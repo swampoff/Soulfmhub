@@ -1,0 +1,231 @@
+import React from 'react';
+import { motion } from 'motion/react';
+
+interface AnimatedPalmProps {
+  side: 'left' | 'right';
+  delay?: number;
+}
+
+export function AnimatedPalm({ side, delay = 0 }: AnimatedPalmProps) {
+  const isLeft = side === 'left';
+  
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: isLeft ? -100 : 100, y: 50 }}
+      animate={{ opacity: 1, x: 0, y: 0 }}
+      transition={{ duration: 1.5, delay, type: 'spring' }}
+      className={`absolute ${isLeft ? 'left-0' : 'right-0'} bottom-0 pointer-events-none ${isLeft ? '' : 'scale-x-[-1]'}`}
+      style={{ height: '70vh', width: 'auto' }}
+    >
+      <svg viewBox="0 0 300 600" fill="none" xmlns="http://www.w3.org/2000/svg" className="h-full w-auto">
+        <defs>
+          {/* Gradients for leaves */}
+          <linearGradient id={`palmGradient1-${side}`} x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#00d9ff" stopOpacity="0.6"/>
+            <stop offset="50%" stopColor="#00ffaa" stopOpacity="0.4"/>
+            <stop offset="100%" stopColor="#00d9ff" stopOpacity="0.3"/>
+          </linearGradient>
+          <linearGradient id={`palmGradient2-${side}`} x1="100%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor="#00ffaa" stopOpacity="0.5"/>
+            <stop offset="50%" stopColor="#00d9ff" stopOpacity="0.4"/>
+            <stop offset="100%" stopColor="#00ffaa" stopOpacity="0.3"/>
+          </linearGradient>
+          <linearGradient id={`trunkGradient-${side}`} x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor="#0d4d4d" stopOpacity="0.4"/>
+            <stop offset="100%" stopColor="#083838" stopOpacity="0.6"/>
+          </linearGradient>
+        </defs>
+        
+        {/* Palm Trunk */}
+        <motion.g
+          animate={{ 
+            rotate: [0, isLeft ? 2 : -2, 0],
+            x: [0, isLeft ? 3 : -3, 0]
+          }}
+          transition={{ 
+            duration: 4, 
+            repeat: Infinity, 
+            ease: "easeInOut",
+            delay: delay
+          }}
+          style={{ transformOrigin: '150px 600px' }}
+        >
+          <path
+            d="M150 600 Q145 550 148 500 Q146 450 150 400 Q148 350 152 300 Q150 250 154 200 Q152 150 150 100"
+            stroke={`url(#trunkGradient-${side})`}
+            strokeWidth="12"
+            fill="none"
+            strokeLinecap="round"
+          />
+          
+          {/* Palm Leaves - Center Top */}
+          <motion.g
+            animate={{ rotate: [0, isLeft ? -5 : 5, 0] }}
+            transition={{ duration: 3, repeat: Infinity, ease: "easeInOut", delay: delay }}
+            style={{ transformOrigin: '150px 100px' }}
+          >
+            <path
+              d="M150 100 Q120 60 100 20 Q95 10 90 0"
+              stroke={`url(#palmGradient1-${side})`}
+              strokeWidth="8"
+              fill="none"
+              strokeLinecap="round"
+            />
+            <path
+              d="M150 100 Q110 70 80 50 Q60 40 40 35"
+              stroke={`url(#palmGradient1-${side})`}
+              strokeWidth="6"
+              fill="none"
+              strokeLinecap="round"
+              opacity="0.8"
+            />
+            <path
+              d="M150 100 Q105 80 70 75 Q45 70 20 70"
+              stroke={`url(#palmGradient1-${side})`}
+              strokeWidth="5"
+              fill="none"
+              strokeLinecap="round"
+              opacity="0.7"
+            />
+          </motion.g>
+
+          {/* Palm Leaves - Right Side */}
+          <motion.g
+            animate={{ rotate: [0, isLeft ? 8 : -8, 0] }}
+            transition={{ duration: 3.5, repeat: Infinity, ease: "easeInOut", delay: delay + 0.3 }}
+            style={{ transformOrigin: '150px 100px' }}
+          >
+            <path
+              d="M150 100 Q180 60 200 20 Q205 10 210 0"
+              stroke={`url(#palmGradient2-${side})`}
+              strokeWidth="8"
+              fill="none"
+              strokeLinecap="round"
+            />
+            <path
+              d="M150 100 Q190 70 220 50 Q240 40 260 35"
+              stroke={`url(#palmGradient2-${side})`}
+              strokeWidth="6"
+              fill="none"
+              strokeLinecap="round"
+              opacity="0.8"
+            />
+            <path
+              d="M150 100 Q195 80 230 75 Q255 70 280 70"
+              stroke={`url(#palmGradient2-${side})`}
+              strokeWidth="5"
+              fill="none"
+              strokeLinecap="round"
+              opacity="0.7"
+            />
+          </motion.g>
+
+          {/* Palm Leaves - Top Center */}
+          <motion.g
+            animate={{ 
+              rotate: [0, isLeft ? -3 : 3, 0],
+              y: [0, -5, 0]
+            }}
+            transition={{ duration: 2.5, repeat: Infinity, ease: "easeInOut", delay: delay + 0.5 }}
+            style={{ transformOrigin: '150px 100px' }}
+          >
+            <path
+              d="M150 100 Q150 50 150 10 Q150 5 150 0"
+              stroke={`url(#palmGradient1-${side})`}
+              strokeWidth="7"
+              fill="none"
+              strokeLinecap="round"
+            />
+            <path
+              d="M150 100 Q145 55 140 20 Q138 10 135 0"
+              stroke={`url(#palmGradient1-${side})`}
+              strokeWidth="6"
+              fill="none"
+              strokeLinecap="round"
+              opacity="0.8"
+            />
+            <path
+              d="M150 100 Q155 55 160 20 Q162 10 165 0"
+              stroke={`url(#palmGradient2-${side})`}
+              strokeWidth="6"
+              fill="none"
+              strokeLinecap="round"
+              opacity="0.8"
+            />
+          </motion.g>
+
+          {/* Additional Leaves - Lower Left */}
+          <motion.g
+            animate={{ rotate: [0, isLeft ? -6 : 6, 0] }}
+            transition={{ duration: 3.2, repeat: Infinity, ease: "easeInOut", delay: delay + 0.7 }}
+            style={{ transformOrigin: '150px 100px' }}
+          >
+            <path
+              d="M150 100 Q100 90 60 95 Q40 95 20 100"
+              stroke={`url(#palmGradient1-${side})`}
+              strokeWidth="5"
+              fill="none"
+              strokeLinecap="round"
+              opacity="0.6"
+            />
+            <path
+              d="M150 100 Q105 100 70 110 Q50 115 30 125"
+              stroke={`url(#palmGradient1-${side})`}
+              strokeWidth="4"
+              fill="none"
+              strokeLinecap="round"
+              opacity="0.5"
+            />
+          </motion.g>
+
+          {/* Additional Leaves - Lower Right */}
+          <motion.g
+            animate={{ rotate: [0, isLeft ? 6 : -6, 0] }}
+            transition={{ duration: 3.8, repeat: Infinity, ease: "easeInOut", delay: delay + 0.9 }}
+            style={{ transformOrigin: '150px 100px' }}
+          >
+            <path
+              d="M150 100 Q200 90 240 95 Q260 95 280 100"
+              stroke={`url(#palmGradient2-${side})`}
+              strokeWidth="5"
+              fill="none"
+              strokeLinecap="round"
+              opacity="0.6"
+            />
+            <path
+              d="M150 100 Q195 100 230 110 Q250 115 270 125"
+              stroke={`url(#palmGradient2-${side})`}
+              strokeWidth="4"
+              fill="none"
+              strokeLinecap="round"
+              opacity="0.5"
+            />
+          </motion.g>
+        </motion.g>
+
+        {/* Floating Particles around palm */}
+        {[...Array(8)].map((_, i) => (
+          <motion.circle
+            key={i}
+            cx={80 + (i % 4) * 40}
+            cy={50 + Math.floor(i / 4) * 100}
+            r="2"
+            fill={i % 2 === 0 ? '#00d9ff' : '#00ffaa'}
+            opacity="0.4"
+            animate={{
+              y: [0, -20, 0],
+              opacity: [0.2, 0.6, 0.2],
+              scale: [1, 1.5, 1]
+            }}
+            transition={{
+              duration: 3 + i * 0.3,
+              repeat: Infinity,
+              ease: "easeInOut",
+              delay: i * 0.4
+            }}
+          />
+        ))}
+      </svg>
+    </motion.div>
+  );
+}
