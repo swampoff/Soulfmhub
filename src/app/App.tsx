@@ -18,6 +18,7 @@ import { ShowsPodcastsPage } from './pages/ShowsPodcastsPage';
 import { PodcastDetailPage } from './pages/PodcastDetailPage';
 import { AboutPage } from './pages/AboutPage';
 import { AuthPage } from './pages/AuthPage';
+import { DashboardPage } from './pages/DashboardPage';
 import { AdminDashboard } from './pages/admin/AdminDashboard';
 import { TracksManagement } from './pages/admin/TracksManagement';
 import { PlaylistsManagement } from './pages/admin/PlaylistsManagement';
@@ -174,6 +175,7 @@ function AppContent() {
         <Route path="/team/:slug" element={<PublicLayout><ProfileDetailPage /></PublicLayout>} />
         <Route path="/analytics" element={<PublicLayout><AnalyticsPage /></PublicLayout>} />
         <Route path="/auth" element={<AuthPage />} />
+        <Route path="/dashboard" element={<DashboardPage />} />
 
         {/* Admin Routes */}
         <Route

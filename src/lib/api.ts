@@ -10,11 +10,11 @@ async function getAuthHeaders() {
 
 export const api = {
   // Auth
-  async signUp(email: string, password: string, name: string) {
+  async signUp(email: string, password: string, name: string, role: string = 'listener') {
     const response = await fetch(`${API_BASE}/auth/signup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, name }),
+      body: JSON.stringify({ email, password, name, role }),
     });
     return response.json();
   },

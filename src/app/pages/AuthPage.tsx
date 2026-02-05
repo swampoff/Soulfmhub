@@ -5,6 +5,7 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Card } from '../components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { useApp } from '../../context/AppContext';
 import { motion } from 'motion/react';
 import { toast } from 'sonner';
@@ -21,7 +22,8 @@ export function AuthPage() {
     name: '', 
     email: '', 
     password: '', 
-    confirmPassword: '' 
+    confirmPassword: '',
+    role: 'listener' 
   });
 
   const handleSignIn = async (e: React.FormEvent) => {
@@ -30,7 +32,7 @@ export function AuthPage() {
     try {
       await signIn(signInData.email, signInData.password);
       toast.success('Welcome back!');
-      navigate('/');
+      navigate('/dashboard');
     } catch (error: any) {
       toast.error(error.message || 'Sign in failed');
     } finally {
@@ -48,9 +50,9 @@ export function AuthPage() {
 
     setLoading(true);
     try {
-      await signUp(signUpData.email, signUpData.password, signUpData.name);
+      await signUp(signUpData.email, signUpData.password, signUpData.name, signUpData.role);
       toast.success('Account created! Welcome to Soul FM Hub.');
-      navigate('/');
+      navigate('/dashboard');
     } catch (error: any) {
       toast.error(error.message || 'Sign up failed');
     } finally {
@@ -280,6 +282,29 @@ export function AuthPage() {
                     required
                     className="bg-[#0a1628] border-[#00d9ff]/30 text-white placeholder:text-gray-500"
                   />
+                </div>
+                <div>
+                  <Label htmlFor="signup-role" className="text-white">Role</Label>
+                  <Select
+                    value={signUpData.role}
+                    onValueChange={(value) => setSignUpData({ ...signUpData, role: value })}
+                  >
+                    <SelectTrigger className="bg-[#0a1628] border-[#00d9ff]/30 text-white">
+                      <SelectValue placeholder="Select your role" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-[#0a1628] border-[#00d9ff]/30 text-white">
+                      <SelectItem value="listener">Listener</SelectItem>
+                      <SelectItem value="dj">DJ</SelectItem>
+                      <SelectItem value="host">Host</SelectItem>
+                      <SelectItem value="music_curator">Music Curator</SelectItem>
+                      <SelectItem value="content_manager">Content Manager</SelectItem>
+                      <SelectItem value="program_director">Program Director</SelectItem>
+                      <SelectItem value="super_admin">Super Admin</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-white/50 mt-1">
+                    Select your role. Admin roles have access to content management.
+                  </p>
                 </div>
                 <Button
                   type="submit"

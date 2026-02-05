@@ -44,6 +44,7 @@ interface AppContextType {
   setIsPlaying: (playing: boolean) => void;
   setVolume: (volume: number) => void;
   signIn: (email: string, password: string) => Promise<any>;
+  signUp: (email: string, password: string, name: string, role?: string) => Promise<any>;
   signOut: () => Promise<void>;
   refreshNowPlaying: () => Promise<void>;
 }
@@ -117,6 +118,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return data;
   };
 
+  const signUp = async (email: string, password: string, name: string, role: string = 'listener') => {
+    const { data, error } = await api.signUp(email, password, name, role);
+    if (error) throw error;
+    return data;
+  };
+
   const signOut = async () => {
     await api.signOut();
     setUser(null);
@@ -134,6 +141,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setIsPlaying,
         setVolume,
         signIn,
+        signUp,
         signOut,
         refreshNowPlaying,
       }}
