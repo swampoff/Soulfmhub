@@ -8,6 +8,11 @@ async function getAuthHeaders() {
   };
 }
 
+async function getAccessToken() {
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token || (await import('/utils/supabase/info')).publicAnonKey;
+}
+
 export const api = {
   // Auth
   async signUp(email: string, password: string, name: string, role: string = 'listener') {
@@ -234,131 +239,94 @@ export const api = {
     return response.json();
   },
 
-  // News
-  async getNews(category?: string) {
-    const params = category ? `?category=${category}` : '';
-    const response = await fetch(`${API_BASE}/news${params}`);
-    return response.json();
-  },
-
-  async getNewsItem(id: string) {
-    const response = await fetch(`${API_BASE}/news/${id}`);
-    return response.json();
-  },
-
-  async createNews(news: any) {
+  // Users Management
+  async getAllUsers() {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/news`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(news),
-    });
+    const response = await fetch(`${API_BASE}/users`, { headers });
     return response.json();
   },
 
-  // Analytics
-  async getAnalytics() {
-    const response = await fetch(`${API_BASE}/analytics`);
-    return response.json();
-  },
-
-  // Profiles
-  async getProfiles() {
-    const response = await fetch(`${API_BASE}/profiles`);
-    return response.json();
-  },
-
-  async getProfileBySlug(slug: string) {
-    const response = await fetch(`${API_BASE}/profiles/${slug}`);
-    return response.json();
-  },
-
-  async getFeaturedProfiles() {
-    const response = await fetch(`${API_BASE}/profiles/featured`);
-    return response.json();
-  },
-
-  async getProfilesByRole(role: string) {
-    const response = await fetch(`${API_BASE}/profiles/role/${role}`);
-    return response.json();
-  },
-
-  async createProfile(profile: any) {
+  async updateUserRole(userId: string, role: string) {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/profiles`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(profile),
-    });
-    return response.json();
-  },
-
-  async updateProfile(slug: string, profile: any) {
-    const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/profiles/${slug}`, {
+    const response = await fetch(`${API_BASE}/users/${userId}/role`, {
       method: 'PUT',
       headers,
-      body: JSON.stringify(profile),
+      body: JSON.stringify({ role }),
     });
     return response.json();
   },
 
-  async deleteProfile(slug: string) {
+  async deleteUser(userId: string) {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/profiles/${slug}`, {
+    const response = await fetch(`${API_BASE}/users/${userId}`, {
       method: 'DELETE',
       headers,
     });
     return response.json();
   },
 
-  // Podcasts
-  async getPodcasts(category?: string) {
-    const params = category ? `?category=${category}` : '';
-    const response = await fetch(`${API_BASE}/podcasts${params}`);
+  // Icecast Integration
+  async getIcecastStatus() {
+    const response = await fetch(`${API_BASE}/icecast/status`);
     return response.json();
   },
 
-  async getPodcast(slug: string) {
-    const response = await fetch(`${API_BASE}/podcasts/${slug}`);
-    return response.json();
-  },
-
-  async createPodcast(podcast: any) {
+  async updateIcecastMetadata(metadata: any) {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/podcasts`, {
+    const response = await fetch(`${API_BASE}/icecast/metadata`, {
       method: 'POST',
       headers,
-      body: JSON.stringify(podcast),
+      body: JSON.stringify(metadata),
     });
     return response.json();
   },
 
-  async updatePodcast(slug: string, podcast: any) {
-    const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/podcasts/${slug}`, {
-      method: 'PUT',
-      headers,
-      body: JSON.stringify(podcast),
-    });
-    return response.json();
-  },
+  // Track Upload with File
+  async uploadTrackFile(formData: FormData, onProgress?: (progress: number) => void) {
+    const accessToken = await getAccessToken();
+    
+    return new Promise<any>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      
+      // Progress tracking
+      if (onProgress) {
+        xhr.upload.addEventListener('progress', (e) => {
+          if (e.lengthComputable) {
+            const progress = Math.round((e.loaded / e.total) * 85); // 0-85%
+            onProgress(progress);
+          }
+        });
+      }
 
-  async togglePodcastSubscription(podcastId: string) {
-    const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/podcasts/${podcastId}/subscribe`, {
-      method: 'POST',
-      headers,
-    });
-    return response.json();
-  },
+      xhr.addEventListener('load', () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            const response = JSON.parse(xhr.responseText);
+            resolve(response);
+          } catch (error) {
+            reject(new Error('Invalid response from server'));
+          }
+        } else {
+          try {
+            const error = JSON.parse(xhr.responseText);
+            reject(new Error(error.error || 'Upload failed'));
+          } catch {
+            reject(new Error(`Upload failed with status ${xhr.status}`));
+          }
+        }
+      });
 
-  async toggleEpisodeLike(episodeId: string) {
-    const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/podcasts/episodes/${episodeId}/like`, {
-      method: 'POST',
-      headers,
+      xhr.addEventListener('error', () => {
+        reject(new Error('Network error during upload'));
+      });
+
+      xhr.addEventListener('abort', () => {
+        reject(new Error('Upload cancelled'));
+      });
+
+      xhr.open('POST', `${API_BASE}/tracks/upload`);
+      xhr.setRequestHeader('Authorization', `Bearer ${accessToken}`);
+      xhr.send(formData);
     });
-    return response.json();
   },
 };

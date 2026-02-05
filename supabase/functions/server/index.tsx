@@ -800,4 +800,280 @@ app.post("/make-server-06086aa3/podcasts/seed", requireAuth, async (c) => {
 // Initialize podcasts on server start
 seedPodcasts().catch(err => console.error('Failed to seed podcasts:', err));
 
+// ==================== USERS MANAGEMENT ====================
+
+// Get all users
+app.get("/make-server-06086aa3/users", requireAuth, async (c) => {
+  try {
+    const userKeys = await kv.getByPrefix('user:');
+    const users = userKeys.map(item => item.value);
+    return c.json({ users });
+  } catch (error: any) {
+    console.error('Get users error:', error);
+    return c.json({ error: `Failed to get users: ${error.message}` }, 500);
+  }
+});
+
+// Update user role
+app.put("/make-server-06086aa3/users/:userId/role", requireAuth, async (c) => {
+  try {
+    const userId = c.req.param('userId');
+    const { role } = await c.req.json();
+    
+    const user = await kv.get(`user:${userId}`);
+    if (!user) {
+      return c.json({ error: 'User not found' }, 404);
+    }
+    
+    user.role = role;
+    user.updatedAt = new Date().toISOString();
+    await kv.set(`user:${userId}`, user);
+    
+    return c.json({ message: 'User role updated', user });
+  } catch (error: any) {
+    console.error('Update user role error:', error);
+    return c.json({ error: `Failed to update user role: ${error.message}` }, 500);
+  }
+});
+
+// Delete user
+app.delete("/make-server-06086aa3/users/:userId", requireAuth, async (c) => {
+  try {
+    const userId = c.req.param('userId');
+    
+    // Delete from KV store
+    await kv.del(`user:${userId}`);
+    
+    // Delete from Supabase Auth
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    );
+    
+    await supabase.auth.admin.deleteUser(userId);
+    
+    return c.json({ message: 'User deleted successfully' });
+  } catch (error: any) {
+    console.error('Delete user error:', error);
+    return c.json({ error: `Failed to delete user: ${error.message}` }, 500);
+  }
+});
+
+// ==================== ICECAST INTEGRATION ====================
+
+// Get Icecast status
+app.get("/make-server-06086aa3/icecast/status", async (c) => {
+  try {
+    // TODO: Replace with your actual Icecast server URL
+    // const icecastUrl = 'http://your-icecast-server:8000/status-json.xsl';
+    // const response = await fetch(icecastUrl);
+    // const data = await response.json();
+    
+    // For now, return mock data
+    const status = {
+      status: 'online',
+      listeners: 0,
+      bitrate: '128kbps',
+      uptime: 0,
+      source: {
+        connected: true,
+        mount: '/stream'
+      },
+      server: {
+        location: 'Soul FM Studios',
+        description: '24/7 Soul, Funk, Jazz Radio'
+      }
+    };
+    
+    return c.json(status);
+  } catch (error: any) {
+    console.error('Icecast status error:', error);
+    return c.json({ 
+      error: `Failed to get Icecast status: ${error.message}`,
+      status: 'offline'
+    }, 500);
+  }
+});
+
+// Update Icecast metadata
+app.post("/make-server-06086aa3/icecast/metadata", requireAuth, async (c) => {
+  try {
+    const { title, artist, album } = await c.req.json();
+    
+    // Update internal now playing
+    const metadata = {
+      track: { title, artist, album },
+      updatedAt: new Date().toISOString()
+    };
+    
+    await kv.set('stream:nowplaying', metadata);
+    
+    // TODO: Send to actual Icecast server
+    // Example using Icecast admin API:
+    // const icecastUrl = `http://admin:${password}@your-server:8000/admin/metadata`;
+    // const params = new URLSearchParams({
+    //   mount: '/stream',
+    //   mode: 'updinfo',
+    //   song: `${artist} - ${title}`
+    // });
+    // await fetch(`${icecastUrl}?${params}`);
+    
+    console.log(`Metadata updated: ${artist} - ${title}`);
+    
+    return c.json({ 
+      message: 'Metadata updated successfully',
+      metadata 
+    });
+  } catch (error: any) {
+    console.error('Update metadata error:', error);
+    return c.json({ error: `Failed to update metadata: ${error.message}` }, 500);
+  }
+});
+
+// ==================== TRACK UPLOAD WITH FILE ====================
+
+// Track upload endpoint (supports multipart/form-data)
+app.post("/make-server-06086aa3/tracks/upload", requireAuth, async (c) => {
+  try {
+    const formData = await c.req.formData();
+    const file = formData.get('file') as File;
+    const position = formData.get('position') as string || 'end';
+    const autoAddToLiveStream = formData.get('autoAddToLiveStream') === 'true';
+    
+    if (!file) {
+      return c.json({ error: 'No file provided' }, 400);
+    }
+    
+    // Validate file type
+    const allowedTypes = ['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audio/m4a', 'audio/flac'];
+    if (!allowedTypes.includes(file.type) && !file.name.match(/\.(mp3|wav|m4a|flac)$/i)) {
+      return c.json({ error: 'Invalid file type. Only MP3, WAV, M4A, and FLAC are supported.' }, 400);
+    }
+    
+    // Generate unique filename
+    const timestamp = Date.now();
+    const randomString = Math.random().toString(36).substring(7);
+    const extension = file.name.split('.').pop() || 'mp3';
+    const filename = `track-${timestamp}-${randomString}.${extension}`;
+    
+    // Upload to Supabase Storage
+    const bucket = 'make-06086aa3-tracks';
+    
+    // Create bucket if it doesn't exist
+    const { data: buckets } = await supabase.storage.listBuckets();
+    const bucketExists = buckets?.some(b => b.name === bucket);
+    if (!bucketExists) {
+      await supabase.storage.createBucket(bucket, { public: false });
+    }
+    
+    // Upload file
+    const fileBuffer = await file.arrayBuffer();
+    const { data: uploadData, error: uploadError } = await supabase.storage
+      .from(bucket)
+      .upload(filename, fileBuffer, {
+        contentType: file.type,
+        upsert: false
+      });
+    
+    if (uploadError) {
+      console.error('Storage upload error:', uploadError);
+      return c.json({ error: `Failed to upload file: ${uploadError.message}` }, 500);
+    }
+    
+    // Get public URL
+    const { data: urlData } = supabase.storage
+      .from(bucket)
+      .getPublicUrl(filename);
+    
+    const audioUrl = urlData.publicUrl;
+    
+    // Extract metadata from filename (basic extraction)
+    // TODO: Use a library like jsmediatags or music-metadata for full ID3 tag extraction
+    const originalName = file.name.replace(/\.(mp3|wav|m4a|flac)$/i, '');
+    const parts = originalName.split(' - ');
+    
+    let title = originalName;
+    let artist = 'Unknown Artist';
+    
+    if (parts.length >= 2) {
+      artist = parts[0].trim();
+      title = parts.slice(1).join(' - ').trim();
+    }
+    
+    // Estimate duration (rough estimate based on file size, not accurate)
+    const estimatedDuration = Math.floor(file.size / 16000); // Rough estimate for 128kbps MP3
+    
+    const metadata = {
+      title,
+      artist,
+      album: '',
+      duration: estimatedDuration,
+      genre: 'Funk', // Default genre
+      year: new Date().getFullYear(),
+      coverUrl: '',
+      audioUrl,
+      tags: ['NEWFUNK'], // Auto-tag with NEWFUNK
+      uploadedBy: c.get('userId'),
+      uploadedAt: new Date().toISOString()
+    };
+    
+    // Create track in database
+    const trackId = `track_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const track = {
+      id: trackId,
+      ...metadata,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    
+    await kv.set(`track:${trackId}`, track);
+    
+    // Add to Live Stream playlist if requested
+    if (autoAddToLiveStream) {
+      let livePlaylist = await kv.get('playlist:livestream');
+      
+      if (!livePlaylist) {
+        // Create Live Stream playlist if it doesn't exist
+        livePlaylist = {
+          id: 'livestream',
+          name: 'Live Stream',
+          description: 'Main broadcast playlist',
+          genre: 'Mixed',
+          trackIds: [],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+      }
+      
+      // Add track to playlist
+      if (position === 'start') {
+        livePlaylist.trackIds = [trackId, ...(livePlaylist.trackIds || [])];
+      } else {
+        livePlaylist.trackIds = [...(livePlaylist.trackIds || []), trackId];
+      }
+      
+      livePlaylist.updatedAt = new Date().toISOString();
+      await kv.set('playlist:livestream', livePlaylist);
+    }
+    
+    console.log(`Track uploaded: ${metadata.title} by ${metadata.artist}`);
+    
+    return c.json({
+      message: 'Track uploaded successfully',
+      track,
+      metadata: {
+        title: metadata.title,
+        artist: metadata.artist,
+        album: metadata.album,
+        duration: metadata.duration
+      },
+      addedToLiveStream: autoAddToLiveStream
+    });
+    
+  } catch (error: any) {
+    console.error('Track upload error:', error);
+    return c.json({ error: `Failed to upload track: ${error.message}` }, 500);
+  }
+});
+
 Deno.serve(app.fetch);

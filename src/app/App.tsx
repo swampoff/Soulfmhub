@@ -175,7 +175,16 @@ function AppContent() {
         <Route path="/team/:slug" element={<PublicLayout><ProfileDetailPage /></PublicLayout>} />
         <Route path="/analytics" element={<PublicLayout><AnalyticsPage /></PublicLayout>} />
         <Route path="/auth" element={<AuthPage />} />
-        <Route path="/dashboard" element={<DashboardPage />} />
+        
+        {/* Dashboard Route */}
+        <Route 
+          path="/dashboard" 
+          element={
+            <ProtectedRoute>
+              <DashboardPage />
+            </ProtectedRoute>
+          } 
+        />
 
         {/* Admin Routes */}
         <Route

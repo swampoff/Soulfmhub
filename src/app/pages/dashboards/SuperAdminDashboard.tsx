@@ -25,9 +25,12 @@ import {
   BarChart3,
   Settings,
   LogOut,
-  Crown
+  Crown,
+  UserCog
 } from 'lucide-react';
 import { AnimatedPalm } from '../../components/AnimatedPalm';
+import { UsersManagement } from './UsersManagement';
+import { TrackUpload } from './TrackUpload';
 import { useNavigate } from 'react-router';
 
 export function SuperAdminDashboard() {
@@ -343,6 +346,10 @@ export function SuperAdminDashboard() {
                 <BarChart3 className="w-4 h-4 mr-2" />
                 Overview
               </TabsTrigger>
+              <TabsTrigger value="upload" className="data-[state=active]:bg-[#00d9ff] data-[state=active]:text-[#0a1628]">
+                <Upload className="w-4 h-4 mr-2" />
+                Upload
+              </TabsTrigger>
               <TabsTrigger value="tracks" className="data-[state=active]:bg-[#00d9ff] data-[state=active]:text-[#0a1628]">
                 <Music className="w-4 h-4 mr-2" />
                 Tracks
@@ -354,6 +361,10 @@ export function SuperAdminDashboard() {
               <TabsTrigger value="schedule" className="data-[state=active]:bg-[#00d9ff] data-[state=active]:text-[#0a1628]">
                 <Calendar className="w-4 h-4 mr-2" />
                 Schedule
+              </TabsTrigger>
+              <TabsTrigger value="users" className="data-[state=active]:bg-[#00d9ff] data-[state=active]:text-[#0a1628]">
+                <UserCog className="w-4 h-4 mr-2" />
+                Users
               </TabsTrigger>
               <TabsTrigger value="settings" className="data-[state=active]:bg-[#00d9ff] data-[state=active]:text-[#0a1628]">
                 <Settings className="w-4 h-4 mr-2" />
@@ -406,6 +417,11 @@ export function SuperAdminDashboard() {
                   </Button>
                 </div>
               </Card>
+            </TabsContent>
+
+            {/* Upload Tab */}
+            <TabsContent value="upload">
+              <TrackUpload />
             </TabsContent>
 
             {/* Tracks Tab */}
@@ -816,6 +832,14 @@ export function SuperAdminDashboard() {
                     View Public Schedule
                   </Button>
                 </div>
+              </Card>
+            </TabsContent>
+
+            {/* Users Tab */}
+            <TabsContent value="users">
+              <Card className="bg-[#0f1c2e]/90 backdrop-blur-sm border-[#00d9ff]/30 p-6">
+                <h2 className="text-2xl font-bold text-white mb-4">User Management</h2>
+                <UsersManagement />
               </Card>
             </TabsContent>
 
