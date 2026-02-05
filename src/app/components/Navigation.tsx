@@ -20,15 +20,20 @@ export function Navigation() {
   const navItems = [
     { path: '/', label: 'Home' },
     { path: '/schedule', label: 'Schedule' },
-    { path: '/shows', label: 'Shows' },
-    { path: '/podcasts', label: 'Podcasts' },
+    { path: '/podcasts', label: 'Shows & Podcasts' },
     { path: '/music', label: 'Music' },
     { path: '/news', label: 'News' },
+    { path: '/team', label: 'Team' },
     { path: '/about', label: 'About' },
+    { path: '/analytics', label: 'Analytics' },
     { path: '/support', label: 'Support Us' },
   ];
 
   const isActive = (path: string) => {
+    // Special case: Shows & Podcasts is active for both /shows and /podcasts routes
+    if (path === '/podcasts') {
+      return location.pathname.startsWith('/podcasts') || location.pathname.startsWith('/shows');
+    }
     return location.pathname === path;
   };
 

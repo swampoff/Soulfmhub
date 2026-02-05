@@ -10,6 +10,7 @@ import soulFmLogo from 'figma:asset/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png
 import { AnimatedPalm } from '../components/AnimatedPalm';
 import { FloatingParticles } from '../components/FloatingParticles';
 import { AnimatedBeach } from '../components/AnimatedBeach';
+import { AnimatedWaves } from '../components/AnimatedWaves';
 
 export function HomePage() {
   const { nowPlaying, setIsPlaying } = useApp();
@@ -465,6 +466,7 @@ export function HomePage() {
 
       {/* Animated Beach and Waves */}
       <AnimatedBeach />
+      <AnimatedWaves />
     </div>
   );
 }

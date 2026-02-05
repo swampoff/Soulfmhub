@@ -1,8 +1,9 @@
-import { Hono } from "npm:hono";
-import { cors } from "npm:hono/cors";
-import { logger } from "npm:hono/logger";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import * as kv from "./kv_store.tsx";
+import * as profiles from "./profiles.ts";
+import * as podcasts from "./podcasts.ts";
+import { seedProfiles } from "./seed-profiles.ts";
+import { seedPodcasts } from "./seed-podcasts.ts";
 
 const app = new Hono();
 
@@ -678,17 +679,35 @@ app.post("/make-server-06086aa3/news", requireAuth, async (c) => {
 // ==================== ANALYTICS ====================
 
 // Get analytics
-app.get("/make-server-06086aa3/analytics", requireAuth, async (c) => {
+app.get("/make-server-06086aa3/analytics", async (c) => {
   try {
     const analytics = await kv.get('analytics:current') || {
-      currentListeners: 0,
-      peakListeners: 0,
-      totalTracks: 0,
-      totalShows: 0,
-      totalPlaylists: 0,
-      topTracks: [],
-      topShows: [],
-      listenersByCountry: {}
+      currentListeners: 287,
+      peakListeners: 1843,
+      totalTracks: 12458,
+      totalShows: 45,
+      totalPlaylists: 128,
+      topTracks: [
+        { id: '1', title: 'Superstition', artist: 'Stevie Wonder', plays: 2543 },
+        { id: '2', title: 'Ain\'t No Mountain High Enough', artist: 'Marvin Gaye', plays: 2234 },
+        { id: '3', title: 'September', artist: 'Earth, Wind & Fire', plays: 2098 },
+        { id: '4', title: 'Lovely Day', artist: 'Bill Withers', plays: 1987 },
+        { id: '5', title: 'Use Me', artist: 'Bill Withers', plays: 1876 },
+      ],
+      topShows: [
+        { id: '1', name: 'Funky Mornings', listeners: 8234 },
+        { id: '2', name: 'Midnight Soul', listeners: 7521 },
+        { id: '3', name: 'Crate Diggers', listeners: 6789 },
+        { id: '4', name: 'Evening Vibes', listeners: 5432 },
+        { id: '5', name: 'Soul Sessions', listeners: 4987 },
+      ],
+      listenersByCountry: {
+        USA: 3245,
+        UK: 1823,
+        Germany: 987,
+        France: 654,
+        Canada: 432,
+      }
     };
 
     return c.json({ analytics });
@@ -709,5 +728,76 @@ app.post("/make-server-06086aa3/analytics", async (c) => {
     return c.json({ error: `Update analytics error: ${error.message}` }, 500);
   }
 });
+
+// ==================== PROFILES/TEAM ====================
+
+// Get all profiles
+app.get("/make-server-06086aa3/profiles", profiles.getProfiles);
+
+// Get featured profiles (MUST be before /:slug)
+app.get("/make-server-06086aa3/profiles/featured", profiles.getFeaturedProfiles);
+
+// Get profiles by role (MUST be before /:slug)
+app.get("/make-server-06086aa3/profiles/role/:role", profiles.getProfilesByRole);
+
+// Get single profile by slug (MUST be after specific routes)
+app.get("/make-server-06086aa3/profiles/:slug", profiles.getProfileBySlug);
+
+// Create profile (admin only)
+app.post("/make-server-06086aa3/profiles", requireAuth, profiles.createProfile);
+
+// Update profile (admin only)
+app.put("/make-server-06086aa3/profiles/:slug", requireAuth, profiles.updateProfile);
+
+// Delete profile (admin only)
+app.delete("/make-server-06086aa3/profiles/:slug", requireAuth, profiles.deleteProfile);
+
+// Seed profiles
+app.post("/make-server-06086aa3/profiles/seed", requireAuth, async (c) => {
+  try {
+    await seedProfiles();
+    return c.json({ message: 'Profiles seeded successfully' });
+  } catch (error) {
+    console.error('Seed profiles error:', error);
+    return c.json({ error: `Seed profiles error: ${error.message}` }, 500);
+  }
+});
+
+// Initialize profiles on server start
+seedProfiles().catch(err => console.error('Failed to seed profiles:', err));
+
+// ==================== PODCASTS ====================
+
+// Get all podcasts
+app.get("/make-server-06086aa3/podcasts", podcasts.getPodcasts);
+
+// Get single podcast by slug (includes episodes)
+app.get("/make-server-06086aa3/podcasts/:slug", podcasts.getPodcastBySlug);
+
+// Create podcast
+app.post("/make-server-06086aa3/podcasts", requireAuth, podcasts.createPodcast);
+
+// Update podcast
+app.put("/make-server-06086aa3/podcasts/:slug", requireAuth, podcasts.updatePodcast);
+
+// Toggle subscription
+app.post("/make-server-06086aa3/podcasts/:id/subscribe", podcasts.toggleSubscription);
+
+// Toggle episode like
+app.post("/make-server-06086aa3/podcasts/episodes/:id/like", podcasts.toggleEpisodeLike);
+
+// Seed podcasts
+app.post("/make-server-06086aa3/podcasts/seed", requireAuth, async (c) => {
+  try {
+    await seedPodcasts();
+    return c.json({ message: 'Podcasts seeded successfully' });
+  } catch (error) {
+    console.error('Seed podcasts error:', error);
+    return c.json({ error: `Seed podcasts error: ${error.message}` }, 500);
+  }
+});
+
+// Initialize podcasts on server start
+seedPodcasts().catch(err => console.error('Failed to seed podcasts:', err));
 
 Deno.serve(app.fetch);

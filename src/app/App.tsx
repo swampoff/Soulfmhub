@@ -11,6 +11,12 @@ import { MusicLibraryPage } from './pages/MusicLibraryPage';
 import { NewsPage } from './pages/NewsPage';
 import { ArticleDetailPage } from './pages/ArticleDetailPage';
 import { SupportPage } from './pages/SupportPage';
+import { ProfilesPage } from './pages/ProfilesPage';
+import { ProfileDetailPage } from './pages/ProfileDetailPage';
+import { AnalyticsPage } from './pages/AnalyticsPage';
+import { ShowsPodcastsPage } from './pages/ShowsPodcastsPage';
+import { PodcastDetailPage } from './pages/PodcastDetailPage';
+import { AboutPage } from './pages/AboutPage';
 import { AuthPage } from './pages/AuthPage';
 import { AdminDashboard } from './pages/admin/AdminDashboard';
 import { TracksManagement } from './pages/admin/TracksManagement';
@@ -148,29 +154,6 @@ function PublicLayout({ children }: { children: React.ReactNode }) {
   );
 }
 
-// Placeholder pages
-function AboutPage() {
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-[#0a1628] via-[#0d1a2d] to-[#0a1628] py-8">
-      <div className="container mx-auto px-4">
-        <h1 className="text-4xl font-bold text-[#00d9ff] mb-4">About Soul FM Hub</h1>
-        <p className="text-gray-300">The Wave of Your Soul - Discover our story and mission.</p>
-      </div>
-    </div>
-  );
-}
-
-function PodcastsPage() {
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-[#0a1628] via-[#0d1a2d] to-[#0a1628] py-8">
-      <div className="container mx-auto px-4">
-        <h1 className="text-4xl font-bold text-[#00d9ff] mb-4">Podcasts</h1>
-        <p className="text-gray-300">Listen to our archive of recorded shows and exclusive content.</p>
-      </div>
-    </div>
-  );
-}
-
 function AppContent() {
   return (
     <BrowserRouter>
@@ -180,12 +163,16 @@ function AppContent() {
         <Route path="/schedule" element={<PublicLayout><SchedulePage /></PublicLayout>} />
         <Route path="/shows" element={<PublicLayout><ShowsPage /></PublicLayout>} />
         <Route path="/shows/:id" element={<PublicLayout><ShowDetailPage /></PublicLayout>} />
-        <Route path="/podcasts" element={<PublicLayout><PodcastsPage /></PublicLayout>} />
+        <Route path="/podcasts" element={<PublicLayout><ShowsPodcastsPage /></PublicLayout>} />
+        <Route path="/podcasts/:id" element={<PublicLayout><PodcastDetailPage /></PublicLayout>} />
         <Route path="/music" element={<PublicLayout><MusicLibraryPage /></PublicLayout>} />
         <Route path="/news" element={<PublicLayout><NewsPage /></PublicLayout>} />
         <Route path="/news/:id" element={<PublicLayout><ArticleDetailPage /></PublicLayout>} />
         <Route path="/support" element={<PublicLayout><SupportPage /></PublicLayout>} />
         <Route path="/about" element={<PublicLayout><AboutPage /></PublicLayout>} />
+        <Route path="/team" element={<PublicLayout><ProfilesPage /></PublicLayout>} />
+        <Route path="/team/:slug" element={<PublicLayout><ProfileDetailPage /></PublicLayout>} />
+        <Route path="/analytics" element={<PublicLayout><AnalyticsPage /></PublicLayout>} />
         <Route path="/auth" element={<AuthPage />} />
 
         {/* Admin Routes */}

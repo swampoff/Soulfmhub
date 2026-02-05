@@ -8,7 +8,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { useApp } from '../../context/AppContext';
 import { motion } from 'motion/react';
 import { toast } from 'sonner';
+import { Sparkles } from 'lucide-react';
 import soulFmLogo from 'figma:asset/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png';
+import { AnimatedPalm } from '../components/AnimatedPalm';
 
 export function AuthPage() {
   const navigate = useNavigate();
@@ -57,22 +59,133 @@ export function AuthPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#0a1628] via-[#0d1a2d] to-[#0a1628] flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gradient-to-br from-[#0a1628] via-[#0d1a2d] to-[#0a1628] relative overflow-hidden flex items-center justify-center p-4">
+      {/* Animated Palms - Left */}
+      <AnimatedPalm side="left" delay={0.3} />
+      
+      {/* Animated Palms - Right */}
+      <AnimatedPalm side="right" delay={0.5} />
+
+      {/* Animated Background */}
+      <div className="absolute inset-0 opacity-10 pointer-events-none">
+        <div className="absolute top-20 left-10 w-96 h-96 bg-[#00d9ff] rounded-full mix-blend-multiply filter blur-3xl animate-blob" />
+        <div className="absolute top-40 right-10 w-96 h-96 bg-[#00ffaa] rounded-full mix-blend-multiply filter blur-3xl animate-blob animation-delay-2000" />
+        <div className="absolute bottom-20 left-1/2 w-96 h-96 bg-[#FF8C42] rounded-full mix-blend-multiply filter blur-3xl animate-blob animation-delay-4000" />
+      </div>
+
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="w-full max-w-md"
+        className="w-full max-w-md relative z-10"
       >
+        {/* Logo Section with Animations */}
         <div className="text-center mb-8">
-          <img 
-            src={soulFmLogo} 
-            alt="Soul FM" 
-            className="h-24 w-auto mx-auto mb-4 object-contain"
-            style={{
-              filter: 'drop-shadow(0 0 20px rgba(0, 217, 255, 0.4)) drop-shadow(0 0 40px rgba(0, 255, 170, 0.2))'
-            }}
-          />
-          <p className="text-[#00d9ff] text-sm">The Wave of Your Soul</p>
+          <motion.div
+            initial={{ scale: 0.8, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ delay: 0.2, duration: 0.6 }}
+            className="inline-block relative mb-6"
+          >
+            {/* Outer glow ring - animated */}
+            <motion.div
+              animate={{
+                scale: [1, 1.1, 1],
+                opacity: [0.3, 0.5, 0.3],
+              }}
+              transition={{
+                duration: 3,
+                repeat: Infinity,
+                ease: "easeInOut"
+              }}
+              className="absolute -inset-6 bg-gradient-to-br from-[#00d9ff] to-[#00ffaa] rounded-full blur-2xl"
+            />
+            
+            {/* Middle ring - animated */}
+            <motion.div
+              animate={{
+                rotate: [0, 360],
+              }}
+              transition={{
+                duration: 20,
+                repeat: Infinity,
+                ease: "linear"
+              }}
+              className="absolute -inset-3 rounded-full"
+              style={{
+                background: 'conic-gradient(from 0deg, #00d9ff, #00ffaa, #00d9ff)',
+                opacity: 0.3,
+              }}
+            />
+            
+            {/* Floating Logo with Breathing Animation */}
+            <motion.div
+              animate={{
+                y: [0, -10, 0],
+              }}
+              transition={{
+                duration: 4,
+                repeat: Infinity,
+                ease: "easeInOut"
+              }}
+              className="relative z-20"
+            >
+              {/* Круглый контейнер для логотипа */}
+              <motion.div
+                animate={{
+                  scale: [1, 1.05, 1],
+                }}
+                transition={{
+                  duration: 3,
+                  repeat: Infinity,
+                  ease: "easeInOut",
+                  delay: 0.5
+                }}
+                className="relative w-32 h-32 rounded-full overflow-hidden bg-gradient-to-br from-[#0a1628] to-[#0d2435] p-2 shadow-2xl"
+              >
+                <img
+                  src={soulFmLogo}
+                  alt="Soul FM Hub"
+                  className="w-full h-full object-cover rounded-full"
+                  style={{
+                    filter: 'drop-shadow(0 0 20px rgba(0, 217, 255, 0.8)) drop-shadow(0 0 40px rgba(0, 255, 170, 0.5))',
+                  }}
+                />
+              </motion.div>
+            </motion.div>
+          </motion.div>
+
+          {/* Title with Righteous */}
+          <motion.h1
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.4, duration: 0.6 }}
+            className="text-4xl font-bold bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] bg-clip-text text-transparent mb-3"
+            style={{ fontFamily: 'var(--font-family-display)' }}
+          >
+            Soul FM Hub
+          </motion.h1>
+
+          {/* Tagline */}
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.5, duration: 0.6 }}
+            className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/5 border border-[#00d9ff]/30 backdrop-blur-sm"
+          >
+            <motion.div
+              animate={{
+                rotate: [0, 360],
+              }}
+              transition={{
+                duration: 2,
+                repeat: Infinity,
+                ease: "linear"
+              }}
+            >
+              <Sparkles className="w-3 h-3 text-[#00d9ff]" />
+            </motion.div>
+            <span className="text-[#00d9ff] font-semibold text-xs tracking-wider">The Wave of Your Soul</span>
+          </motion.div>
         </div>
 
         <Card className="bg-[#0f1c2e]/90 backdrop-blur-sm border-[#00d9ff]/30 p-6">

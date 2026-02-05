@@ -197,7 +197,7 @@ export function ArticleDetailPage() {
               </div>
 
               {/* Title */}
-              <h1 className="text-4xl md:text-5xl font-bold text-white mb-4 leading-tight">
+              <h1 className="text-4xl md:text-5xl font-bold text-white mb-4 leading-tight" style={{ fontFamily: 'var(--font-family-display)' }}>
                 {article.title}
               </h1>
 

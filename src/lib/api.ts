@@ -258,8 +258,107 @@ export const api = {
 
   // Analytics
   async getAnalytics() {
+    const response = await fetch(`${API_BASE}/analytics`);
+    return response.json();
+  },
+
+  // Profiles
+  async getProfiles() {
+    const response = await fetch(`${API_BASE}/profiles`);
+    return response.json();
+  },
+
+  async getProfileBySlug(slug: string) {
+    const response = await fetch(`${API_BASE}/profiles/${slug}`);
+    return response.json();
+  },
+
+  async getFeaturedProfiles() {
+    const response = await fetch(`${API_BASE}/profiles/featured`);
+    return response.json();
+  },
+
+  async getProfilesByRole(role: string) {
+    const response = await fetch(`${API_BASE}/profiles/role/${role}`);
+    return response.json();
+  },
+
+  async createProfile(profile: any) {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/analytics`, { headers });
+    const response = await fetch(`${API_BASE}/profiles`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(profile),
+    });
+    return response.json();
+  },
+
+  async updateProfile(slug: string, profile: any) {
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${API_BASE}/profiles/${slug}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(profile),
+    });
+    return response.json();
+  },
+
+  async deleteProfile(slug: string) {
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${API_BASE}/profiles/${slug}`, {
+      method: 'DELETE',
+      headers,
+    });
+    return response.json();
+  },
+
+  // Podcasts
+  async getPodcasts(category?: string) {
+    const params = category ? `?category=${category}` : '';
+    const response = await fetch(`${API_BASE}/podcasts${params}`);
+    return response.json();
+  },
+
+  async getPodcast(slug: string) {
+    const response = await fetch(`${API_BASE}/podcasts/${slug}`);
+    return response.json();
+  },
+
+  async createPodcast(podcast: any) {
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${API_BASE}/podcasts`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(podcast),
+    });
+    return response.json();
+  },
+
+  async updatePodcast(slug: string, podcast: any) {
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${API_BASE}/podcasts/${slug}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(podcast),
+    });
+    return response.json();
+  },
+
+  async togglePodcastSubscription(podcastId: string) {
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${API_BASE}/podcasts/${podcastId}/subscribe`, {
+      method: 'POST',
+      headers,
+    });
+    return response.json();
+  },
+
+  async toggleEpisodeLike(episodeId: string) {
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${API_BASE}/podcasts/episodes/${episodeId}/like`, {
+      method: 'POST',
+      headers,
+    });
     return response.json();
   },
 };

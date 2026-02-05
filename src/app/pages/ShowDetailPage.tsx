@@ -151,7 +151,7 @@ export function ShowDetailPage() {
                   )}
                 </div>
 
-                <h1 className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] bg-clip-text text-transparent mb-4">
+                <h1 className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] bg-clip-text text-transparent mb-4" style={{ fontFamily: 'var(--font-family-display)' }}>
                   {show.name}
                 </h1>
 

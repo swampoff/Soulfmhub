@@ -5,6 +5,7 @@ import { Input } from '../components/ui/input';
 import { Music, Search, Grid3x3, List, Play, Pause, Clock, Disc3, Filter, X } from 'lucide-react';
 import { api } from '../../lib/api';
 import { motion, AnimatePresence } from 'motion/react';
+import { AnimatedPalm } from '../components/AnimatedPalm';
 
 const GENRE_COLORS: Record<string, string> = {
   disco: '#E91E63',
@@ -148,8 +149,21 @@ export function MusicLibraryPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#0a1628] via-[#0d1a2d] to-[#0a1628] py-12">
-      <div className="container mx-auto px-4 max-w-7xl">
+    <div className="min-h-screen bg-gradient-to-br from-[#0a1628] via-[#0d1a2d] to-[#0a1628] relative overflow-hidden py-12">
+      {/* Animated Palms - Left */}
+      <AnimatedPalm side="left" delay={0.3} />
+      
+      {/* Animated Palms - Right */}
+      <AnimatedPalm side="right" delay={0.5} />
+
+      {/* Animated Background */}
+      <div className="absolute inset-0 opacity-10 pointer-events-none">
+        <div className="absolute top-20 left-10 w-96 h-96 bg-[#00d9ff] rounded-full mix-blend-multiply filter blur-3xl animate-blob" />
+        <div className="absolute top-40 right-10 w-96 h-96 bg-[#00ffaa] rounded-full mix-blend-multiply filter blur-3xl animate-blob animation-delay-2000" />
+        <div className="absolute bottom-20 left-1/2 w-96 h-96 bg-[#FF8C42] rounded-full mix-blend-multiply filter blur-3xl animate-blob animation-delay-4000" />
+      </div>
+
+      <div className="container mx-auto px-4 max-w-7xl relative z-10">
         {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -162,7 +176,7 @@ export function MusicLibraryPage() {
                 <Music className="w-4 h-4 text-[#00d9ff]" />
                 <span className="text-[#00d9ff] font-semibold text-sm">MUSIC LIBRARY</span>
               </div>
-              <h1 className="text-5xl font-bold bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] bg-clip-text text-transparent mb-2">
+              <h1 className="text-5xl font-bold bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] bg-clip-text text-transparent mb-2" style={{ fontFamily: 'var(--font-family-display)' }}>
                 Browse Our Collection
               </h1>
               <p className="text-white/70 text-lg">
