@@ -17,7 +17,11 @@ import {
   FileAudio,
   Plus,
   ListMusic,
-  AlertCircle
+  AlertCircle,
+  Copy,
+  ExternalLink,
+  Play,
+  Link
 } from 'lucide-react';
 
 interface UploadingTrack {
@@ -26,11 +30,15 @@ interface UploadingTrack {
   status: 'pending' | 'uploading' | 'processing' | 'success' | 'error';
   progress: number;
   error?: string;
+  shortId?: string;
+  streamUrl?: string;
   metadata?: {
     title: string;
     artist: string;
     album?: string;
     duration?: number;
+    genre?: string;
+    year?: number;
   };
 }
 
@@ -41,6 +49,50 @@ export function TrackUpload() {
   const [playlistPosition, setPlaylistPosition] = useState<'start' | 'end'>('end');
   const [autoAddToLiveStream, setAutoAddToLiveStream] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Extract basic metadata from audio file (duration only on frontend)
+  const extractBasicMetadata = async (file: File): Promise<any> => {
+    return new Promise((resolve) => {
+      const audio = new Audio();
+      const objectUrl = URL.createObjectURL(file);
+      audio.src = objectUrl;
+      
+      // Parse filename for title and artist
+      const fileName = file.name.replace(/\.(mp3|wav|m4a|flac)$/i, '');
+      const parts = fileName.split(' - ');
+      
+      const basicMetadata = {
+        title: parts.length >= 2 ? parts.slice(1).join(' - ') : fileName,
+        artist: parts.length >= 2 ? parts[0] : 'Unknown Artist',
+        album: '',
+        genre: 'Funk',
+        year: new Date().getFullYear(),
+        duration: 180 // default fallback
+      };
+      
+      audio.addEventListener('loadedmetadata', () => {
+        const duration = Math.floor(audio.duration);
+        URL.revokeObjectURL(objectUrl);
+        
+        resolve({
+          ...basicMetadata,
+          duration: duration || 180
+        });
+      });
+      
+      audio.addEventListener('error', () => {
+        URL.revokeObjectURL(objectUrl);
+        // Return fallback metadata if audio loading fails
+        resolve(basicMetadata);
+      });
+
+      // Set timeout for metadata loading
+      setTimeout(() => {
+        URL.revokeObjectURL(objectUrl);
+        resolve(basicMetadata);
+      }, 5000);
+    });
+  };
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -134,7 +186,9 @@ export function TrackUpload() {
       updateTrackStatus(track.id, { 
         status: 'success', 
         progress: 100,
-        metadata: response.metadata 
+        metadata: response.metadata,
+        shortId: response.shortId,
+        streamUrl: response.streamUrl
       });
 
       toast.success(`${response.metadata.title} uploaded successfully!`);
@@ -458,14 +512,102 @@ export function TrackUpload() {
                   </div>
 
                   {track.status === 'success' && (
-                    <div className="flex items-center gap-2 mt-2 pt-2 border-t border-white/5">
-                      <Badge variant="outline" className="border-[#00ffaa]/30 text-[#00ffaa] text-xs">
-                        NEWFUNK
-                      </Badge>
-                      {autoAddToLiveStream && (
-                        <Badge variant="outline" className="border-[#00d9ff]/30 text-[#00d9ff] text-xs">
-                          Added to Live Stream
+                    <div className="space-y-2 mt-3 pt-3 border-t border-white/5">
+                      {/* Tags */}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Badge variant="outline" className="border-[#00ffaa]/30 text-[#00ffaa] text-xs">
+                          NEWFUNK
                         </Badge>
+                        {autoAddToLiveStream && (
+                          <Badge variant="outline" className="border-[#00d9ff]/30 text-[#00d9ff] text-xs">
+                            Added to Live Stream
+                          </Badge>
+                        )}
+                      </div>
+
+                      {/* Streaming Link */}
+                      {track.streamUrl && track.shortId && (
+                        <div className="space-y-2">
+                          {/* Public Player Link */}
+                          <div className="bg-[#00ffaa]/5 border border-[#00ffaa]/20 rounded-lg p-3">
+                            <div className="flex items-center gap-2 mb-2">
+                              <ExternalLink className="w-4 h-4 text-[#00ffaa]" />
+                              <span className="text-xs font-semibold text-white uppercase tracking-wide">
+                                Public Player Link
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <code className="flex-1 text-xs bg-[#0a1628]/80 px-2 py-1.5 rounded border border-[#00ffaa]/10 text-[#00ffaa] font-mono truncate">
+                                {window.location.origin}/play/{track.shortId}
+                              </code>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(`${window.location.origin}/play/${track.shortId}`);
+                                  toast.success('Player link copied!');
+                                }}
+                                className="h-7 w-7 p-0 hover:bg-[#00ffaa]/10"
+                              >
+                                <Copy className="w-3 h-3 text-[#00ffaa]" />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => window.open(`/play/${track.shortId}`, '_blank')}
+                                className="h-7 w-7 p-0 hover:bg-[#00ffaa]/10"
+                              >
+                                <ExternalLink className="w-3 h-3 text-[#00ffaa]" />
+                              </Button>
+                            </div>
+                          </div>
+
+                          {/* Direct Stream Link */}
+                          <div className="bg-[#00d9ff]/5 border border-[#00d9ff]/20 rounded-lg p-3">
+                            <div className="flex items-center gap-2 mb-2">
+                              <ExternalLink className="w-4 h-4 text-[#00d9ff]" />
+                              <span className="text-xs font-semibold text-white uppercase tracking-wide">
+                                Direct Stream URL
+                              </span>
+                            </div>
+                            
+                            <div className="flex items-center gap-2">
+                              <code className="flex-1 text-sm bg-[#0a1628]/80 px-3 py-2 rounded border border-[#00d9ff]/10 text-[#00d9ff] font-mono truncate">
+                                {track.streamUrl}
+                              </code>
+                              
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(track.streamUrl!);
+                                  toast.success('Link copied to clipboard!');
+                                }}
+                                className="border-[#00d9ff]/30 text-[#00d9ff] hover:bg-[#00d9ff]/10 flex-shrink-0"
+                              >
+                                <Copy className="w-3 h-3 mr-1" />
+                                Copy
+                              </Button>
+                              
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  // Open in new tab for testing
+                                  window.open(track.streamUrl!, '_blank');
+                                }}
+                                className="border-[#00ffaa]/30 text-[#00ffaa] hover:bg-[#00ffaa]/10 flex-shrink-0"
+                              >
+                                <Play className="w-3 h-3 mr-1" />
+                                Test
+                              </Button>
+                            </div>
+                            
+                            <p className="text-xs text-white/50 mt-2">
+                              Share this link to stream the track • Short ID: <span className="text-[#00d9ff] font-mono">{track.shortId}</span>
+                            </p>
+                          </div>
+                        </div>
                       )}
                     </div>
                   )}

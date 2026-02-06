@@ -2,11 +2,6 @@ import React from 'react';
 import { useNavigate } from 'react-router';
 import { useApp } from '../../context/AppContext';
 import { ListenerDashboard } from './dashboards/ListenerDashboard';
-import { DJDashboard } from './dashboards/DJDashboard';
-import { HostDashboard } from './dashboards/HostDashboard';
-import { MusicCuratorDashboard } from './dashboards/MusicCuratorDashboard';
-import { ContentManagerDashboard } from './dashboards/ContentManagerDashboard';
-import { ProgramDirectorDashboard } from './dashboards/ProgramDirectorDashboard';
 import { SuperAdminDashboard } from './dashboards/SuperAdminDashboard';
 import { motion } from 'motion/react';
 import { Loader2 } from 'lucide-react';
@@ -40,16 +35,6 @@ export function DashboardPage() {
     switch (user.role) {
       case 'super_admin':
         return <SuperAdminDashboard />;
-      case 'program_director':
-        return <ProgramDirectorDashboard />;
-      case 'content_manager':
-        return <ContentManagerDashboard />;
-      case 'music_curator':
-        return <MusicCuratorDashboard />;
-      case 'host':
-        return <HostDashboard />;
-      case 'dj':
-        return <DJDashboard />;
       case 'listener':
       default:
         return <ListenerDashboard />;

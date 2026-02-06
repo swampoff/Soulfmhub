@@ -10,6 +10,7 @@ import { ShowDetailPage } from './pages/ShowDetailPage';
 import { MusicLibraryPage } from './pages/MusicLibraryPage';
 import { NewsPage } from './pages/NewsPage';
 import { ArticleDetailPage } from './pages/ArticleDetailPage';
+import { StreamPlayer } from './pages/StreamPlayer';
 import { SupportPage } from './pages/SupportPage';
 import { ProfilesPage } from './pages/ProfilesPage';
 import { ProfileDetailPage } from './pages/ProfileDetailPage';
@@ -22,6 +23,8 @@ import { DashboardPage } from './pages/DashboardPage';
 import { AdminDashboard } from './pages/admin/AdminDashboard';
 import { TracksManagement } from './pages/admin/TracksManagement';
 import { PlaylistsManagement } from './pages/admin/PlaylistsManagement';
+import { AdminSetupPage } from './pages/AdminSetupPage';
+import { PublicPlayer } from './pages/PublicPlayer';
 import { Toaster } from './components/ui/sonner';
 import soulFmLogo from 'figma:asset/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png';
 
@@ -51,105 +54,32 @@ function ProtectedRoute({ children, requiredRole }: { children: React.ReactNode;
     return <Navigate to="/auth" replace />;
   }
 
-  if (requiredRole && user.role !== requiredRole && user.role !== 'admin') {
-    return <Navigate to="/" replace />;
+  if (requiredRole && user.role !== requiredRole) {
+    return <Navigate to="/dashboard" replace />;
   }
 
   return <>{children}</>;
 }
 
-// Admin Layout
-function AdminLayout({ children }: { children: React.ReactNode }) {
-  const { user } = useApp();
-
+// Public Layout Component
+function PublicLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#0a1628] via-[#0d1a2d] to-[#0a1628]">
-      <div className="flex">
-        {/* Sidebar */}
-        <aside className="w-64 bg-[#0f1c2e]/80 backdrop-blur-sm border-r border-[#00d9ff]/20 min-h-screen p-6">
-          <div className="mb-8">
-            <div className="flex items-center gap-3 mb-6">
-              <img 
-                src={soulFmLogo} 
-                alt="Soul FM" 
-                className="h-12 w-auto"
-                style={{
-                  filter: 'drop-shadow(0 0 8px rgba(0, 217, 255, 0.3))'
-                }}
-              />
-            </div>
-            <div className="text-[#00d9ff] text-sm font-semibold mb-1">Admin Panel</div>
-            <div className="text-xs text-gray-400">{user?.name}</div>
-          </div>
-
-          <nav className="space-y-2">
-            <a
-              href="/admin"
-              className="block px-4 py-3 rounded-lg text-white bg-white/10 hover:bg-white/20 transition-colors"
-            >
-              📊 Dashboard
-            </a>
-            <a
-              href="/admin/tracks"
-              className="block px-4 py-3 rounded-lg text-white/70 hover:bg-white/10 transition-colors"
-            >
-              🎵 Tracks
-            </a>
-            <a
-              href="/admin/playlists"
-              className="block px-4 py-3 rounded-lg text-white/70 hover:bg-white/10 transition-colors"
-            >
-              📀 Playlists
-            </a>
-            <a
-              href="/admin/schedule"
-              className="block px-4 py-3 rounded-lg text-white/70 hover:bg-white/10 transition-colors"
-            >
-              📅 Schedule
-            </a>
-            <a
-              href="/admin/shows"
-              className="block px-4 py-3 rounded-lg text-white/70 hover:bg-white/10 transition-colors"
-            >
-              📻 Shows
-            </a>
-            <a
-              href="/admin/news"
-              className="block px-4 py-3 rounded-lg text-white/70 hover:bg-white/10 transition-colors"
-            >
-              📰 News
-            </a>
-            <a
-              href="/admin/donations"
-              className="block px-4 py-3 rounded-lg text-white/70 hover:bg-white/10 transition-colors"
-            >
-              💰 Donations
-            </a>
-            <div className="my-4 border-t border-white/10" />
-            <a
-              href="/"
-              className="block px-4 py-3 rounded-lg text-white/70 hover:bg-white/10 transition-colors"
-            >
-              ← Back to Site
-            </a>
-          </nav>
-        </aside>
-
-        {/* Main Content */}
-        <main className="flex-1 p-8">
-          {children}
-        </main>
-      </div>
+      <Navigation />
+      {children}
+      <RadioPlayer />
     </div>
   );
 }
 
-// Public Layout
-function PublicLayout({ children }: { children: React.ReactNode }) {
+// Admin Layout Component
+function AdminLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen bg-[#0a1628]">
+    <div className="min-h-screen bg-gradient-to-br from-[#0a1628] via-[#0d1a2d] to-[#0a1628]">
       <Navigation />
-      <main className="pb-20">{children}</main>
+      <div className="container mx-auto px-4 py-8">
+        {children}
+      </div>
       <RadioPlayer />
     </div>
   );
@@ -175,13 +105,22 @@ function AppContent() {
         <Route path="/team/:slug" element={<PublicLayout><ProfileDetailPage /></PublicLayout>} />
         <Route path="/analytics" element={<PublicLayout><AnalyticsPage /></PublicLayout>} />
         <Route path="/auth" element={<AuthPage />} />
+        <Route path="/stream" element={<PublicLayout><StreamPlayer /></PublicLayout>} />
+        
+        {/* Public Player Route - NO LAYOUT */}
+        <Route path="/play/:uniqueId" element={<PublicPlayer />} />
+        
+        {/* Public Admin Setup Route (for initial setup before any user exists) */}
+        <Route path="/setup" element={<AdminSetupPage />} />
         
         {/* Dashboard Route */}
         <Route 
           path="/dashboard" 
           element={
             <ProtectedRoute>
-              <DashboardPage />
+              <PublicLayout>
+                <DashboardPage />
+              </PublicLayout>
             </ProtectedRoute>
           } 
         />
@@ -265,6 +204,18 @@ function AppContent() {
                   <h1 className="text-3xl font-bold mb-4">Donation Management</h1>
                   <p className="text-white/70">Track supporter contributions.</p>
                 </div>
+              </AdminLayout>
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Admin Setup Route */}
+        <Route
+          path="/admin/setup"
+          element={
+            <ProtectedRoute>
+              <AdminLayout>
+                <AdminSetupPage />
               </AdminLayout>
             </ProtectedRoute>
           }

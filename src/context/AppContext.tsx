@@ -2,11 +2,13 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { supabase } from '../lib/supabase';
 import { api } from '../lib/api';
 
+export type UserRole = 'listener' | 'super_admin';
+
 interface User {
   id: string;
   email: string;
   name: string;
-  role: string;
+  role: UserRole;
 }
 
 interface NowPlaying {
@@ -113,14 +115,52 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const signIn = async (email: string, password: string) => {
+    console.log('[AppContext] signIn called with email:', email);
     const { data, error } = await api.signIn(email, password);
-    if (error) throw error;
+    if (error) {
+      console.error('[AppContext] signIn error:', error);
+      throw error;
+    }
+    console.log('[AppContext] signIn success, user:', data?.user?.email);
+    
+    // Load profile immediately after sign in
+    console.log('[AppContext] Loading user profile...');
+    try {
+      const profileData = await api.getProfile();
+      console.log('[AppContext] Profile data:', profileData);
+      if (profileData.profile) {
+        setUser(profileData.profile);
+        console.log('[AppContext] User state updated:', profileData.profile);
+      }
+    } catch (profileError) {
+      console.error('[AppContext] Error loading profile:', profileError);
+    }
+    
     return data;
   };
 
   const signUp = async (email: string, password: string, name: string, role: string = 'listener') => {
+    console.log('[AppContext] signUp called:', { email, name, role });
     const { data, error } = await api.signUp(email, password, name, role);
-    if (error) throw error;
+    if (error) {
+      console.error('[AppContext] signUp error:', error);
+      throw error;
+    }
+    console.log('[AppContext] signUp success');
+    
+    // Load profile immediately after sign up
+    console.log('[AppContext] Loading user profile...');
+    try {
+      const profileData = await api.getProfile();
+      console.log('[AppContext] Profile data:', profileData);
+      if (profileData.profile) {
+        setUser(profileData.profile);
+        console.log('[AppContext] User state updated:', profileData.profile);
+      }
+    } catch (profileError) {
+      console.error('[AppContext] Error loading profile:', profileError);
+    }
+    
     return data;
   };
 

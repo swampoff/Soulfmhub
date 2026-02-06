@@ -1,31 +1,72 @@
 import { API_BASE, supabase } from './supabase';
+import { publicAnonKey } from '../../utils/supabase/info';
 
 async function getAuthHeaders() {
   const { data: { session } } = await supabase.auth.getSession();
   return {
     'Content-Type': 'application/json',
-    'Authorization': session?.access_token ? `Bearer ${session.access_token}` : `Bearer ${(await import('/utils/supabase/info')).publicAnonKey}`,
+    'Authorization': session?.access_token ? `Bearer ${session.access_token}` : `Bearer ${publicAnonKey}`,
+  };
+}
+
+async function getPublicHeaders() {
+  return {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${publicAnonKey}`,
   };
 }
 
 async function getAccessToken() {
   const { data: { session } } = await supabase.auth.getSession();
-  return session?.access_token || (await import('/utils/supabase/info')).publicAnonKey;
+  return session?.access_token || publicAnonKey;
 }
 
 export const api = {
   // Auth
   async signUp(email: string, password: string, name: string, role: string = 'listener') {
-    const response = await fetch(`${API_BASE}/auth/signup`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, name, role }),
-    });
-    return response.json();
+    console.log('[API] Signing up:', { email, name, role });
+    
+    try {
+      const headers = await getPublicHeaders();
+      const response = await fetch(`${API_BASE}/auth/signup`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ email, password, name, role }),
+      });
+      
+      console.log('[API] Signup response status:', response.status, response.statusText);
+      
+      const data = await response.json();
+      console.log('[API] Signup response data:', data);
+      
+      if (!response.ok || data.error) {
+        const errorMsg = data.error || `Signup failed with status ${response.status}: ${response.statusText}`;
+        console.error('[API] Signup failed:', errorMsg);
+        console.error('[API] Full error details:', JSON.stringify(data, null, 2));
+        return { data: null, error: new Error(errorMsg) };
+      }
+      
+      // Now sign in automatically
+      console.log('[API] Auto-signing in after signup');
+      const signInResult = await this.signIn(email, password);
+      if (signInResult.error) {
+        console.error('[API] Auto sign-in failed:', signInResult.error);
+        return { data: null, error: signInResult.error };
+      }
+      
+      console.log('[API] Signup and auto-login successful!');
+      return { data: signInResult.data, error: null };
+    } catch (error: any) {
+      console.error('[API] Signup exception:', error);
+      console.error('[API] Exception details:', error.stack);
+      return { data: null, error };
+    }
   },
 
   async signIn(email: string, password: string) {
+    console.log('[API] Signing in:', email);
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    console.log('[API] Sign in result:', { data: data?.user?.email, error });
     return { data, error };
   },
 
@@ -328,5 +369,156 @@ export const api = {
       xhr.setRequestHeader('Authorization', `Bearer ${accessToken}`);
       xhr.send(formData);
     });
+  },
+
+  // Podcasts
+  async getPodcasts() {
+    const response = await fetch(`${API_BASE}/podcasts`);
+    return response.json();
+  },
+
+  async getPodcast(id: string) {
+    const response = await fetch(`${API_BASE}/podcasts/${id}`);
+    return response.json();
+  },
+
+  async createPodcast(podcast: any) {
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${API_BASE}/podcasts`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(podcast),
+    });
+    return response.json();
+  },
+
+  async updatePodcast(id: string, podcast: any) {
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${API_BASE}/podcasts/${id}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(podcast),
+    });
+    return response.json();
+  },
+
+  async deletePodcast(id: string) {
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${API_BASE}/podcasts/${id}`, {
+      method: 'DELETE',
+      headers,
+    });
+    return response.json();
+  },
+
+  // Profiles
+  async getProfiles() {
+    const response = await fetch(`${API_BASE}/profiles`);
+    return response.json();
+  },
+
+  async getProfileById(id: string) {
+    const response = await fetch(`${API_BASE}/profiles/${id}`);
+    return response.json();
+  },
+
+  async createProfile(profile: any) {
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${API_BASE}/profiles`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(profile),
+    });
+    return response.json();
+  },
+
+  async updateProfile(id: string, profile: any) {
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${API_BASE}/profiles/${id}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(profile),
+    });
+    return response.json();
+  },
+
+  async deleteProfile(id: string) {
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${API_BASE}/profiles/${id}`, {
+      method: 'DELETE',
+      headers,
+    });
+    return response.json();
+  },
+
+  // Analytics
+  async getAnalytics(filters?: { startDate?: string; endDate?: string; metric?: string }) {
+    const params = new URLSearchParams(filters as any);
+    const response = await fetch(`${API_BASE}/analytics?${params}`);
+    return response.json();
+  },
+
+  async getListenerStats() {
+    const response = await fetch(`${API_BASE}/analytics/listeners`);
+    return response.json();
+  },
+
+  async getTrackStats() {
+    const response = await fetch(`${API_BASE}/analytics/tracks`);
+    return response.json();
+  },
+
+  async getShowStats() {
+    const response = await fetch(`${API_BASE}/analytics/shows`);
+    return response.json();
+  },
+
+  // Radio/Auto DJ
+  async startAutoDJ() {
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${API_BASE}/radio/start`, {
+      method: 'POST',
+      headers,
+    });
+    return response.json();
+  },
+
+  async stopAutoDJ() {
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${API_BASE}/radio/stop`, {
+      method: 'POST',
+      headers,
+    });
+    return response.json();
+  },
+
+  async skipToNextTrack() {
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${API_BASE}/radio/next`, {
+      method: 'POST',
+      headers,
+    });
+    return response.json();
+  },
+
+  async getRadioStatus() {
+    const response = await fetch(`${API_BASE}/radio/status`);
+    return response.json();
+  },
+
+  // Get live radio stream URL
+  getLiveRadioURL() {
+    return `${API_BASE}/radio/live`;
+  },
+
+  // Get stream base URL
+  getStreamURL() {
+    return `${API_BASE}/stream`;
+  },
+
+  // Get stream info for public player
+  async getStreamInfo(shortId: string) {
+    const response = await fetch(`${API_BASE}/stream/info/${shortId}`);
+    return response.json();
   },
 };

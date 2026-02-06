@@ -22,12 +22,7 @@ export function UsersManagement() {
 
   const roles = [
     { value: 'listener', label: 'Listener', color: 'text-gray-400' },
-    { value: 'dj', label: 'DJ', color: 'text-[#00d9ff]' },
-    { value: 'host', label: 'Host', color: 'text-[#00ffaa]' },
-    { value: 'music_curator', label: 'Music Curator', color: 'text-purple-400' },
-    { value: 'content_manager', label: 'Content Manager', color: 'text-blue-400' },
-    { value: 'program_director', label: 'Program Director', color: 'text-orange-400' },
-    { value: 'super_admin', label: 'Super Admin', color: 'text-[#FF8C42]' },
+    { value: 'super_admin', label: 'Admin', color: 'text-[#FF8C42]' },
   ];
 
   useEffect(() => {

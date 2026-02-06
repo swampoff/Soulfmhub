@@ -31,6 +31,8 @@ import {
 import { AnimatedPalm } from '../../components/AnimatedPalm';
 import { UsersManagement } from './UsersManagement';
 import { TrackUpload } from './TrackUpload';
+import { LiveStreamPlaylist } from './LiveStreamPlaylist';
+import { AutoDJControl } from '../../components/AutoDJControl';
 import { useNavigate } from 'react-router';
 
 export function SuperAdminDashboard() {
@@ -350,6 +352,10 @@ export function SuperAdminDashboard() {
                 <Upload className="w-4 h-4 mr-2" />
                 Upload
               </TabsTrigger>
+              <TabsTrigger value="playlist-manager" className="data-[state=active]:bg-[#00d9ff] data-[state=active]:text-[#0a1628]">
+                <Radio className="w-4 h-4 mr-2" />
+                Live Stream
+              </TabsTrigger>
               <TabsTrigger value="tracks" className="data-[state=active]:bg-[#00d9ff] data-[state=active]:text-[#0a1628]">
                 <Music className="w-4 h-4 mr-2" />
                 Tracks
@@ -374,54 +380,65 @@ export function SuperAdminDashboard() {
 
             {/* Overview Tab */}
             <TabsContent value="overview">
-              <Card className="bg-[#0f1c2e]/90 backdrop-blur-sm border-[#00d9ff]/30 p-6">
-                <h2 className="text-2xl font-bold text-white mb-4">Quick Actions</h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  <Button
-                    onClick={() => {
-                      resetTrackForm();
-                      setIsTrackDialogOpen(true);
-                    }}
-                    className="bg-[#00d9ff] hover:bg-[#00b8dd] text-[#0a1628] justify-start h-auto py-6"
-                  >
-                    <Upload className="w-5 h-5 mr-3" />
-                    <div className="text-left">
-                      <div className="font-semibold">Upload Track</div>
-                      <div className="text-xs opacity-80">Add new music to library</div>
-                    </div>
-                  </Button>
+              <div className="space-y-6">
+                {/* Auto DJ Control */}
+                <AutoDJControl />
+                
+                {/* Quick Actions */}
+                <Card className="bg-[#0f1c2e]/90 backdrop-blur-sm border-[#00d9ff]/30 p-6">
+                  <h2 className="text-2xl font-bold text-white mb-4">Quick Actions</h2>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <Button
+                      onClick={() => {
+                        resetTrackForm();
+                        setIsTrackDialogOpen(true);
+                      }}
+                      className="bg-[#00d9ff] hover:bg-[#00b8dd] text-[#0a1628] justify-start h-auto py-6"
+                    >
+                      <Upload className="w-5 h-5 mr-3" />
+                      <div className="text-left">
+                        <div className="font-semibold">Upload Track</div>
+                        <div className="text-xs opacity-80">Add new music to library</div>
+                      </div>
+                    </Button>
 
-                  <Button
-                    onClick={() => {
-                      resetPlaylistForm();
-                      setIsPlaylistDialogOpen(true);
-                    }}
-                    className="bg-[#00ffaa] hover:bg-[#00dd99] text-[#0a1628] justify-start h-auto py-6"
-                  >
-                    <Plus className="w-5 h-5 mr-3" />
-                    <div className="text-left">
-                      <div className="font-semibold">Create Playlist</div>
-                      <div className="text-xs opacity-80">New curated collection</div>
-                    </div>
-                  </Button>
+                    <Button
+                      onClick={() => {
+                        resetPlaylistForm();
+                        setIsPlaylistDialogOpen(true);
+                      }}
+                      className="bg-[#00ffaa] hover:bg-[#00dd99] text-[#0a1628] justify-start h-auto py-6"
+                    >
+                      <Plus className="w-5 h-5 mr-3" />
+                      <div className="text-left">
+                        <div className="font-semibold">Create Playlist</div>
+                        <div className="text-xs opacity-80">New curated collection</div>
+                      </div>
+                    </Button>
 
-                  <Button
-                    onClick={() => navigate('/admin/schedule')}
-                    className="bg-[#FF8C42] hover:bg-[#ff7a2e] text-white justify-start h-auto py-6"
-                  >
-                    <Calendar className="w-5 h-5 mr-3" />
-                    <div className="text-left">
-                      <div className="font-semibold">Manage Schedule</div>
-                      <div className="text-xs opacity-80">Plan your programming</div>
-                    </div>
-                  </Button>
-                </div>
-              </Card>
+                    <Button
+                      onClick={() => navigate('/admin/schedule')}
+                      className="bg-[#FF8C42] hover:bg-[#ff7a2e] text-white justify-start h-auto py-6"
+                    >
+                      <Calendar className="w-5 h-5 mr-3" />
+                      <div className="text-left">
+                        <div className="font-semibold">Manage Schedule</div>
+                        <div className="text-xs opacity-80">Plan your programming</div>
+                      </div>
+                    </Button>
+                  </div>
+                </Card>
+              </div>
             </TabsContent>
 
             {/* Upload Tab */}
             <TabsContent value="upload">
               <TrackUpload />
+            </TabsContent>
+
+            {/* Playlist Manager Tab */}
+            <TabsContent value="playlist-manager">
+              <LiveStreamPlaylist />
             </TabsContent>
 
             {/* Tracks Tab */}

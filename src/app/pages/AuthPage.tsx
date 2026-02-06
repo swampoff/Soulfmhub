@@ -12,6 +12,7 @@ import { toast } from 'sonner';
 import { Sparkles } from 'lucide-react';
 import soulFmLogo from 'figma:asset/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png';
 import { AnimatedPalm } from '../components/AnimatedPalm';
+import { API_BASE } from '../../lib/supabase';
 
 export function AuthPage() {
   const navigate = useNavigate();
@@ -26,15 +27,55 @@ export function AuthPage() {
     role: 'listener' 
   });
 
+  const handleQuickStart = async () => {
+    setLoading(true);
+    const testEmail = `test${Date.now()}@soulfm.local`;
+    try {
+      // First, check server health
+      console.log('Checking server health...');
+      const healthResponse = await fetch(`${API_BASE}/health`);
+      const healthData = await healthResponse.json();
+      console.log('Server health:', healthData);
+      
+      if (healthData.env?.supabaseServiceKey === 'MISSING') {
+        toast.error('⚠️ Server configuration error: SUPABASE_SERVICE_ROLE_KEY not set. Please check your Supabase Edge Function environment variables.');
+        console.error('CRITICAL: SUPABASE_SERVICE_ROLE_KEY is not configured on the server!');
+        setLoading(false);
+        return;
+      }
+      
+      console.log('Creating quick test account:', testEmail);
+      await signUp(testEmail, 'dev-mode', 'Test User', 'super_admin');
+      toast.success('🎵 Quick account created! Logging you in...');
+      
+      // Wait for profile to load
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      console.log('Navigating to dashboard...');
+      navigate('/dashboard');
+    } catch (error: any) {
+      console.error('Quick start error:', error);
+      toast.error(error.message || 'Quick start failed. Check console (F12) for details.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
-      await signIn(signInData.email, signInData.password);
+      // Simple magic link - just email, no password
+      console.log('Attempting sign in with:', signInData.email);
+      await signIn(signInData.email, 'dev-mode');
       toast.success('Welcome back!');
+      
+      // Wait for profile to load
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      console.log('Navigating to dashboard...');
       navigate('/dashboard');
     } catch (error: any) {
-      toast.error(error.message || 'Sign in failed');
+      console.error('Sign in error:', error);
+      toast.error(error.message || 'Sign in failed. Try signing up first! Check console (F12) for details.');
     } finally {
       setLoading(false);
     }
@@ -43,18 +84,20 @@ export function AuthPage() {
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (signUpData.password !== signUpData.confirmPassword) {
-      toast.error('Passwords do not match');
-      return;
-    }
-
     setLoading(true);
     try {
-      await signUp(signUpData.email, signUpData.password, signUpData.name, signUpData.role);
+      // Dev mode - use simple password
+      console.log('Attempting sign up with:', signUpData.email, signUpData.name, signUpData.role);
+      await signUp(signUpData.email, 'dev-mode', signUpData.name, signUpData.role);
       toast.success('Account created! Welcome to Soul FM Hub.');
+      
+      // Wait for profile to load
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      console.log('Navigating to dashboard...');
       navigate('/dashboard');
     } catch (error: any) {
-      toast.error(error.message || 'Sign up failed');
+      console.error('Sign up error:', error);
+      toast.error(error.message || 'Sign up failed. Check console (F12) for details.');
     } finally {
       setLoading(false);
     }
@@ -210,18 +253,9 @@ export function AuthPage() {
                     required
                     className="bg-[#0a1628] border-[#00d9ff]/30 text-white placeholder:text-gray-500"
                   />
-                </div>
-                <div>
-                  <Label htmlFor="signin-password" className="text-white">Password</Label>
-                  <Input
-                    id="signin-password"
-                    type="password"
-                    placeholder="••••••••"
-                    value={signInData.password}
-                    onChange={(e) => setSignInData({ ...signInData, password: e.target.value })}
-                    required
-                    className="bg-[#0a1628] border-[#00d9ff]/30 text-white placeholder:text-gray-500"
-                  />
+                  <p className="text-xs text-white/50 mt-1">
+                    Development mode - just enter your email, no password needed
+                  </p>
                 </div>
                 <Button
                   type="submit"
@@ -258,30 +292,9 @@ export function AuthPage() {
                     required
                     className="bg-[#0a1628] border-[#00d9ff]/30 text-white placeholder:text-gray-500"
                   />
-                </div>
-                <div>
-                  <Label htmlFor="signup-password" className="text-white">Password</Label>
-                  <Input
-                    id="signup-password"
-                    type="password"
-                    placeholder="••••••••"
-                    value={signUpData.password}
-                    onChange={(e) => setSignUpData({ ...signUpData, password: e.target.value })}
-                    required
-                    className="bg-[#0a1628] border-[#00d9ff]/30 text-white placeholder:text-gray-500"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="signup-confirm" className="text-white">Confirm Password</Label>
-                  <Input
-                    id="signup-confirm"
-                    type="password"
-                    placeholder="••••••••"
-                    value={signUpData.confirmPassword}
-                    onChange={(e) => setSignUpData({ ...signUpData, confirmPassword: e.target.value })}
-                    required
-                    className="bg-[#0a1628] border-[#00d9ff]/30 text-white placeholder:text-gray-500"
-                  />
+                  <p className="text-xs text-white/50 mt-1">
+                    Development mode - password set automatically
+                  </p>
                 </div>
                 <div>
                   <Label htmlFor="signup-role" className="text-white">Role</Label>
@@ -294,12 +307,7 @@ export function AuthPage() {
                     </SelectTrigger>
                     <SelectContent className="bg-[#0a1628] border-[#00d9ff]/30 text-white">
                       <SelectItem value="listener">Listener</SelectItem>
-                      <SelectItem value="dj">DJ</SelectItem>
-                      <SelectItem value="host">Host</SelectItem>
-                      <SelectItem value="music_curator">Music Curator</SelectItem>
-                      <SelectItem value="content_manager">Content Manager</SelectItem>
-                      <SelectItem value="program_director">Program Director</SelectItem>
-                      <SelectItem value="super_admin">Super Admin</SelectItem>
+                      <SelectItem value="super_admin">Admin</SelectItem>
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-white/50 mt-1">
@@ -317,6 +325,20 @@ export function AuthPage() {
             </TabsContent>
           </Tabs>
         </Card>
+
+        {/* Quick Start Button for Development */}
+        <div className="mt-4">
+          <Button
+            onClick={handleQuickStart}
+            disabled={loading}
+            className="w-full bg-gradient-to-r from-[#00ffaa] to-[#00d9ff] hover:from-[#00dd88] hover:to-[#00b8dd] text-[#0a1628] font-bold text-lg py-6"
+          >
+            {loading ? '⏳ Creating...' : '🚀 Quick Start (Auto Admin)'}
+          </Button>
+          <p className="text-xs text-white/40 text-center mt-2">
+            Development mode - creates instant admin account
+          </p>
+        </div>
 
         <div className="mt-6 text-center">
           <Button

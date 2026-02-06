@@ -108,13 +108,16 @@ export function Navigation() {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-48 bg-[#0f1c2e] border-[#00d9ff]/30">
-                  <DropdownMenuItem disabled className="text-white">
-                    <div className="flex flex-col">
-                      <span className="font-semibold">{user.name}</span>
+                  <DropdownMenuItem className="flex items-center gap-3 p-3 border-b border-white/5">
+                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#00d9ff] to-[#00ffaa] flex items-center justify-center font-bold text-[#0a1628]" style={{ fontFamily: 'var(--font-family-display)' }}>
+                      {user.name[0].toUpperCase()}
+                    </div>
+                    <div className="flex-1">
+                      <span className="block font-semibold text-white">{user.name}</span>
                       <span className="text-xs text-gray-400">{user.email}</span>
                     </div>
                   </DropdownMenuItem>
-                  {(user.role === 'admin' || user.role === 'dj' || user.role === 'curator') && (
+                  {user.role === 'super_admin' && (
                     <DropdownMenuItem asChild>
                       <Link to="/admin" className="text-[#00d9ff]">
                         Admin Panel
