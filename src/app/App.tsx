@@ -38,7 +38,7 @@ import { UploadTestPage } from './pages/admin/UploadTestPage';
 import { NewsInjection } from './pages/admin/NewsInjection';
 import { SystemTest } from './pages/admin/SystemTest';
 import { Toaster } from './components/ui/sonner';
-import soulFmLogo from 'figma:asset/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png';
+import soulFmLogo from '@/assets/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png';
 import BeachCarDemo from './pages/BeachCarDemo';
 import { Footer } from './components/Footer';
 import { AnimatedPalm } from './components/AnimatedPalm';
