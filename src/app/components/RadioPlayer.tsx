@@ -6,13 +6,16 @@ import { useApp } from '../../context/AppContext';
 import { motion, AnimatePresence } from 'motion/react';
 import soulFmLogo from 'figma:asset/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png';
 import { AnimatedWaves } from './AnimatedWaves';
+import { RealtimeIndicator } from './RealtimeIndicator';
 
 // Icecast stream configuration
 // You can use any of these public soul/funk radio streams:
 // Option 1: FIP Groove (French soul/funk station)
 // Option 2: Exclusively Soul Radio
 // Option 3: Your own Icecast server
-const STREAM_URL = 'https://stream.soulfm.radio/stream'; // Replace with your Icecast stream URL
+
+// Get stream URL from environment variable or use default
+const STREAM_URL = import.meta.env.VITE_STREAM_URL || 'https://stream.soulfm.radio/stream';
 // For testing, you can use: 'https://icecast.streamserver24.com:8000/soul128.mp3'
 // or 'http://stream.soulfunkradio.com:8000/soul.mp3'
 
@@ -428,7 +431,10 @@ export function RadioPlayer() {
 
                     {/* Stream Info */}
                     <div className="bg-white/5 rounded-lg p-3 border border-white/10">
-                      <div className="text-xs text-gray-400 mb-1">Stream Quality</div>
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="text-xs text-gray-400">Stream Quality</div>
+                        <RealtimeIndicator size="sm" />
+                      </div>
                       <div className="text-sm font-semibold text-[#00ffaa]">
                         128 kbps MP3
                       </div>

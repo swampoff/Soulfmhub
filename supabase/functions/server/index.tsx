@@ -2824,6 +2824,169 @@ app.post("/make-server-06086aa3/settings/stream", requireAuth, async (c) => {
   }
 });
 
+// ==================== UPLOAD ENDPOINTS ====================
+
+// Image upload endpoint (for covers, avatars, etc.)
+app.post("/make-server-06086aa3/upload/image", async (c) => {
+  try {
+    const formData = await c.req.formData();
+    const file = formData.get('file') as File;
+    const bucketName = (formData.get('bucket') as string) || 'make-06086aa3-covers';
+
+    if (!file) {
+      return c.json({ error: 'No file provided' }, 400);
+    }
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      return c.json({ error: 'File must be an image' }, 400);
+    }
+
+    // Validate file size (5MB max)
+    if (file.size > 5 * 1024 * 1024) {
+      return c.json({ error: 'File size must be less than 5MB' }, 400);
+    }
+
+    // Generate unique filename
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+    const filePath = `uploads/${fileName}`;
+
+    // Upload to Supabase Storage
+    const arrayBuffer = await file.arrayBuffer();
+    const { data, error } = await supabase.storage
+      .from(bucketName)
+      .upload(filePath, arrayBuffer, {
+        contentType: file.type,
+        cacheControl: '3600',
+        upsert: false,
+      });
+
+    if (error) {
+      console.error('Storage upload error:', error);
+      return c.json({ error: `Upload failed: ${error.message}` }, 500);
+    }
+
+    // Get public URL (for public buckets) or signed URL (for private buckets)
+    let publicUrl: string;
+    
+    if (bucketName === 'make-06086aa3-covers') {
+      // Public bucket - get public URL
+      const { data: publicUrlData } = supabase.storage
+        .from(bucketName)
+        .getPublicUrl(filePath);
+      publicUrl = publicUrlData.publicUrl;
+    } else {
+      // Private bucket - create signed URL (valid for 1 year)
+      const { data: signedUrlData, error: signedError } = await supabase.storage
+        .from(bucketName)
+        .createSignedUrl(filePath, 31536000); // 1 year
+
+      if (signedError) {
+        console.error('Signed URL error:', signedError);
+        return c.json({ error: `Failed to create signed URL: ${signedError.message}` }, 500);
+      }
+
+      publicUrl = signedUrlData.signedUrl;
+    }
+
+    return c.json({
+      success: true,
+      url: publicUrl,
+      path: filePath,
+      bucket: bucketName,
+      size: file.size,
+      type: file.type,
+    });
+  } catch (error: any) {
+    console.error('Image upload error:', error);
+    return c.json({ error: `Upload failed: ${error.message}` }, 500);
+  }
+});
+
+// Audio upload endpoint (for podcast episodes, etc.)
+app.post("/make-server-06086aa3/upload/audio", async (c) => {
+  try {
+    const formData = await c.req.formData();
+    const file = formData.get('file') as File;
+    const extractMetadata = formData.get('extractMetadata') === 'true';
+
+    if (!file) {
+      return c.json({ error: 'No file provided' }, 400);
+    }
+
+    // Validate file type
+    const validTypes = ['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/m4a', 'audio/flac', 'audio/ogg'];
+    const isValidType = validTypes.includes(file.type) || file.name.match(/\.(mp3|wav|m4a|flac|ogg)$/i);
+    
+    if (!isValidType) {
+      return c.json({ error: 'File must be an audio file (MP3, WAV, M4A, FLAC, OGG)' }, 400);
+    }
+
+    // Validate file size (50MB max)
+    if (file.size > 50 * 1024 * 1024) {
+      return c.json({ error: 'File size must be less than 50MB' }, 400);
+    }
+
+    // Generate unique filename
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+    const filePath = `episodes/${fileName}`;
+
+    // Upload to Supabase Storage
+    const arrayBuffer = await file.arrayBuffer();
+    const { data, error } = await supabase.storage
+      .from('make-06086aa3-tracks')
+      .upload(filePath, arrayBuffer, {
+        contentType: file.type || 'audio/mpeg',
+        cacheControl: '3600',
+        upsert: false,
+      });
+
+    if (error) {
+      console.error('Storage upload error:', error);
+      return c.json({ error: `Upload failed: ${error.message}` }, 500);
+    }
+
+    // Create signed URL (private bucket, valid for 1 year)
+    const { data: signedUrlData, error: signedError } = await supabase.storage
+      .from('make-06086aa3-tracks')
+      .createSignedUrl(filePath, 31536000); // 1 year
+
+    if (signedError) {
+      console.error('Signed URL error:', signedError);
+      return c.json({ error: `Failed to create signed URL: ${signedError.message}` }, 500);
+    }
+
+    // Extract metadata if requested
+    let metadata = null;
+    if (extractMetadata) {
+      try {
+        const buffer = new Uint8Array(arrayBuffer);
+        const parsedMetadata = await parseBuffer(buffer, file.type || 'audio/mpeg');
+        metadata = extractCompleteMetadata(parsedMetadata);
+        console.log('Extracted audio metadata:', metadata);
+      } catch (metadataError) {
+        console.error('Metadata extraction error:', metadataError);
+        // Don't fail upload if metadata extraction fails
+      }
+    }
+
+    return c.json({
+      success: true,
+      url: signedUrlData.signedUrl,
+      path: filePath,
+      size: file.size,
+      type: file.type,
+      metadata: metadata,
+      duration: metadata?.duration || null,
+    });
+  } catch (error: any) {
+    console.error('Audio upload error:', error);
+    return c.json({ error: `Upload failed: ${error.message}` }, 500);
+  }
+});
+
 // Run admin check on startup
 console.log('🚀 Starting Soul FM Hub server...');
 await initializeStorageBuckets();
