@@ -8,6 +8,7 @@ import { Progress } from '../../components/ui/progress';
 import { Badge } from '../../components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { toast } from 'sonner';
+import { MetadataExtractionDemo } from '../../components/MetadataExtractionDemo';
 import { 
   Upload, 
   Music, 
@@ -48,6 +49,7 @@ export function TrackUpload() {
   const [isDragging, setIsDragging] = useState(false);
   const [playlistPosition, setPlaylistPosition] = useState<'start' | 'end'>('end');
   const [autoAddToLiveStream, setAutoAddToLiveStream] = useState(true);
+  const [generateWaveform, setGenerateWaveform] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Extract basic metadata from audio file (duration only on frontend)
@@ -162,6 +164,7 @@ export function TrackUpload() {
       formData.append('file', track.file);
       formData.append('position', playlistPosition);
       formData.append('autoAddToLiveStream', autoAddToLiveStream.toString());
+      formData.append('generateWaveform', generateWaveform.toString());
 
       // Upload with progress
       const response = await api.uploadTrackFile(formData, (progress) => {
@@ -345,16 +348,43 @@ export function TrackUpload() {
           )}
         </div>
 
+        {/* Advanced Options */}
+        <div className="mt-4 p-4 bg-[#0a1628]/50 border border-slate-700 rounded-lg">
+          <h4 className="text-white font-medium mb-3 flex items-center gap-2">
+            <Music className="w-4 h-4" />
+            Advanced Options
+          </h4>
+          
+          <label className="flex items-center gap-3 cursor-pointer group">
+            <input
+              type="checkbox"
+              checked={generateWaveform}
+              onChange={(e) => setGenerateWaveform(e.target.checked)}
+              className="w-5 h-5 rounded border-2 border-slate-600 bg-slate-800 checked:bg-[#00d9ff] checked:border-[#00d9ff] transition-colors"
+            />
+            <div>
+              <p className="text-white font-medium group-hover:text-[#00d9ff] transition-colors">
+                Generate Waveform
+              </p>
+              <p className="text-xs text-slate-400">
+                Creates visual waveform data for each track (adds ~2-3 seconds per track)
+              </p>
+            </div>
+          </label>
+        </div>
+
         <div className="mt-4 p-3 bg-[#00d9ff]/5 border border-[#00d9ff]/20 rounded-lg">
           <div className="flex items-start gap-2">
             <AlertCircle className="w-4 h-4 text-[#00d9ff] mt-0.5 flex-shrink-0" />
             <div className="text-sm text-white/70">
-              <p className="font-semibold text-white mb-1">Automatic Processing:</p>
+              <p className="font-semibold text-white mb-1">🎵 Automatic ID3 Processing:</p>
               <ul className="space-y-1 text-xs">
-                <li>• ID3 tags (title, artist, album, duration) extracted automatically</li>
-                <li>• All tracks tagged with "NEWFUNK" for easy filtering</li>
-                <li>• Supported formats: MP3, WAV, M4A, FLAC</li>
-                <li>• Maximum 50 files per upload batch</li>
+                <li>✅ <strong>ID3 Tags:</strong> Title, Artist, Album, Genre, Year, BPM</li>
+                <li>✅ <strong>Cover Art:</strong> Extracted from ID3 or searched via MusicBrainz</li>
+                <li>✅ <strong>Duration:</strong> Precisely calculated from audio</li>
+                <li>✅ <strong>Auto-tagging:</strong> All tracks tagged with "NEWFUNK"</li>
+                <li>📊 <strong>Waveform:</strong> Optional visual data generation</li>
+                <li>💾 <strong>Formats:</strong> MP3, WAV, M4A, FLAC (max 50 files/batch)</li>
               </ul>
             </div>
           </div>
@@ -513,6 +543,21 @@ export function TrackUpload() {
 
                   {track.status === 'success' && (
                     <div className="space-y-2 mt-3 pt-3 border-t border-white/5">
+                      {/* Metadata Success Indicator */}
+                      {track.metadata && (
+                        <div className="flex items-center gap-2 p-2 bg-green-500/10 border border-green-500/30 rounded-lg">
+                          <CheckCircle2 className="w-4 h-4 text-green-400" />
+                          <span className="text-xs text-green-400 font-medium">
+                            ID3 Metadata Extracted
+                          </span>
+                          {track.metadata.genre && (
+                            <Badge className="bg-purple-500/20 text-purple-300 text-xs ml-auto">
+                              {track.metadata.genre}
+                            </Badge>
+                          )}
+                        </div>
+                      )}
+
                       {/* Tags */}
                       <div className="flex items-center gap-2 flex-wrap">
                         <Badge variant="outline" className="border-[#00ffaa]/30 text-[#00ffaa] text-xs">
@@ -616,6 +661,11 @@ export function TrackUpload() {
             </AnimatePresence>
           </div>
         </Card>
+      )}
+
+      {/* Metadata Extraction Demo */}
+      {uploadingTracks.length === 0 && (
+        <MetadataExtractionDemo />
       )}
     </div>
   );

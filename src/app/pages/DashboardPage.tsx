@@ -5,6 +5,9 @@ import { ListenerDashboard } from './dashboards/ListenerDashboard';
 import { SuperAdminDashboard } from './dashboards/SuperAdminDashboard';
 import { motion } from 'motion/react';
 import { Loader2 } from 'lucide-react';
+import { Navigation } from '../components/Navigation';
+import { RadioPlayer } from '../components/RadioPlayer';
+import { RealtimeIndicator } from '../components/RealtimeIndicator';
 
 export function DashboardPage() {
   const { user, loading } = useApp();
@@ -34,10 +37,19 @@ export function DashboardPage() {
   const renderDashboard = () => {
     switch (user.role) {
       case 'super_admin':
+        // SuperAdminDashboard has its own complete layout (header, navigation, etc.)
         return <SuperAdminDashboard />;
       case 'listener':
       default:
-        return <ListenerDashboard />;
+        // ListenerDashboard uses the public layout
+        return (
+          <div className="min-h-screen bg-gradient-to-br from-[#0a1628] via-[#0d1a2d] to-[#0a1628]">
+            <Navigation />
+            <RealtimeIndicator />
+            <ListenerDashboard />
+            <RadioPlayer />
+          </div>
+        );
     }
   };
 

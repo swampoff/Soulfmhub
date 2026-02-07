@@ -1,16 +1,16 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Link } from 'react-router';
-import { Play } from 'lucide-react';
-import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
+import { Button } from '../components/ui/button';
+import { Play } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { api } from '../../lib/api';
 import { motion } from 'motion/react';
 import soulFmLogo from 'figma:asset/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png';
-import { AnimatedPalm } from '../components/AnimatedPalm';
 import { FloatingParticles } from '../components/FloatingParticles';
 import { AnimatedBeach } from '../components/AnimatedBeach';
 import { AnimatedWaves } from '../components/AnimatedWaves';
+import { PublicNowPlayingWidget } from '../components/PublicNowPlayingWidget';
 
 export function HomePage() {
   const { nowPlaying, setIsPlaying } = useApp();
@@ -21,7 +21,7 @@ export function HomePage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#0a1628] via-[#0d1a2d] to-[#0a1628] relative overflow-hidden">
+    <div className="relative overflow-hidden">
       {/* Enhanced Background Pattern */}
       <div className="absolute inset-0">
         {/* Grid Pattern */}
@@ -103,12 +103,6 @@ export function HomePage() {
           }}
         />
       </div>
-
-      {/* Animated Palms - Left */}
-      <AnimatedPalm side="left" delay={0.3} />
-      
-      {/* Animated Palms - Right */}
-      <AnimatedPalm side="right" delay={0.5} />
 
       {/* ON AIR NOW Badge */}
       <motion.div
@@ -411,6 +405,16 @@ export function HomePage() {
           </Link>
         </motion.div>
 
+        {/* Now Playing Widget with Realtime */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.75 }}
+          className="mt-12 w-full max-w-lg"
+        >
+          <PublicNowPlayingWidget />
+        </motion.div>
+
         {/* Stats */}
         <motion.div
           initial={{ opacity: 0 }}
@@ -463,10 +467,6 @@ export function HomePage() {
           <div className="w-1.5 h-3 bg-[#00d9ff] rounded-full"></div>
         </motion.div>
       </motion.div>
-
-      {/* Animated Beach and Waves */}
-      <AnimatedBeach />
-      <AnimatedWaves />
     </div>
   );
 }

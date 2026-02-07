@@ -28,6 +28,34 @@ const STREAM_URL = 'твой-реальный-icecast-url';
 
 **Все данные хранятся в таблице:** `kv_store_06086aa3`
 
+**SQL Миграции:** ✅ ГОТОВЫ
+- 📄 `/supabase/migrations/00_initial_schema.sql` - Полная схема БД
+- 📄 `/supabase/migrations/01_admin_queries.sql` - Админские запросы
+- 📄 `/supabase/migrations/quick_setup.sql` - Быстрая установка одной командой
+- 📄 `/supabase/migrations/README.md` - Подробная документация
+
+**Применение миграций:**
+```bash
+# Вариант 1: Через Supabase Dashboard
+# SQL Editor → New Query → Вставь содержимое quick_setup.sql → RUN
+
+# Вариант 2: Через CLI
+supabase db push
+
+# Вариант 3: Автоматически при деплое
+# Figma Make применит миграции автоматически! 🎉
+```
+
+**Что создаёт миграция:**
+- ✅ Таблица `kv_store_06086aa3` (key TEXT, value JSONB)
+- ✅ 4 индекса (GIN для JSONB, prefix search, timestamps)
+- ✅ RLS политики (Service Role, Super Admin, Authenticated, Anonymous)
+- ✅ Триггеры (auto-update updated_at)
+- ✅ Helper функции (get_user_role, is_super_admin, search_kv_by_prefix)
+- ✅ Views для статистики (kv_stats, kv_recent_activity)
+- ✅ Функции обслуживания (cleanup_old_history, get_kv_store_size)
+- ✅ Начальные данные (stream:status, stream:nowplaying)
+
 ```typescript
 Структура ключей:
 ├── user:${userId}           // Профили пользователей

@@ -11,28 +11,27 @@ export function AnimatedPalm({ side, delay = 0 }: AnimatedPalmProps) {
   
   return (
     <motion.div
-      initial={{ opacity: 0, x: isLeft ? -100 : 100, y: 50 }}
+      initial={{ opacity: 1, x: 0, y: 0 }}
       animate={{ opacity: 1, x: 0, y: 0 }}
-      transition={{ duration: 1.5, delay, type: 'spring' }}
-      className={`absolute ${isLeft ? 'left-0' : 'right-0'} bottom-0 pointer-events-none ${isLeft ? '' : 'scale-x-[-1]'}`}
-      style={{ height: '70vh', width: 'auto' }}
+      className={`fixed ${isLeft ? 'left-0' : 'right-0'} pointer-events-none z-0 ${isLeft ? '' : 'scale-x-[-1]'}`}
+      style={{ height: '140vh', width: 'auto', bottom: '-50vh' }}
     >
-      <svg viewBox="0 0 300 600" fill="none" xmlns="http://www.w3.org/2000/svg" className="h-full w-auto">
+      <svg viewBox="0 0 300 1800" fill="none" xmlns="http://www.w3.org/2000/svg" className="h-full w-auto" preserveAspectRatio="xMidYMax meet">
         <defs>
           {/* Gradients for leaves */}
           <linearGradient id={`palmGradient1-${side}`} x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#00d9ff" stopOpacity="0.6"/>
-            <stop offset="50%" stopColor="#00ffaa" stopOpacity="0.4"/>
-            <stop offset="100%" stopColor="#00d9ff" stopOpacity="0.3"/>
+            <stop offset="0%" stopColor="#00d9ff" stopOpacity="0.9"/>
+            <stop offset="50%" stopColor="#00ffaa" stopOpacity="0.7"/>
+            <stop offset="100%" stopColor="#00d9ff" stopOpacity="0.6"/>
           </linearGradient>
           <linearGradient id={`palmGradient2-${side}`} x1="100%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stopColor="#00ffaa" stopOpacity="0.5"/>
-            <stop offset="50%" stopColor="#00d9ff" stopOpacity="0.4"/>
-            <stop offset="100%" stopColor="#00ffaa" stopOpacity="0.3"/>
+            <stop offset="0%" stopColor="#00ffaa" stopOpacity="0.8"/>
+            <stop offset="50%" stopColor="#00d9ff" stopOpacity="0.7"/>
+            <stop offset="100%" stopColor="#00ffaa" stopOpacity="0.6"/>
           </linearGradient>
           <linearGradient id={`trunkGradient-${side}`} x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stopColor="#0d4d4d" stopOpacity="0.4"/>
-            <stop offset="100%" stopColor="#083838" stopOpacity="0.6"/>
+            <stop offset="0%" stopColor="#0d4d4d" stopOpacity="0.8"/>
+            <stop offset="100%" stopColor="#083838" stopOpacity="0.9"/>
           </linearGradient>
         </defs>
         
@@ -48,12 +47,12 @@ export function AnimatedPalm({ side, delay = 0 }: AnimatedPalmProps) {
             ease: "easeInOut",
             delay: delay
           }}
-          style={{ transformOrigin: '150px 600px' }}
+          style={{ transformOrigin: '150px 1800px' }}
         >
           <path
-            d="M150 600 Q145 550 148 500 Q146 450 150 400 Q148 350 152 300 Q150 250 154 200 Q152 150 150 100"
+            d="M150 1800 Q145 1700 148 1600 Q146 1500 150 1400 Q148 1300 152 1200 Q150 1100 154 1000 Q152 900 150 800 Q148 700 152 600 Q150 500 154 400 Q152 300 150 200 Q148 150 152 100"
             stroke={`url(#trunkGradient-${side})`}
-            strokeWidth="12"
+            strokeWidth="16"
             fill="none"
             strokeLinecap="round"
           />

@@ -7,6 +7,12 @@ import * as profiles from "./profiles.ts";
 import * as podcasts from "./podcasts.ts";
 import { seedProfiles } from "./seed-profiles.ts";
 import { seedPodcasts } from "./seed-podcasts.ts";
+import { parseBuffer } from "npm:music-metadata@10";
+import { setupJinglesRoutes } from "./jingles.ts";
+import * as jingleRotation from "./jingle-rotation.ts";
+import * as autoDJHelper from "./auto-dj-helper.ts";
+import { extractCompleteMetadata } from "./metadata-utils.ts";
+import { setupAutomationRoutes } from "./content-automation-routes.ts";
 
 const app = new Hono();
 
@@ -28,6 +34,55 @@ const supabase = createClient(
   supabaseUrl ?? '',
   supabaseServiceKey ?? '',
 );
+
+// ==================== STORAGE SETUP ====================
+
+// Initialize Storage Buckets
+async function initializeStorageBuckets() {
+  try {
+    console.log('🗄️  Initializing storage buckets...');
+    
+    const bucketsToCreate = [
+      { name: 'make-06086aa3-tracks', public: false },
+      { name: 'make-06086aa3-covers', public: true },
+      { name: 'make-06086aa3-jingles', public: false },
+    ];
+
+    const { data: buckets } = await supabase.storage.listBuckets();
+    
+    for (const bucketConfig of bucketsToCreate) {
+      const bucketExists = buckets?.some(bucket => bucket.name === bucketConfig.name);
+      
+      if (bucketExists) {
+        console.log(`✅ Bucket exists: ${bucketConfig.name}`);
+        continue;
+      }
+      
+      const { error } = await supabase.storage.createBucket(bucketConfig.name, {
+        public: bucketConfig.public,
+        fileSizeLimit: bucketConfig.name.includes('tracks') ? 52428800 : 5242880, // 50MB for tracks, 5MB for covers
+        allowedMimeTypes: bucketConfig.name.includes('tracks') 
+          ? ['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audio/m4a', 'audio/flac']
+          : ['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
+      });
+      
+      if (error) {
+        // Ignore "already exists" errors (409)
+        if (error.statusCode === '409' || error.message?.includes('already exists')) {
+          console.log(`✅ Bucket exists: ${bucketConfig.name}`);
+        } else {
+          console.error(`❌ Error creating bucket ${bucketConfig.name}:`, error);
+        }
+      } else {
+        console.log(`✅ Created bucket: ${bucketConfig.name}`);
+      }
+    }
+    
+    console.log('✅ Storage buckets initialized');
+  } catch (error) {
+    console.error('❌ Error initializing storage buckets:', error);
+  }
+}
 
 // Enable logger
 app.use('*', logger(console.log));
@@ -60,6 +115,12 @@ async function requireAuth(c: any, next: any) {
   c.set('user', user);
   await next();
 }
+
+// Setup Jingles routes
+setupJinglesRoutes(app, supabase, requireAuth);
+
+// Setup Content Automation routes
+setupAutomationRoutes(app, supabase, requireAuth);
 
 // Health check endpoint
 app.get("/make-server-06086aa3/health", (c) => {
@@ -190,8 +251,151 @@ let autoDJState = {
   currentTrack: null as any,
   playlistTracks: [] as any[],
   startTime: null as string | null,
-  listeners: 0
+  currentTrackStartTime: null as string | null,
+  listeners: 0,
+  autoAdvance: true,
+  pendingJingle: null as any, // Jingle waiting to be played
+  isPlayingJingle: false, // Currently playing a jingle
 };
+
+// Auto-advance tracks
+async function checkAndAdvanceTrack() {
+  if (!autoDJState.isPlaying || !autoDJState.currentTrack || !autoDJState.currentTrackStartTime) {
+    return;
+  }
+
+  const now = new Date();
+  const trackStartTime = new Date(autoDJState.currentTrackStartTime);
+  const trackDuration = autoDJState.currentTrack.duration || 180;
+  const elapsedSeconds = Math.floor((now.getTime() - trackStartTime.getTime()) / 1000);
+
+  if (elapsedSeconds >= trackDuration - 5) {
+    console.log(`⏭️  Auto-advancing from "${autoDJState.currentTrack.title}"`);
+    
+    // 🔔 CHECK FOR JINGLES BEFORE PLAYING NEXT TRACK
+    const jingle = await autoDJHelper.checkAndPlayJingle(autoDJState);
+    
+    if (jingle) {
+      // Play jingle instead of next track
+      console.log(`🔔 Playing jingle: "${jingle.title}"`);
+      autoDJState.isPlayingJingle = true;
+      autoDJState.currentTrack = {
+        id: jingle.id,
+        title: `🔔 ${jingle.title}`,
+        artist: 'Station ID',
+        album: jingle.category.replace(/_/g, ' '),
+        duration: jingle.duration,
+        coverUrl: null,
+        isJingle: true
+      };
+      autoDJState.currentTrackStartTime = new Date().toISOString();
+      
+      // Update Now Playing with jingle
+      await autoDJHelper.updateNowPlayingWithJingle(jingle);
+      
+      // Mark jingle as played
+      await jingleRotation.markJinglePlayed(jingle.id);
+      
+      console.log(`✅ Now playing jingle: "${jingle.title}"`);
+      return;
+    }
+    
+    // No jingle to play, continue with regular track
+    autoDJState.isPlayingJingle = false;
+    
+    // Increment track count for jingle rules
+    autoDJHelper.incrementMusicTrackCount();
+    
+    const currentSchedule = await getCurrentScheduledPlaylist();
+    
+    if (currentSchedule) {
+      console.log(`📅 Schedule: "${currentSchedule.title}"`);
+      const playlist = await kv.get(`playlist:${currentSchedule.playlistId}`);
+      if (playlist && playlist.trackIds && playlist.trackIds.length > 0) {
+        const tracks = [];
+        for (const trackId of playlist.trackIds) {
+          const track = await kv.get(`track:${trackId}`);
+          if (track) tracks.push(track);
+        }
+        if (tracks.length > 0) {
+          autoDJState.playlistTracks = tracks;
+          autoDJState.currentTrackIndex = 0;
+        }
+      }
+    }
+    
+    autoDJState.currentTrackIndex = (autoDJState.currentTrackIndex + 1) % autoDJState.playlistTracks.length;
+    autoDJState.currentTrack = autoDJState.playlistTracks[autoDJState.currentTrackIndex];
+    autoDJState.currentTrackStartTime = new Date().toISOString();
+    
+    await kv.set('stream:nowplaying', {
+      track: {
+        id: autoDJState.currentTrack.id,
+        title: autoDJState.currentTrack.title,
+        artist: autoDJState.currentTrack.artist,
+        album: autoDJState.currentTrack.album,
+        duration: autoDJState.currentTrack.duration,
+        cover: autoDJState.currentTrack.coverUrl
+      },
+      startTime: autoDJState.currentTrackStartTime,
+      updatedAt: new Date().toISOString()
+    });
+    
+    // Broadcast track change via Supabase Realtime
+    try {
+      const channel = supabase.channel('radio-updates');
+      await channel.send({
+        type: 'broadcast',
+        event: 'track-changed',
+        payload: {
+          track: {
+            id: autoDJState.currentTrack.id,
+            title: autoDJState.currentTrack.title,
+            artist: autoDJState.currentTrack.artist,
+            album: autoDJState.currentTrack.album,
+            duration: autoDJState.currentTrack.duration,
+            cover: autoDJState.currentTrack.coverUrl
+          },
+          startTime: autoDJState.currentTrackStartTime,
+          updatedAt: new Date().toISOString()
+        }
+      });
+      console.log('📡 Broadcast: Track change sent');
+    } catch (broadcastError) {
+      console.error('Broadcast error:', broadcastError);
+    }
+    
+    console.log(`✅ Now playing: "${autoDJState.currentTrack.title}"`);
+  }
+}
+
+async function getCurrentScheduledPlaylist() {
+  try {
+    const allSchedules = await kv.getByPrefix('schedule:');
+    const now = new Date();
+    const currentDay = now.getDay();
+    const currentTime = now.toTimeString().slice(0, 5);
+    
+    for (const schedule of allSchedules) {
+      if (!schedule.isActive) continue;
+      if (schedule.dayOfWeek !== null && schedule.dayOfWeek !== currentDay) continue;
+      if (currentTime >= schedule.startTime && currentTime < schedule.endTime) {
+        const playlist = await kv.get(`playlist:${schedule.playlistId}`);
+        return { ...schedule, playlistName: playlist?.name || 'Unknown' };
+      }
+    }
+    return null;
+  } catch (error) {
+    console.error('Error getting schedule:', error);
+    return null;
+  }
+}
+
+setInterval(() => {
+  if (autoDJState.autoAdvance) {
+    checkAndAdvanceTrack().catch(error => console.error('Auto-advance error:', error));
+  }
+}, 10000);
 
 // Start Auto DJ
 app.post("/make-server-06086aa3/radio/start", requireAuth, async (c) => {
@@ -223,7 +427,9 @@ app.post("/make-server-06086aa3/radio/start", requireAuth, async (c) => {
       currentTrack: tracks[0],
       playlistTracks: tracks,
       startTime: new Date().toISOString(),
-      listeners: 0
+      currentTrackStartTime: new Date().toISOString(),
+      listeners: 0,
+      autoAdvance: true
     };
 
     // Update Now Playing
@@ -250,6 +456,29 @@ app.post("/make-server-06086aa3/radio/start", requireAuth, async (c) => {
     });
 
     console.log('🎵 Auto DJ started with', tracks.length, 'tracks');
+
+    // Broadcast start event
+    try {
+      const channel = supabase.channel('radio-updates');
+      await channel.send({
+        type: 'broadcast',
+        event: 'track-changed',
+        payload: {
+          track: {
+            id: tracks[0].id,
+            title: tracks[0].title,
+            artist: tracks[0].artist,
+            album: tracks[0].album,
+            duration: tracks[0].duration,
+            cover: tracks[0].coverUrl
+          },
+          startTime: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        }
+      });
+    } catch (broadcastError) {
+      console.error('Broadcast error:', broadcastError);
+    }
 
     return c.json({ 
       message: 'Auto DJ started successfully',
@@ -291,9 +520,49 @@ app.post("/make-server-06086aa3/radio/next", requireAuth, async (c) => {
       return c.json({ error: 'Auto DJ is not running' }, 400);
     }
 
+    // 🔔 CHECK FOR JINGLES BEFORE SKIPPING TO NEXT TRACK
+    const jingle = await autoDJHelper.checkAndPlayJingle(autoDJState);
+    
+    if (jingle) {
+      // Play jingle instead of next track
+      console.log(`🔔 Playing jingle: "${jingle.title}"`);
+      autoDJState.isPlayingJingle = true;
+      autoDJState.currentTrack = {
+        id: jingle.id,
+        title: `🔔 ${jingle.title}`,
+        artist: 'Station ID',
+        album: jingle.category.replace(/_/g, ' '),
+        duration: jingle.duration,
+        coverUrl: null,
+        isJingle: true
+      };
+      autoDJState.currentTrackStartTime = new Date().toISOString();
+      
+      // Update Now Playing with jingle
+      await autoDJHelper.updateNowPlayingWithJingle(jingle);
+      
+      // Mark jingle as played
+      await jingleRotation.markJinglePlayed(jingle.id);
+      
+      console.log(`✅ Skipped to jingle: "${jingle.title}"`);
+      
+      return c.json({ 
+        message: 'Playing jingle',
+        currentTrack: autoDJState.currentTrack,
+        isJingle: true
+      });
+    }
+
+    // No jingle, skip to next track
+    autoDJState.isPlayingJingle = false;
+    
+    // Increment track count
+    autoDJHelper.incrementMusicTrackCount();
+    
     // Move to next track
     autoDJState.currentTrackIndex = (autoDJState.currentTrackIndex + 1) % autoDJState.playlistTracks.length;
     autoDJState.currentTrack = autoDJState.playlistTracks[autoDJState.currentTrackIndex];
+    autoDJState.currentTrackStartTime = new Date().toISOString();
 
     // Update Now Playing
     await kv.set('stream:nowplaying', {
@@ -311,6 +580,29 @@ app.post("/make-server-06086aa3/radio/next", requireAuth, async (c) => {
 
     console.log('⏭️ Skipped to next track:', autoDJState.currentTrack.title);
 
+    // Broadcast skip event
+    try {
+      const channel = supabase.channel('radio-updates');
+      await channel.send({
+        type: 'broadcast',
+        event: 'track-changed',
+        payload: {
+          track: {
+            id: autoDJState.currentTrack.id,
+            title: autoDJState.currentTrack.title,
+            artist: autoDJState.currentTrack.artist,
+            album: autoDJState.currentTrack.album,
+            duration: autoDJState.currentTrack.duration,
+            cover: autoDJState.currentTrack.coverUrl
+          },
+          startTime: autoDJState.currentTrackStartTime,
+          updatedAt: new Date().toISOString()
+        }
+      });
+    } catch (broadcastError) {
+      console.error('Broadcast error:', broadcastError);
+    }
+
     return c.json({ 
       message: 'Skipped to next track',
       currentTrack: autoDJState.currentTrack
@@ -326,6 +618,20 @@ app.get("/make-server-06086aa3/radio/status", async (c) => {
   try {
     const nowPlaying = await kv.get('stream:nowplaying');
     const streamStatus = await kv.get('stream:status');
+    
+    // Calculate track progress
+    let trackProgress = 0;
+    let elapsedSeconds = 0;
+    if (autoDJState.isPlaying && autoDJState.currentTrackStartTime && autoDJState.currentTrack) {
+      const now = new Date();
+      const trackStartTime = new Date(autoDJState.currentTrackStartTime);
+      elapsedSeconds = Math.floor((now.getTime() - trackStartTime.getTime()) / 1000);
+      const trackDuration = autoDJState.currentTrack.duration || 180;
+      trackProgress = Math.min((elapsedSeconds / trackDuration) * 100, 100);
+    }
+    
+    // Get current schedule
+    const currentSchedule = await getCurrentScheduledPlaylist();
 
     return c.json({
       autoDJ: {
@@ -333,7 +639,12 @@ app.get("/make-server-06086aa3/radio/status", async (c) => {
         currentTrack: autoDJState.currentTrack,
         currentTrackIndex: autoDJState.currentTrackIndex,
         totalTracks: autoDJState.playlistTracks.length,
-        startTime: autoDJState.startTime
+        startTime: autoDJState.startTime,
+        currentTrackStartTime: autoDJState.currentTrackStartTime,
+        trackProgress,
+        elapsedSeconds,
+        autoAdvance: autoDJState.autoAdvance,
+        currentSchedule
       },
       nowPlaying,
       streamStatus
@@ -627,6 +938,245 @@ app.delete("/make-server-06086aa3/tracks/:id", requireAuth, async (c) => {
   } catch (error) {
     console.error('Delete track error:', error);
     return c.json({ error: `Delete track error: ${error.message}` }, 500);
+  }
+});
+
+// Bulk update tags
+app.post("/make-server-06086aa3/tracks/bulk-update-tags", requireAuth, async (c) => {
+  try {
+    const body = await c.req.json();
+    const { trackIds, action, tags } = body;
+
+    if (!trackIds || !Array.isArray(trackIds) || trackIds.length === 0) {
+      return c.json({ error: 'trackIds array is required' }, 400);
+    }
+
+    if (!action || !['add', 'remove', 'replace'].includes(action)) {
+      return c.json({ error: 'action must be "add", "remove", or "replace"' }, 400);
+    }
+
+    if (!tags || !Array.isArray(tags)) {
+      return c.json({ error: 'tags array is required' }, 400);
+    }
+
+    let updatedCount = 0;
+    for (const trackId of trackIds) {
+      const track = await kv.get(`track:${trackId}`);
+      if (!track) {
+        console.warn(`Track ${trackId} not found, skipping`);
+        continue;
+      }
+
+      let newTags = track.tags || [];
+      
+      if (action === 'add') {
+        // Add tags (avoid duplicates)
+        const tagsSet = new Set([...newTags, ...tags]);
+        newTags = Array.from(tagsSet);
+      } else if (action === 'remove') {
+        // Remove tags
+        newTags = newTags.filter(tag => !tags.includes(tag));
+      } else if (action === 'replace') {
+        // Replace all tags
+        newTags = [...tags];
+      }
+
+      const updatedTrack = {
+        ...track,
+        tags: newTags,
+        updatedAt: new Date().toISOString()
+      };
+
+      await kv.set(`track:${trackId}`, updatedTrack);
+      updatedCount++;
+    }
+
+    return c.json({ 
+      message: `Successfully updated tags for ${updatedCount} track(s)`,
+      updatedCount 
+    });
+  } catch (error) {
+    console.error('Bulk update tags error:', error);
+    return c.json({ error: `Bulk update tags error: ${error.message}` }, 500);
+  }
+});
+
+// Upload cover image for track
+app.post("/make-server-06086aa3/tracks/:id/cover", requireAuth, async (c) => {
+  try {
+    const trackId = c.req.param('id');
+    const formData = await c.req.formData();
+    const file = formData.get('cover') as File;
+    
+    if (!file) {
+      return c.json({ error: 'No file provided' }, 400);
+    }
+
+    // Validate file type
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    if (!allowedTypes.includes(file.type)) {
+      return c.json({ error: 'Invalid file type. Only JPEG, PNG, and WebP are supported.' }, 400);
+    }
+
+    // Validate file size (5MB max)
+    if (file.size > 5242880) {
+      return c.json({ error: 'File too large. Maximum size is 5MB.' }, 400);
+    }
+
+    // Get track to verify it exists
+    const track = await kv.get(`track:${trackId}`);
+    if (!track) {
+      return c.json({ error: 'Track not found' }, 404);
+    }
+
+    // Generate unique filename
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${trackId}-${Date.now()}.${fileExt}`;
+    
+    // Convert File to ArrayBuffer
+    const arrayBuffer = await file.arrayBuffer();
+    const uint8Array = new Uint8Array(arrayBuffer);
+
+    // Upload to Supabase Storage
+    const { data, error } = await supabase.storage
+      .from('make-06086aa3-covers')
+      .upload(fileName, uint8Array, {
+        contentType: file.type,
+        upsert: true
+      });
+
+    if (error) {
+      console.error('Storage upload error:', error);
+      return c.json({ error: `Failed to upload cover: ${error.message}` }, 500);
+    }
+
+    // Get public URL
+    const { data: { publicUrl } } = supabase.storage
+      .from('make-06086aa3-covers')
+      .getPublicUrl(fileName);
+
+    // Update track with new cover URL
+    const updatedTrack = {
+      ...track,
+      coverUrl: publicUrl,
+      updatedAt: new Date().toISOString()
+    };
+    await kv.set(`track:${trackId}`, updatedTrack);
+
+    console.log(`✅ Cover uploaded for track ${trackId}: ${publicUrl}`);
+
+    return c.json({ 
+      message: 'Cover uploaded successfully',
+      coverUrl: publicUrl,
+      track: updatedTrack
+    });
+  } catch (error) {
+    console.error('Upload cover error:', error);
+    return c.json({ error: `Upload cover error: ${error.message}` }, 500);
+  }
+});
+
+// Extract metadata from audio file endpoint (for re-processing existing tracks)
+app.post("/make-server-06086aa3/tracks/:id/extract-metadata", requireAuth, async (c) => {
+  try {
+    const trackId = c.req.param('id');
+    
+    // Get track
+    const track = await kv.get(`track:${trackId}`);
+    if (!track) {
+      return c.json({ error: 'Track not found' }, 404);
+    }
+
+    // Download audio file from storage
+    if (!track.storageFilename || !track.storageBucket) {
+      return c.json({ error: 'Track has no associated audio file in storage' }, 400);
+    }
+
+    const { data: fileData, error: downloadError } = await supabase.storage
+      .from(track.storageBucket)
+      .download(track.storageFilename);
+
+    if (downloadError || !fileData) {
+      console.error('Download error:', downloadError);
+      return c.json({ error: 'Failed to download audio file for processing' }, 500);
+    }
+
+    // Convert Blob to ArrayBuffer
+    const arrayBuffer = await fileData.arrayBuffer();
+    const uint8Array = new Uint8Array(arrayBuffer);
+
+    // Extract metadata
+    let extractedMetadata: any = {};
+    try {
+      const metadata = await parseBuffer(uint8Array, fileData.type, { duration: true });
+      
+      if (metadata) {
+        extractedMetadata = {
+          title: metadata.common.title || track.title,
+          artist: metadata.common.artist || metadata.common.albumartist || track.artist,
+          album: metadata.common.album || track.album,
+          genre: metadata.common.genre?.[0] || track.genre,
+          year: metadata.common.year || track.year,
+          bpm: metadata.common.bpm || track.bpm,
+          duration: metadata.format.duration ? Math.floor(metadata.format.duration) : track.duration,
+          composer: metadata.common.composer?.[0],
+          label: metadata.common.label?.[0],
+          isrc: metadata.common.isrc?.[0],
+        };
+
+        // Extract and upload cover art if available
+        if (metadata.common.picture && metadata.common.picture.length > 0) {
+          const picture = metadata.common.picture[0];
+          const coverBuffer = picture.data;
+          const coverExt = picture.format.split('/')[1] || 'jpg';
+          const timestamp = Date.now();
+          const randomString = Math.random().toString(36).substring(7);
+          const coverFilename = `cover-${trackId}-${timestamp}.${coverExt}`;
+          
+          const { error: coverUploadError } = await supabase.storage
+            .from('make-06086aa3-covers')
+            .upload(coverFilename, coverBuffer, {
+              contentType: picture.format,
+              upsert: true
+            });
+          
+          if (!coverUploadError) {
+            const { data: coverUrlData } = supabase.storage
+              .from('make-06086aa3-covers')
+              .getPublicUrl(coverFilename);
+            extractedMetadata.coverUrl = coverUrlData.publicUrl;
+          }
+        }
+
+        console.log('✅ Metadata extracted for track:', trackId, extractedMetadata);
+      }
+    } catch (metadataError) {
+      console.error('Metadata extraction error:', metadataError);
+      return c.json({ 
+        error: 'Failed to extract metadata from audio file',
+        details: metadataError.message 
+      }, 500);
+    }
+
+    // Update track with extracted metadata (only update fields that are not empty)
+    const updatedTrack = {
+      ...track,
+      ...Object.fromEntries(
+        Object.entries(extractedMetadata).filter(([_, v]) => v != null && v !== '')
+      ),
+      updatedAt: new Date().toISOString()
+    };
+
+    await kv.set(`track:${trackId}`, updatedTrack);
+
+    return c.json({ 
+      message: 'Metadata extracted and updated successfully',
+      metadata: extractedMetadata,
+      track: updatedTrack
+    });
+  } catch (error) {
+    console.error('Extract metadata error:', error);
+    return c.json({ error: `Extract metadata error: ${error.message}` }, 500);
   }
 });
 
@@ -1447,30 +1997,43 @@ app.post("/make-server-06086aa3/tracks/upload", requireAuth, async (c) => {
     
     const audioUrl = urlData.publicUrl;
     
-    // Extract metadata from filename (basic extraction)
-    const originalName = file.name.replace(/\.(mp3|wav|m4a|flac)$/i, '');
-    const parts = originalName.split(' - ');
+    // 🎵 Extract complete metadata with ID3 tags, cover art search, and waveform
+    console.log('🎵 Starting complete metadata extraction...');
+    const enableWaveform = formData.get('generateWaveform') === 'true';
     
-    let title = originalName;
-    let artist = 'Unknown Artist';
+    const { metadata: extractedMetadata, coverUrl, waveform } = await extractCompleteMetadata(
+      supabase,
+      fileBuffer,
+      file.type,
+      file.name,
+      {
+        searchOnline: true, // Search MusicBrainz if no embedded cover
+        generateWaveform: enableWaveform, // Optional waveform generation
+        waveformSamples: 100
+      }
+    );
     
-    if (parts.length >= 2) {
-      artist = parts[0].trim();
-      title = parts.slice(1).join(' - ').trim();
-    }
-    
-    // Estimate duration (rough estimate based on file size, not accurate)
-    const estimatedDuration = Math.floor(file.size / 16000); // Rough estimate for 128kbps MP3
+    const {
+      title,
+      artist,
+      album,
+      genre,
+      year,
+      duration,
+      bpm
+    } = extractedMetadata;
     
     const metadata = {
       title,
       artist,
-      album: '',
-      duration: estimatedDuration,
-      genre: 'Funk', // Default genre
-      year: new Date().getFullYear(),
-      coverUrl: '',
+      album,
+      duration,
+      genre,
+      year,
+      bpm,
+      coverUrl,
       audioUrl,
+      waveform, // Waveform data for visualization
       shortId, // Short link ID
       streamUrl: `https://soulfm.stream/${shortId}`, // Full streaming URL
       storageFilename: filename, // Original storage filename
@@ -1751,5 +2314,520 @@ app.get("/make-server-06086aa3/admin/user-by-email", async (c) => {
     return c.json({ error: `Failed to get user: ${error.message}` }, 500);
   }
 });
+
+// ==================== PLAYLISTS API ====================
+
+// Get all playlists
+app.get("/make-server-06086aa3/playlists", async (c) => {
+  try {
+    const allPlaylists = await kv.getByPrefix('playlist:');
+    const playlists = allPlaylists.filter(p => p.id !== 'livestream'); // Exclude livestream from general list
+    
+    return c.json({ 
+      playlists: playlists.sort((a, b) => 
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      )
+    });
+  } catch (error: any) {
+    console.error('Get playlists error:', error);
+    return c.json({ error: `Failed to get playlists: ${error.message}` }, 500);
+  }
+});
+
+// Create playlist
+app.post("/make-server-06086aa3/playlists", requireAuth, async (c) => {
+  try {
+    const body = await c.req.json();
+    const { name, description, color, genre } = body;
+    
+    if (!name || !name.trim()) {
+      return c.json({ error: 'Playlist name is required' }, 400);
+    }
+    
+    const playlistId = `playlist_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    const playlist = {
+      id: playlistId,
+      name: name.trim(),
+      description: description || '',
+      color: color || '#00d9ff',
+      genre: genre || '',
+      trackIds: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    
+    await kv.set(`playlist:${playlistId}`, playlist);
+    
+    return c.json({ 
+      message: 'Playlist created successfully',
+      playlist
+    });
+  } catch (error: any) {
+    console.error('Create playlist error:', error);
+    return c.json({ error: `Failed to create playlist: ${error.message}` }, 500);
+  }
+});
+
+// Update playlist
+app.put("/make-server-06086aa3/playlists/:id", requireAuth, async (c) => {
+  try {
+    const id = c.req.param('id');
+    const body = await c.req.json();
+    
+    const playlist = await kv.get(`playlist:${id}`);
+    if (!playlist) {
+      return c.json({ error: 'Playlist not found' }, 404);
+    }
+    
+    const updatedPlaylist = {
+      ...playlist,
+      name: body.name !== undefined ? body.name : playlist.name,
+      description: body.description !== undefined ? body.description : playlist.description,
+      color: body.color !== undefined ? body.color : playlist.color,
+      genre: body.genre !== undefined ? body.genre : playlist.genre,
+      updatedAt: new Date().toISOString()
+    };
+    
+    await kv.set(`playlist:${id}`, updatedPlaylist);
+    
+    return c.json({ 
+      message: 'Playlist updated successfully',
+      playlist: updatedPlaylist
+    });
+  } catch (error: any) {
+    console.error('Update playlist error:', error);
+    return c.json({ error: `Failed to update playlist: ${error.message}` }, 500);
+  }
+});
+
+// Delete playlist
+app.delete("/make-server-06086aa3/playlists/:id", requireAuth, async (c) => {
+  try {
+    const id = c.req.param('id');
+    
+    // Don't allow deleting the livestream playlist
+    if (id === 'livestream') {
+      return c.json({ error: 'Cannot delete the Live Stream playlist' }, 400);
+    }
+    
+    const playlist = await kv.get(`playlist:${id}`);
+    if (!playlist) {
+      return c.json({ error: 'Playlist not found' }, 404);
+    }
+    
+    await kv.del(`playlist:${id}`);
+    
+    return c.json({ message: 'Playlist deleted successfully' });
+  } catch (error: any) {
+    console.error('Delete playlist error:', error);
+    return c.json({ error: `Failed to delete playlist: ${error.message}` }, 500);
+  }
+});
+
+// ==================== SCHEDULE API ====================
+
+// Get all schedules
+app.get("/make-server-06086aa3/schedule", async (c) => {
+  try {
+    const allSchedules = await kv.getByPrefix('schedule:');
+    
+    // Load playlist info for each schedule
+    const schedulesWithPlaylists = await Promise.all(
+      allSchedules.map(async (schedule) => {
+        const playlist = await kv.get(`playlist:${schedule.playlistId}`);
+        return {
+          ...schedule,
+          playlistName: playlist?.name || 'Unknown',
+          playlistColor: playlist?.color || '#00d9ff'
+        };
+      })
+    );
+    
+    return c.json({ 
+      schedules: schedulesWithPlaylists.sort((a, b) => {
+        // Sort by day of week, then by start time
+        if (a.dayOfWeek === null && b.dayOfWeek !== null) return -1;
+        if (a.dayOfWeek !== null && b.dayOfWeek === null) return 1;
+        if (a.dayOfWeek !== b.dayOfWeek) return (a.dayOfWeek || 0) - (b.dayOfWeek || 0);
+        return a.startTime.localeCompare(b.startTime);
+      })
+    });
+  } catch (error: any) {
+    console.error('Get schedules error:', error);
+    return c.json({ error: `Failed to get schedules: ${error.message}` }, 500);
+  }
+});
+
+// Create schedule
+app.post("/make-server-06086aa3/schedule", requireAuth, async (c) => {
+  try {
+    const body = await c.req.json();
+    const { playlistId, dayOfWeek, startTime, endTime, title, isActive, repeatWeekly } = body;
+    
+    if (!playlistId || !startTime || !endTime || !title) {
+      return c.json({ error: 'Missing required fields' }, 400);
+    }
+    
+    // Verify playlist exists
+    const playlist = await kv.get(`playlist:${playlistId}`);
+    if (!playlist) {
+      return c.json({ error: 'Playlist not found' }, 404);
+    }
+    
+    const scheduleId = `schedule_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    const schedule = {
+      id: scheduleId,
+      playlistId,
+      dayOfWeek: dayOfWeek !== undefined && dayOfWeek !== null ? parseInt(dayOfWeek) : null,
+      startTime,
+      endTime,
+      title,
+      isActive: isActive !== undefined ? isActive : true,
+      repeatWeekly: repeatWeekly !== undefined ? repeatWeekly : true,
+      createdAt: new Date().toISOString()
+    };
+    
+    await kv.set(`schedule:${scheduleId}`, schedule);
+    
+    return c.json({ 
+      message: 'Schedule created successfully',
+      schedule
+    });
+  } catch (error: any) {
+    console.error('Create schedule error:', error);
+    return c.json({ error: `Failed to create schedule: ${error.message}` }, 500);
+  }
+});
+
+// Update schedule
+app.put("/make-server-06086aa3/schedule/:id", requireAuth, async (c) => {
+  try {
+    const id = c.req.param('id');
+    const body = await c.req.json();
+    
+    const schedule = await kv.get(`schedule:${id}`);
+    if (!schedule) {
+      return c.json({ error: 'Schedule not found' }, 404);
+    }
+    
+    // Verify playlist exists if changed
+    if (body.playlistId && body.playlistId !== schedule.playlistId) {
+      const playlist = await kv.get(`playlist:${body.playlistId}`);
+      if (!playlist) {
+        return c.json({ error: 'Playlist not found' }, 404);
+      }
+    }
+    
+    const updatedSchedule = {
+      ...schedule,
+      playlistId: body.playlistId !== undefined ? body.playlistId : schedule.playlistId,
+      dayOfWeek: body.dayOfWeek !== undefined ? (body.dayOfWeek !== null ? parseInt(body.dayOfWeek) : null) : schedule.dayOfWeek,
+      startTime: body.startTime !== undefined ? body.startTime : schedule.startTime,
+      endTime: body.endTime !== undefined ? body.endTime : schedule.endTime,
+      title: body.title !== undefined ? body.title : schedule.title,
+      isActive: body.isActive !== undefined ? body.isActive : schedule.isActive,
+      repeatWeekly: body.repeatWeekly !== undefined ? body.repeatWeekly : schedule.repeatWeekly,
+      updatedAt: new Date().toISOString()
+    };
+    
+    await kv.set(`schedule:${id}`, updatedSchedule);
+    
+    return c.json({ 
+      message: 'Schedule updated successfully',
+      schedule: updatedSchedule
+    });
+  } catch (error: any) {
+    console.error('Update schedule error:', error);
+    return c.json({ error: `Failed to update schedule: ${error.message}` }, 500);
+  }
+});
+
+// Delete schedule
+app.delete("/make-server-06086aa3/schedule/:id", requireAuth, async (c) => {
+  try {
+    const id = c.req.param('id');
+    
+    const schedule = await kv.get(`schedule:${id}`);
+    if (!schedule) {
+      return c.json({ error: 'Schedule not found' }, 404);
+    }
+    
+    await kv.del(`schedule:${id}`);
+    
+    return c.json({ message: 'Schedule deleted successfully' });
+  } catch (error: any) {
+    console.error('Delete schedule error:', error);
+    return c.json({ error: `Failed to delete schedule: ${error.message}` }, 500);
+  }
+});
+
+// ==================== ANALYTICS: ACTIVE LISTENERS ====================
+
+// Get active listeners with geolocation
+app.get("/make-server-06086aa3/analytics/active-listeners", requireAuth, async (c) => {
+  try {
+    // Get active listeners from KV store
+    const listeners = await kv.getByPrefix('listener:active:');
+    
+    // Transform to array with geolocation data
+    const activeListeners = listeners.map((entry: any) => entry.value).filter((l: any) => {
+      // Filter out listeners that have been inactive for more than 5 minutes
+      const inactiveTime = Date.now() - new Date(l.lastSeen).getTime();
+      return inactiveTime < 5 * 60 * 1000; // 5 minutes
+    });
+    
+    return c.json({
+      listeners: activeListeners,
+      total: activeListeners.length,
+      countries: [...new Set(activeListeners.map((l: any) => l.country))].length
+    });
+  } catch (error: any) {
+    console.error('Get active listeners error:', error);
+    return c.json({ error: `Failed to get active listeners: ${error.message}` }, 500);
+  }
+});
+
+// Track listener connection (called when someone starts listening)
+app.post("/make-server-06086aa3/analytics/listener-connect", async (c) => {
+  try {
+    const clientIP = c.req.header('x-forwarded-for') || c.req.header('x-real-ip') || 'unknown';
+    
+    // Try to get geolocation from IP (using ipapi.co or similar service)
+    let geoData = {
+      country: 'Unknown',
+      city: 'Unknown',
+      coordinates: [0, 0] as [number, number]
+    };
+    
+    try {
+      // Use free IP geolocation API
+      const geoResponse = await fetch(`https://ipapi.co/${clientIP}/json/`);
+      if (geoResponse.ok) {
+        const geo = await geoResponse.json();
+        geoData = {
+          country: geo.country_name || 'Unknown',
+          city: geo.city || 'Unknown',
+          coordinates: [geo.longitude || 0, geo.latitude || 0]
+        };
+      }
+    } catch (geoError) {
+      console.warn('Geolocation lookup failed:', geoError);
+      // Use default values
+    }
+    
+    const listenerId = `listener_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const listener = {
+      id: listenerId,
+      country: geoData.country,
+      city: geoData.city,
+      coordinates: geoData.coordinates,
+      connectedAt: new Date().toISOString(),
+      lastSeen: new Date().toISOString(),
+      userAgent: c.req.header('user-agent') || 'Unknown',
+      ip: clientIP
+    };
+    
+    await kv.set(`listener:active:${listenerId}`, listener);
+    
+    console.log(`📻 New listener connected from ${listener.city}, ${listener.country}`);
+    
+    return c.json({ 
+      message: 'Listener tracked',
+      listenerId 
+    });
+  } catch (error: any) {
+    console.error('Track listener error:', error);
+    return c.json({ error: `Failed to track listener: ${error.message}` }, 500);
+  }
+});
+
+// Update listener heartbeat
+app.post("/make-server-06086aa3/analytics/listener-heartbeat/:id", async (c) => {
+  try {
+    const listenerId = c.req.param('id');
+    const listener = await kv.get(`listener:active:${listenerId}`);
+    
+    if (listener) {
+      listener.lastSeen = new Date().toISOString();
+      await kv.set(`listener:active:${listenerId}`, listener);
+    }
+    
+    return c.json({ message: 'Heartbeat updated' });
+  } catch (error: any) {
+    console.error('Update heartbeat error:', error);
+    return c.json({ error: `Failed to update heartbeat: ${error.message}` }, 500);
+  }
+});
+
+// ==================== ANALYTICS: USAGE STATS ====================
+
+// Get usage statistics (Storage & Bandwidth)
+app.get("/make-server-06086aa3/analytics/usage", requireAuth, async (c) => {
+  try {
+    // Get all tracks to calculate storage usage
+    const tracks = await kv.getByPrefix('track:');
+    const totalTracks = tracks.length;
+    
+    // Calculate approximate storage (rough estimate based on average file size)
+    // Average MP3 file size: ~4-5 MB per track
+    const averageTrackSize = 4.5; // MB
+    const estimatedStorageUsed = (totalTracks * averageTrackSize) / 1024; // Convert to GB
+    
+    // Get active listeners and calculate bandwidth
+    const listeners = await kv.getByPrefix('listener:active:');
+    const activeListeners = listeners.filter((entry: any) => {
+      const inactiveTime = Date.now() - new Date(entry.value.lastSeen).getTime();
+      return inactiveTime < 5 * 60 * 1000; // 5 minutes
+    });
+    
+    // Calculate approximate bandwidth
+    // Average streaming bitrate: 128 kbps = 0.96 MB/min = 57.6 MB/hour
+    // Bandwidth calculation: activeListeners * 0.96 MB/min * minutes in current month
+    const now = new Date();
+    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const minutesInMonth = daysInMonth * 24 * 60;
+    const estimatedBandwidthUsed = (activeListeners.length * 0.96 * minutesInMonth) / 1024; // Convert to GB
+    
+    // Get actual bucket sizes if available
+    let actualStorageUsed = estimatedStorageUsed;
+    try {
+      const bucket = 'make-06086aa3-tracks';
+      const { data: files } = await supabase.storage.from(bucket).list();
+      if (files && files.length > 0) {
+        // Sum up file sizes if available in metadata
+        const totalBytes = files.reduce((sum: number, file: any) => {
+          return sum + (file.metadata?.size || 0);
+        }, 0);
+        actualStorageUsed = totalBytes / (1024 * 1024 * 1024); // Convert bytes to GB
+      }
+    } catch (storageError) {
+      console.warn('Could not get actual storage usage:', storageError);
+    }
+    
+    return c.json({
+      storage: {
+        used: parseFloat(actualStorageUsed.toFixed(2)),
+        total: 50, // GB - default limit
+        percentage: Math.round((actualStorageUsed / 50) * 100)
+      },
+      bandwidth: {
+        used: parseFloat(estimatedBandwidthUsed.toFixed(2)),
+        total: 20, // TB - default limit
+        percentage: Math.round((estimatedBandwidthUsed / 20) * 100)
+      },
+      totalTracks,
+      activeListeners: activeListeners.length,
+      lastUpdated: new Date().toISOString()
+    });
+  } catch (error: any) {
+    console.error('Get usage stats error:', error);
+    return c.json({ error: `Failed to get usage stats: ${error.message}` }, 500);
+  }
+});
+
+// ==================== AUTO ADMIN ASSIGNMENT ON STARTUP ====================
+
+// Automatically assign super_admin role to niqbello@gmail.com on server startup
+async function ensureSuperAdmin() {
+  try {
+    const adminEmail = 'niqbello@gmail.com';
+    console.log(`🔍 Checking if ${adminEmail} needs super_admin role...`);
+    
+    // Find user by email in KV store
+    const allUsers = await kv.getByPrefix('user:');
+    const userEntry = allUsers.find((entry: any) => entry?.value?.email === adminEmail);
+    
+    if (!userEntry || !userEntry.value) {
+      console.log(`⚠️  User ${adminEmail} not found yet. Will be assigned admin role upon first signup.`);
+      return;
+    }
+    
+    const user = userEntry.value;
+    
+    // Check if already super_admin
+    if (user.role === 'super_admin') {
+      console.log(`✅ ${adminEmail} already has super_admin role`);
+      return;
+    }
+    
+    // Assign super_admin role
+    user.role = 'super_admin';
+    user.updatedAt = new Date().toISOString();
+    await kv.set(`user:${user.id}`, user);
+    
+    console.log(`✅ Super Admin role assigned to ${adminEmail} (${user.id})`);
+  } catch (error: any) {
+    console.error('❌ Error ensuring super admin:', error?.message || error);
+  }
+}
+
+// ==================== STREAM SETTINGS ROUTES ====================
+
+// Get Stream Settings
+app.get("/make-server-06086aa3/settings/stream", async (c) => {
+  try {
+    let settings = await kv.get('settings:stream');
+    
+    // Initialize with defaults if not exists
+    if (!settings) {
+      settings = {
+        stationName: 'Soul FM Hub',
+        stationSlogan: 'Your Soul & Funk Headquarters',
+        stationGenre: 'Soul, Funk, R&B',
+        defaultPlaylistId: 'livestream',
+        autoAdvanceEnabled: true,
+        crossfadeDuration: 3,
+        bufferSize: 8192,
+        bitrate: '128',
+        maxListeners: 100,
+        fallbackTrackId: null,
+        autoRestartOnError: true,
+        metadataUpdateInterval: 10,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      await kv.set('settings:stream', settings);
+    }
+    
+    return c.json({ settings });
+  } catch (error: any) {
+    console.error('Get stream settings error:', error);
+    return c.json({ error: `Failed to get stream settings: ${error.message}` }, 500);
+  }
+});
+
+// Update Stream Settings
+app.post("/make-server-06086aa3/settings/stream", requireAuth, async (c) => {
+  try {
+    const body = await c.req.json();
+    const currentSettings = await kv.get('settings:stream');
+    
+    const updatedSettings = {
+      ...currentSettings,
+      ...body,
+      updatedAt: new Date().toISOString()
+    };
+    
+    await kv.set('settings:stream', updatedSettings);
+    
+    console.log('✅ Stream settings updated');
+    
+    return c.json({ 
+      message: 'Stream settings updated successfully',
+      settings: updatedSettings
+    });
+  } catch (error: any) {
+    console.error('Update stream settings error:', error);
+    return c.json({ error: `Failed to update stream settings: ${error.message}` }, 500);
+  }
+});
+
+// Run admin check on startup
+console.log('🚀 Starting Soul FM Hub server...');
+await initializeStorageBuckets();
+await ensureSuperAdmin();
+console.log('🎵 Server ready!');
 
 Deno.serve(app.fetch);

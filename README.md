@@ -67,6 +67,36 @@ const STREAM_URL = 'https://your-icecast-server.com/stream';
 - [**PROJECT_INFO.md**](./PROJECT_INFO.md) - Полная документация проекта
 - [**QUICK_START.md**](./QUICK_START.md) - Руководство по быстрому старту
 - [**ICECAST_INTEGRATION.md**](./ICECAST_INTEGRATION.md) - Интеграция с Icecast
+- [**SQL_DEPLOYMENT_GUIDE.md**](./SQL_DEPLOYMENT_GUIDE.md) - SQL миграции и настройка БД
+- [**DEPLOY_CHECKLIST.md**](./DEPLOY_CHECKLIST.md) - Чеклист для деплоя
+
+## 🗄️ База данных
+
+**Архитектура:** Flexible KV Store (PostgreSQL + JSONB)
+
+**SQL Миграции:**
+```bash
+# Быстрая установка (одна команда)
+supabase/migrations/quick_setup.sql
+
+# ИЛИ через Supabase Dashboard
+SQL Editor → New Query → Вставь quick_setup.sql → RUN
+```
+
+**Файлы миграций:**
+- `00_initial_schema.sql` - Полная схема БД (таблица, индексы, RLS, функции)
+- `01_admin_queries.sql` - Полезные SQL запросы для администрирования
+- `quick_setup.sql` - Быстрая установка одной командой (рекомендуется)
+- `README.md` - Подробная документация по БД
+
+**Что создаётся:**
+- ✅ Таблица `kv_store_06086aa3` с JSONB
+- ✅ 4 индекса (GIN, prefix, timestamps)
+- ✅ Row Level Security (4 политики)
+- ✅ Helper функции (search, auth checks, cleanup)
+- ✅ Views для статистики и мониторинга
+
+См. [SQL_DEPLOYMENT_GUIDE.md](./SQL_DEPLOYMENT_GUIDE.md) для подробностей.
 
 ## 🏗️ Структура проекта
 

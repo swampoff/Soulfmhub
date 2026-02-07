@@ -6,6 +6,7 @@ import { Badge } from './ui/badge';
 import { Progress } from './ui/progress';
 import { api } from '../../lib/api';
 import { toast } from 'sonner';
+import { useRealtimeNowPlaying } from '../../hooks/useRealtimeNowPlaying';
 import {
   Play,
   Pause,
@@ -16,7 +17,9 @@ import {
   Clock,
   Loader2,
   Copy,
-  ExternalLink
+  ExternalLink,
+  Calendar,
+  Zap
 } from 'lucide-react';
 
 interface AutoDJStatus {
@@ -26,39 +29,25 @@ interface AutoDJStatus {
     currentTrackIndex: number;
     totalTracks: number;
     startTime: string | null;
+    currentTrackStartTime: string | null;
+    trackProgress: number;
+    elapsedSeconds: number;
+    autoAdvance: boolean;
+    currentSchedule: any;
   };
   nowPlaying: any;
   streamStatus: any;
 }
 
 export function AutoDJControl() {
-  const [status, setStatus] = useState<AutoDJStatus | null>(null);
-  const [loading, setLoading] = useState(false);
   const [startingDJ, setStartingDJ] = useState(false);
   const [stoppingDJ, setStoppingDJ] = useState(false);
   const [skipping, setSkipping] = useState(false);
 
+  // Use realtime hook instead of polling
+  const { nowPlaying, autoDJStatus, streamStatus, loading, refresh } = useRealtimeNowPlaying();
+
   const liveStreamURL = api.getLiveRadioURL();
-
-  useEffect(() => {
-    loadStatus();
-    
-    // Refresh status every 10 seconds
-    const interval = setInterval(loadStatus, 10000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const loadStatus = async () => {
-    try {
-      setLoading(true);
-      const response = await api.getRadioStatus();
-      setStatus(response);
-    } catch (error) {
-      console.error('Error loading Auto DJ status:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleStartDJ = async () => {
     try {
@@ -69,7 +58,7 @@ export function AutoDJControl() {
         toast.error(response.error);
       } else {
         toast.success('🎵 Auto DJ started!');
-        await loadStatus();
+        refresh();
       }
     } catch (error: any) {
       console.error('Error starting Auto DJ:', error);
@@ -90,7 +79,7 @@ export function AutoDJControl() {
         toast.error(response.error);
       } else {
         toast.success('Auto DJ stopped');
-        await loadStatus();
+        refresh();
       }
     } catch (error: any) {
       console.error('Error stopping Auto DJ:', error);
@@ -109,7 +98,7 @@ export function AutoDJControl() {
         toast.error(response.error);
       } else {
         toast.success(`⏭️ Skipped to: ${response.currentTrack.title}`);
-        await loadStatus();
+        refresh();
       }
     } catch (error: any) {
       console.error('Error skipping track:', error);
@@ -124,9 +113,9 @@ export function AutoDJControl() {
     toast.success('Stream URL copied to clipboard!');
   };
 
-  const isPlaying = status?.autoDJ?.isPlaying || false;
-  const currentTrack = status?.autoDJ?.currentTrack;
-  const listeners = status?.streamStatus?.listeners || 0;
+  const isPlaying = autoDJStatus?.isPlaying || false;
+  const currentTrack = autoDJStatus?.currentTrack;
+  const listeners = streamStatus?.listeners || 0;
 
   return (
     <Card className="bg-[#0f1c2e]/90 backdrop-blur-sm border-[#00d9ff]/30 p-6">
@@ -175,16 +164,46 @@ export function AutoDJControl() {
             </div>
           </div>
 
-          {status?.autoDJ && (
-            <div className="mt-4">
-              <div className="flex items-center justify-between text-sm text-white/50 mb-2">
-                <span>Track {status.autoDJ.currentTrackIndex + 1} of {status.autoDJ.totalTracks}</span>
-                <span>{currentTrack.duration ? `${Math.floor(currentTrack.duration / 60)}:${String(currentTrack.duration % 60).padStart(2, '0')}` : '--:--'}</span>
+          {autoDJStatus && (
+            <div className="mt-4 space-y-3">
+              {/* Track Progress Bar */}
+              <div>
+                <div className="flex items-center justify-between text-sm text-white/50 mb-2">
+                  <span>
+                    {Math.floor(autoDJStatus.elapsedSeconds / 60)}:{String(autoDJStatus.elapsedSeconds % 60).padStart(2, '0')}
+                  </span>
+                  <span>{currentTrack.duration ? `${Math.floor(currentTrack.duration / 60)}:${String(currentTrack.duration % 60).padStart(2, '0')}` : '--:--'}</span>
+                </div>
+                <Progress
+                  value={autoDJStatus.trackProgress || 0}
+                  className="h-2"
+                />
+                <p className="text-xs text-white/40 mt-1">
+                  {autoDJStatus.trackProgress >= 95 ? '⏭️ Next track auto-loading...' : `Track ${autoDJStatus.currentTrackIndex + 1} of ${autoDJStatus.totalTracks}`}
+                </p>
               </div>
-              <Progress
-                value={((status.autoDJ.currentTrackIndex + 1) / status.autoDJ.totalTracks) * 100}
-                className="h-1"
-              />
+
+              {/* Auto Advance Status */}
+              {autoDJStatus.autoAdvance && (
+                <div className="flex items-center gap-2 text-xs text-[#00ffaa]">
+                  <Zap className="w-3 h-3" />
+                  <span>Auto-DJ Active • Tracks auto-advance when complete</span>
+                </div>
+              )}
+
+              {/* Current Schedule */}
+              {autoDJStatus.currentSchedule && (
+                <div className="p-3 bg-[#00d9ff]/5 border border-[#00d9ff]/20 rounded-lg">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Calendar className="w-4 h-4 text-[#00d9ff]" />
+                    <span className="text-sm font-semibold text-white">Scheduled Program</span>
+                  </div>
+                  <p className="text-sm text-white/90">{autoDJStatus.currentSchedule.title}</p>
+                  <p className="text-xs text-white/60 mt-1">
+                    Playlist: {autoDJStatus.currentSchedule.playlistName} • {autoDJStatus.currentSchedule.startTime} - {autoDJStatus.currentSchedule.endTime}
+                  </p>
+                </div>
+              )}
             </div>
           )}
         </motion.div>
@@ -207,7 +226,7 @@ export function AutoDJControl() {
             <Music className="w-5 h-5 text-[#00ffaa]" />
             <div>
               <p className="text-xs text-white/50">Tracks</p>
-              <p className="text-2xl font-bold text-white">{status?.autoDJ?.totalTracks || 0}</p>
+              <p className="text-2xl font-bold text-white">{autoDJStatus?.totalTracks || 0}</p>
             </div>
           </div>
         </Card>
@@ -218,8 +237,8 @@ export function AutoDJControl() {
             <div>
               <p className="text-xs text-white/50">Uptime</p>
               <p className="text-2xl font-bold text-white">
-                {status?.autoDJ?.startTime 
-                  ? Math.floor((new Date().getTime() - new Date(status.autoDJ.startTime).getTime()) / 60000) + 'm'
+                {autoDJStatus?.startTime 
+                  ? Math.floor((new Date().getTime() - new Date(autoDJStatus.startTime).getTime()) / 60000) + 'm'
                   : '0m'
                 }
               </p>

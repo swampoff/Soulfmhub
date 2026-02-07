@@ -82,26 +82,26 @@ export function PlaylistsManagement() {
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <div className="text-white">Loading playlists...</div>
+        <div className="text-white text-sm sm:text-base">Loading playlists...</div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       {/* Header */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="flex items-center justify-between"
+        className="flex flex-col xs:flex-row xs:items-center xs:justify-between gap-3 sm:gap-4"
       >
         <div>
-          <h1 className="text-3xl font-bold text-white mb-2">Playlist Management</h1>
-          <p className="text-white/70">Create and manage playlists for Auto DJ • {playlists.length} playlists</p>
+          <h1 className="text-2xl sm:text-3xl font-righteous text-white mb-1 sm:mb-2">Playlist Management</h1>
+          <p className="text-white/70 text-sm sm:text-base">Create and manage playlists for Auto DJ • {playlists.length} playlists</p>
         </div>
         <Button
           onClick={() => setIsCreateModalOpen(true)}
-          className="bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] hover:from-[#00b8dd] hover:to-[#00dd88] text-[#0a1628]"
+          className="bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] hover:from-[#00b8dd] hover:to-[#00dd88] text-[#0a1628] w-full xs:w-auto flex-shrink-0"
         >
           <Plus className="w-4 h-4 mr-2" />
           Create Playlist
@@ -114,7 +114,7 @@ export function PlaylistsManagement() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.1 }}
       >
-        <Card className="bg-white/10 backdrop-blur-sm border-white/20 p-4">
+        <Card className="bg-white/10 backdrop-blur-sm border-white/20 p-3 sm:p-4">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/50" />
             <Input
@@ -122,7 +122,7 @@ export function PlaylistsManagement() {
               placeholder="Search playlists..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10 bg-white/5 border-white/20 text-white placeholder:text-white/50"
+              className="pl-10 bg-white/5 border-white/20 text-white placeholder:text-white/50 text-sm sm:text-base"
             />
           </div>
         </Card>
@@ -133,13 +133,13 @@ export function PlaylistsManagement() {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.2 }}
-        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
+        className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6"
       >
         {filteredPlaylists.length === 0 ? (
           <div className="col-span-full text-center py-12 text-white/50">
-            <List className="w-12 h-12 mx-auto mb-4 opacity-50" />
-            <p>No playlists found</p>
-            <p className="text-sm mt-2">Create your first playlist to get started</p>
+            <List className="w-10 h-10 sm:w-12 sm:h-12 mx-auto mb-4 opacity-50" />
+            <p className="text-sm sm:text-base">No playlists found</p>
+            <p className="text-xs sm:text-sm mt-2">Create your first playlist to get started</p>
           </div>
         ) : (
           filteredPlaylists.map((playlist, index) => (
@@ -160,7 +160,7 @@ export function PlaylistsManagement() {
                     />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center">
-                      <List className="w-20 h-20 text-[#00d9ff]/50" />
+                      <List className="w-16 sm:w-20 h-16 sm:h-20 text-[#00d9ff]/50" />
                     </div>
                   )}
                   
@@ -168,42 +168,42 @@ export function PlaylistsManagement() {
                   <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                     <Button
                       size="icon"
-                      className="w-16 h-16 rounded-full bg-[#00d9ff] hover:bg-[#00b8dd] text-[#0a1628]"
+                      className="w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-[#00d9ff] hover:bg-[#00b8dd] text-[#0a1628]"
                     >
-                      <Play className="w-6 h-6 ml-1" fill="currentColor" />
+                      <Play className="w-5 h-5 sm:w-6 sm:h-6 ml-1" fill="currentColor" />
                     </Button>
                   </div>
 
                   {/* Public Badge */}
                   {playlist.isPublic && (
-                    <div className="absolute top-3 right-3 px-2 py-1 rounded-full bg-green-500/80 text-white text-xs font-semibold backdrop-blur-sm">
+                    <div className="absolute top-2 sm:top-3 right-2 sm:right-3 px-2 py-1 rounded-full bg-green-500/80 text-white text-xs font-semibold backdrop-blur-sm">
                       Public
                     </div>
                   )}
                 </div>
 
                 {/* Content */}
-                <div className="p-4">
-                  <h3 className="text-white font-bold text-lg mb-1 truncate">{playlist.name}</h3>
-                  <p className="text-white/60 text-sm mb-3 line-clamp-2 min-h-[2.5rem]">
+                <div className="p-3 sm:p-4">
+                  <h3 className="text-white font-bold text-base sm:text-lg mb-1 truncate">{playlist.name}</h3>
+                  <p className="text-white/60 text-xs sm:text-sm mb-3 line-clamp-2 min-h-[2.5rem]">
                     {playlist.description || 'No description'}
                   </p>
 
                   {/* Stats */}
-                  <div className="flex items-center gap-4 text-sm text-white/50 mb-4">
+                  <div className="flex items-center gap-3 sm:gap-4 text-xs sm:text-sm text-white/50 mb-3 sm:mb-4">
                     <div className="flex items-center gap-1">
-                      <Music className="w-3.5 h-3.5" />
+                      <Music className="w-3 h-3 sm:w-3.5 sm:h-3.5 flex-shrink-0" />
                       <span>{playlist.trackCount} tracks</span>
                     </div>
                     <div className="flex items-center gap-1">
-                      <Clock className="w-3.5 h-3.5" />
+                      <Clock className="w-3 h-3 sm:w-3.5 sm:h-3.5 flex-shrink-0" />
                       <span>{formatDuration(playlist.duration)}</span>
                     </div>
                   </div>
 
                   {/* Genre Tag */}
                   {playlist.genre && (
-                    <div className="mb-4">
+                    <div className="mb-3 sm:mb-4">
                       <span className="px-2 py-1 rounded text-xs font-semibold bg-[#00d9ff]/20 text-[#00d9ff]">
                         {playlist.genre}
                       </span>
@@ -216,18 +216,18 @@ export function PlaylistsManagement() {
                       size="sm"
                       variant="outline"
                       onClick={() => handleEditPlaylist(playlist)}
-                      className="flex-1 bg-white/5 text-white border-white/20 hover:bg-white/10"
+                      className="flex-1 bg-white/5 text-white border-white/20 hover:bg-white/10 text-xs sm:text-sm"
                     >
-                      <Edit2 className="w-3.5 h-3.5 mr-2" />
-                      Edit
+                      <Edit2 className="w-3 h-3 sm:w-3.5 sm:h-3.5 mr-1 sm:mr-2" />
+                      <span className="hidden xs:inline">Edit</span>
                     </Button>
                     <Button
                       size="sm"
                       variant="outline"
                       onClick={() => handleDeletePlaylist(playlist.id)}
-                      className="bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/20"
+                      className="bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/20 flex-shrink-0"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      <Trash2 className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                     </Button>
                   </div>
                 </div>
@@ -308,52 +308,52 @@ function CreatePlaylistModal({ isOpen, onClose, onSuccess }: { isOpen: boolean; 
             initial={{ opacity: 0, scale: 0.9, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.9, y: 20 }}
-            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg bg-[#0a1628] rounded-xl border border-[#00d9ff]/30 shadow-2xl z-50"
+            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[calc(100%-2rem)] sm:w-full max-w-lg bg-[#0a1628] rounded-xl border border-[#00d9ff]/30 shadow-2xl z-50 max-h-[90vh] overflow-y-auto"
           >
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-bold text-white">Create New Playlist</h2>
+            <div className="p-4 sm:p-6">
+              <div className="flex items-center justify-between mb-4 sm:mb-6">
+                <h2 className="text-xl sm:text-2xl font-bold text-white">Create New Playlist</h2>
                 <Button
                   size="icon"
                   variant="ghost"
                   onClick={onClose}
-                  className="text-white/70 hover:text-white"
+                  className="text-white/70 hover:text-white flex-shrink-0"
                 >
-                  <X className="w-5 h-5" />
+                  <X className="w-4 h-4 sm:w-5 sm:h-5" />
                 </Button>
               </div>
 
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
-                  <Label htmlFor="name" className="text-white">Playlist Name *</Label>
+                  <Label htmlFor="name" className="text-white text-sm sm:text-base">Playlist Name *</Label>
                   <Input
                     id="name"
                     required
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    className="bg-white/5 border-white/20 text-white"
+                    className="bg-white/5 border-white/20 text-white text-sm sm:text-base"
                     placeholder="Sunday Soul Classics"
                   />
                 </div>
 
                 <div>
-                  <Label htmlFor="description" className="text-white">Description</Label>
+                  <Label htmlFor="description" className="text-white text-sm sm:text-base">Description</Label>
                   <textarea
                     id="description"
                     value={formData.description}
                     onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                    className="w-full h-24 px-3 py-2 rounded-md bg-white/5 border border-white/20 text-white placeholder:text-white/50 resize-none"
+                    className="w-full h-20 sm:h-24 px-3 py-2 rounded-md bg-white/5 border border-white/20 text-white placeholder:text-white/50 resize-none text-sm sm:text-base"
                     placeholder="Smooth soul grooves for a relaxing Sunday..."
                   />
                 </div>
 
                 <div>
-                  <Label htmlFor="genre" className="text-white">Genre</Label>
+                  <Label htmlFor="genre" className="text-white text-sm sm:text-base">Genre</Label>
                   <select
                     id="genre"
                     value={formData.genre}
                     onChange={(e) => setFormData({ ...formData, genre: e.target.value })}
-                    className="w-full h-10 px-3 rounded-md bg-white/5 border border-white/20 text-white"
+                    className="w-full h-10 px-3 rounded-md bg-white/5 border border-white/20 text-white text-sm sm:text-base"
                   >
                     <option value="">All Genres</option>
                     <option value="soul">Soul</option>
@@ -375,24 +375,24 @@ function CreatePlaylistModal({ isOpen, onClose, onSuccess }: { isOpen: boolean; 
                     onChange={(e) => setFormData({ ...formData, isPublic: e.target.checked })}
                     className="w-4 h-4 rounded bg-white/5 border-white/20 text-[#00d9ff] focus:ring-[#00d9ff]"
                   />
-                  <Label htmlFor="isPublic" className="text-white cursor-pointer">
+                  <Label htmlFor="isPublic" className="text-white cursor-pointer text-sm sm:text-base">
                     Make this playlist public
                   </Label>
                 </div>
 
-                <div className="flex gap-3 pt-4">
+                <div className="flex flex-col xs:flex-row gap-3 pt-4">
                   <Button
                     type="button"
                     variant="outline"
                     onClick={onClose}
-                    className="flex-1 bg-white/5 text-white border-white/20 hover:bg-white/10"
+                    className="flex-1 bg-white/5 text-white border-white/20 hover:bg-white/10 text-sm sm:text-base order-2 xs:order-1"
                   >
                     Cancel
                   </Button>
                   <Button
                     type="submit"
                     disabled={creating}
-                    className="flex-1 bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] hover:from-[#00b8dd] hover:to-[#00dd88] text-[#0a1628]"
+                    className="flex-1 bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] hover:from-[#00b8dd] hover:to-[#00dd88] text-[#0a1628] text-sm sm:text-base order-1 xs:order-2"
                   >
                     {creating ? 'Creating...' : 'Create Playlist'}
                   </Button>
@@ -447,50 +447,50 @@ function EditPlaylistModal({ isOpen, playlist, onClose, onSuccess }: { isOpen: b
             initial={{ opacity: 0, scale: 0.9, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.9, y: 20 }}
-            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg bg-[#0a1628] rounded-xl border border-[#00d9ff]/30 shadow-2xl z-50"
+            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[calc(100%-2rem)] sm:w-full max-w-lg bg-[#0a1628] rounded-xl border border-[#00d9ff]/30 shadow-2xl z-50 max-h-[90vh] overflow-y-auto"
           >
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-bold text-white">Edit Playlist</h2>
+            <div className="p-4 sm:p-6">
+              <div className="flex items-center justify-between mb-4 sm:mb-6">
+                <h2 className="text-xl sm:text-2xl font-bold text-white">Edit Playlist</h2>
                 <Button
                   size="icon"
                   variant="ghost"
                   onClick={onClose}
-                  className="text-white/70 hover:text-white"
+                  className="text-white/70 hover:text-white flex-shrink-0"
                 >
-                  <X className="w-5 h-5" />
+                  <X className="w-4 h-4 sm:w-5 sm:h-5" />
                 </Button>
               </div>
 
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
-                  <Label htmlFor="edit-name" className="text-white">Playlist Name *</Label>
+                  <Label htmlFor="edit-name" className="text-white text-sm sm:text-base">Playlist Name *</Label>
                   <Input
                     id="edit-name"
                     required
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    className="bg-white/5 border-white/20 text-white"
+                    className="bg-white/5 border-white/20 text-white text-sm sm:text-base"
                   />
                 </div>
 
                 <div>
-                  <Label htmlFor="edit-description" className="text-white">Description</Label>
+                  <Label htmlFor="edit-description" className="text-white text-sm sm:text-base">Description</Label>
                   <textarea
                     id="edit-description"
                     value={formData.description}
                     onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                    className="w-full h-24 px-3 py-2 rounded-md bg-white/5 border border-white/20 text-white placeholder:text-white/50 resize-none"
+                    className="w-full h-20 sm:h-24 px-3 py-2 rounded-md bg-white/5 border border-white/20 text-white placeholder:text-white/50 resize-none text-sm sm:text-base"
                   />
                 </div>
 
                 <div>
-                  <Label htmlFor="edit-genre" className="text-white">Genre</Label>
+                  <Label htmlFor="edit-genre" className="text-white text-sm sm:text-base">Genre</Label>
                   <select
                     id="edit-genre"
                     value={formData.genre}
                     onChange={(e) => setFormData({ ...formData, genre: e.target.value })}
-                    className="w-full h-10 px-3 rounded-md bg-white/5 border border-white/20 text-white"
+                    className="w-full h-10 px-3 rounded-md bg-white/5 border border-white/20 text-white text-sm sm:text-base"
                   >
                     <option value="">All Genres</option>
                     <option value="soul">Soul</option>
@@ -512,24 +512,24 @@ function EditPlaylistModal({ isOpen, playlist, onClose, onSuccess }: { isOpen: b
                     onChange={(e) => setFormData({ ...formData, isPublic: e.target.checked })}
                     className="w-4 h-4 rounded bg-white/5 border-white/20 text-[#00d9ff] focus:ring-[#00d9ff]"
                   />
-                  <Label htmlFor="edit-isPublic" className="text-white cursor-pointer">
+                  <Label htmlFor="edit-isPublic" className="text-white cursor-pointer text-sm sm:text-base">
                     Make this playlist public
                   </Label>
                 </div>
 
-                <div className="flex gap-3 pt-4">
+                <div className="flex flex-col xs:flex-row gap-3 pt-4">
                   <Button
                     type="button"
                     variant="outline"
                     onClick={onClose}
-                    className="flex-1 bg-white/5 text-white border-white/20 hover:bg-white/10"
+                    className="flex-1 bg-white/5 text-white border-white/20 hover:bg-white/10 text-sm sm:text-base order-2 xs:order-1"
                   >
                     Cancel
                   </Button>
                   <Button
                     type="submit"
                     disabled={saving}
-                    className="flex-1 bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] hover:from-[#00b8dd] hover:to-[#00dd88] text-[#0a1628]"
+                    className="flex-1 bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] hover:from-[#00b8dd] hover:to-[#00dd88] text-[#0a1628] text-sm sm:text-base order-1 xs:order-2"
                   >
                     {saving ? 'Saving...' : 'Save Changes'}
                   </Button>

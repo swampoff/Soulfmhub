@@ -152,8 +152,47 @@ export const api = {
     return response.json();
   },
 
+  async bulkUpdateTags(trackIds: string[], options: { action: 'add' | 'remove' | 'replace'; tags: string[] }) {
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${API_BASE}/tracks/bulk-update-tags`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ trackIds, ...options }),
+    });
+    return response.json();
+  },
+
+  async uploadTrackCover(trackId: string, coverFile: File) {
+    const token = await getAuthToken();
+    const formData = new FormData();
+    formData.append('cover', coverFile);
+    
+    const response = await fetch(`${API_BASE}/tracks/${trackId}/cover`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+      body: formData,
+    });
+    return response.json();
+  },
+
+  async extractTrackMetadata(trackId: string) {
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${API_BASE}/tracks/${trackId}/extract-metadata`, {
+      method: 'POST',
+      headers,
+    });
+    return response.json();
+  },
+
   // Playlists
   async getPlaylists() {
+    const response = await fetch(`${API_BASE}/playlists`);
+    return response.json();
+  },
+
+  async getAllPlaylists() {
     const response = await fetch(`${API_BASE}/playlists`);
     return response.json();
   },
@@ -173,12 +212,12 @@ export const api = {
     return response.json();
   },
 
-  async updatePlaylist(id: string, playlist: any) {
+  async updatePlaylist(id: string, updates: any) {
     const headers = await getAuthHeaders();
     const response = await fetch(`${API_BASE}/playlists/${id}`, {
       method: 'PUT',
       headers,
-      body: JSON.stringify(playlist),
+      body: JSON.stringify(updates),
     });
     return response.json();
   },
@@ -192,41 +231,33 @@ export const api = {
     return response.json();
   },
 
-  // Shows
-  async getShows() {
-    const response = await fetch(`${API_BASE}/shows`);
-    return response.json();
-  },
-
-  async getShow(id: string) {
-    const response = await fetch(`${API_BASE}/shows/${id}`);
-    return response.json();
-  },
-
-  async createShow(show: any) {
+  async addTrackToPlaylist(playlistId: string, trackId: string, position?: 'start' | 'end') {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/shows`, {
+    const response = await fetch(`${API_BASE}/playlists/${playlistId}/tracks`, {
       method: 'POST',
       headers,
-      body: JSON.stringify(show),
+      body: JSON.stringify({ trackId, position: position || 'end' }),
     });
     return response.json();
   },
 
-  async updateShow(id: string, show: any) {
+  async removeTrackFromPlaylist(playlistId: string, trackId: string) {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/shows/${id}`, {
-      method: 'PUT',
+    const response = await fetch(`${API_BASE}/playlists/${playlistId}/tracks/${trackId}`, {
+      method: 'DELETE',
       headers,
-      body: JSON.stringify(show),
     });
     return response.json();
   },
 
-  // Schedule
-  async getSchedule(date?: string) {
-    const params = date ? `?date=${date}` : '';
-    const response = await fetch(`${API_BASE}/schedule${params}`);
+  // Schedules
+  async getAllSchedules() {
+    const response = await fetch(`${API_BASE}/schedule`);
+    return response.json();
+  },
+
+  async getSchedule(id: string) {
+    const response = await fetch(`${API_BASE}/schedule/${id}`);
     return response.json();
   },
 
@@ -411,6 +442,46 @@ export const api = {
     return response.json();
   },
 
+  // Shows
+  async getShows() {
+    const response = await fetch(`${API_BASE}/shows`);
+    return response.json();
+  },
+
+  async getShow(id: string) {
+    const response = await fetch(`${API_BASE}/shows/${id}`);
+    return response.json();
+  },
+
+  async createShow(show: any) {
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${API_BASE}/shows`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(show),
+    });
+    return response.json();
+  },
+
+  async updateShow(id: string, show: any) {
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${API_BASE}/shows/${id}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(show),
+    });
+    return response.json();
+  },
+
+  async deleteShow(id: string) {
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${API_BASE}/shows/${id}`, {
+      method: 'DELETE',
+      headers,
+    });
+    return response.json();
+  },
+
   // Profiles
   async getProfiles() {
     const response = await fetch(`${API_BASE}/profiles`);
@@ -519,6 +590,176 @@ export const api = {
   // Get stream info for public player
   async getStreamInfo(shortId: string) {
     const response = await fetch(`${API_BASE}/stream/info/${shortId}`);
+    return response.json();
+  },
+
+  // Active Listeners
+  async getActiveListeners() {
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${API_BASE}/analytics/active-listeners`, { headers });
+    return response.json();
+  },
+
+  // Usage Stats (Storage & Bandwidth)
+  async getUsageStats() {
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${API_BASE}/analytics/usage`, { headers });
+    return response.json();
+  },
+
+  // Shows Management
+  async getShows() {
+    const response = await fetch(`${API_BASE}/shows`);
+    return response.json();
+  },
+
+  async getShow(id: string) {
+    const response = await fetch(`${API_BASE}/shows/${id}`);
+    return response.json();
+  },
+
+  async createShow(show: any) {
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${API_BASE}/shows`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(show),
+    });
+    return response.json();
+  },
+
+  async updateShow(id: string, show: any) {
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${API_BASE}/shows/${id}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(show),
+    });
+    return response.json();
+  },
+
+  async deleteShow(id: string) {
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${API_BASE}/shows/${id}`, {
+      method: 'DELETE',
+      headers,
+    });
+    return response.json();
+  },
+
+  // Podcasts Management
+  async getPodcasts() {
+    const response = await fetch(`${API_BASE}/podcasts`);
+    return response.json();
+  },
+
+  async getPodcast(id: string) {
+    const response = await fetch(`${API_BASE}/podcasts/${id}`);
+    return response.json();
+  },
+
+  async createPodcast(podcast: any) {
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${API_BASE}/podcasts`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(podcast),
+    });
+    return response.json();
+  },
+
+  async updatePodcast(id: string, podcast: any) {
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${API_BASE}/podcasts/${id}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(podcast),
+    });
+    return response.json();
+  },
+
+  async deletePodcast(id: string) {
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${API_BASE}/podcasts/${id}`, {
+      method: 'DELETE',
+      headers,
+    });
+    return response.json();
+  },
+
+  // Podcast Episodes
+  async getPodcastEpisodes(podcastId: string) {
+    const response = await fetch(`${API_BASE}/podcasts/${podcastId}/episodes`);
+    return response.json();
+  },
+
+  async createEpisode(episode: any) {
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${API_BASE}/podcasts/${episode.podcastId}/episodes`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(episode),
+    });
+    return response.json();
+  },
+
+  async updateEpisode(id: string, episode: any) {
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${API_BASE}/episodes/${id}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(episode),
+    });
+    return response.json();
+  },
+
+  async deleteEpisode(id: string) {
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${API_BASE}/episodes/${id}`, {
+      method: 'DELETE',
+      headers,
+    });
+    return response.json();
+  },
+
+  // Schedule Slots
+  async createScheduleSlot(slot: any) {
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${API_BASE}/schedule/slots`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(slot),
+    });
+    return response.json();
+  },
+
+  async deleteScheduleSlot(slotId: string) {
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${API_BASE}/schedule/slots/${slotId}`, {
+      method: 'DELETE',
+      headers,
+    });
+    return response.json();
+  },
+
+  // Stream Settings
+  async getStreamSettings() {
+    const headers = await getPublicHeaders();
+    const response = await fetch(`${API_BASE}/settings/stream`, { headers });
+    return response.json();
+  },
+
+  async updateStreamSettings(settings: any) {
+    const headers = await getAuthHeaders();
+    const response = await fetch(`${API_BASE}/settings/stream`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(settings),
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to update settings');
+    }
     return response.json();
   },
 };

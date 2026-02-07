@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router';
-import { Menu, X, User } from 'lucide-react';
+import { Menu, X, User, Settings } from 'lucide-react';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { useApp } from '../../context/AppContext';
@@ -11,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from './ui/dropdown-menu';
 import soulFmLogo from 'figma:asset/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png';
+import { RealtimeConnectionStatus } from './RealtimeConnectionStatus';
 
 export function Navigation() {
   const location = useLocation();
@@ -30,7 +31,7 @@ export function Navigation() {
   ];
 
   const isActive = (path: string) => {
-    // Special case: Shows & Podcasts is active for both /shows and /podcasts routes
+    // Special case: Shows & Podcasts is active for both /podcasts and /shows routes
     if (path === '/podcasts') {
       return location.pathname.startsWith('/podcasts') || location.pathname.startsWith('/shows');
     }
@@ -38,7 +39,7 @@ export function Navigation() {
   };
 
   return (
-    <nav className="bg-[#0a1628]/95 backdrop-blur-md text-white border-b border-[#00d9ff]/20">
+    <nav className="bg-[#0a1628]/95 backdrop-blur-md text-white border-b border-[#00d9ff]/20 relative z-50">
       <div className="container mx-auto px-4">
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
@@ -85,6 +86,23 @@ export function Navigation() {
 
           {/* Right Side */}
           <div className="flex items-center gap-3">
+            {/* Realtime Connection Status */}
+            <div className="hidden md:block">
+              <RealtimeConnectionStatus showLabel={false} compact={true} />
+            </div>
+
+            {/* Admin Button - Always visible */}
+            <Link to="/admin">
+              <Button 
+                size="sm"
+                variant="ghost"
+                className="gap-2 text-[#00ffaa] hover:bg-[#00ffaa]/10 border border-[#00ffaa]/30 hover:border-[#00ffaa]/50 hidden sm:flex"
+              >
+                <Settings className="w-4 h-4" />
+                <span>Admin</span>
+              </Button>
+            </Link>
+
             {/* Live Badge */}
             {streamStatus?.status === 'online' && (
               <Badge className="bg-[#00ff88]/20 text-[#00ff88] border border-[#00ff88]/40 gap-2 px-3 py-1.5 hidden sm:flex">
@@ -170,6 +188,16 @@ export function Navigation() {
                   {item.label}
                 </Link>
               ))}
+              
+              {/* Admin link in mobile menu */}
+              <Link
+                to="/admin"
+                onClick={() => setMobileMenuOpen(false)}
+                className="px-4 py-3 rounded-lg transition-colors flex items-center gap-2 text-[#00ffaa] hover:bg-[#00ffaa]/10 border border-[#00ffaa]/30"
+              >
+                <Settings className="w-4 h-4" />
+                <span>Admin Panel</span>
+              </Link>
             </div>
           </div>
         )}

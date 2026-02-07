@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { api } from '../lib/api';
+import { RealtimeChannel } from '@supabase/supabase-js';
 
 export type UserRole = 'listener' | 'super_admin';
 
@@ -61,6 +62,44 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [volume, setVolume] = useState(0.7);
 
+  // Realtime channel для глобального обновления Now Playing
+  useEffect(() => {
+    let channel: RealtimeChannel | null = null;
+
+    console.log('🔌 [AppContext] Setting up Realtime channel');
+
+    // Initial load
+    refreshNowPlaying();
+
+    // Subscribe to Realtime updates
+    channel = supabase.channel('radio-updates-global', {
+      config: {
+        broadcast: { self: false }
+      }
+    });
+
+    channel.on('broadcast', { event: 'track-changed' }, (payload) => {
+      console.log('🎵 [AppContext] Track changed via Realtime:', payload);
+      // Update nowPlaying immediately
+      refreshNowPlaying();
+    });
+
+    channel.subscribe((status) => {
+      console.log('📡 [AppContext] Realtime channel status:', status);
+      if (status === 'SUBSCRIBED') {
+        console.log('✅ [AppContext] Connected to radio-updates-global channel');
+      }
+    });
+
+    // Cleanup
+    return () => {
+      console.log('🔌 [AppContext] Cleaning up Realtime channel');
+      if (channel) {
+        supabase.removeChannel(channel);
+      }
+    };
+  }, []);
+
   useEffect(() => {
     // Check active session
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -88,16 +127,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
 
     return () => subscription.unsubscribe();
-  }, []);
-
-  useEffect(() => {
-    // Fetch now playing info
-    refreshNowPlaying();
-    
-    // Update every 30 seconds
-    const interval = setInterval(refreshNowPlaying, 30000);
-    
-    return () => clearInterval(interval);
   }, []);
 
   const refreshNowPlaying = async () => {
