@@ -3,7 +3,7 @@ import { Settings, Zap, Calendar, List } from 'lucide-react';
 import { JingleRuleEditor } from './JingleRuleEditor';
 import { AutomationPresets } from './AutomationPresets';
 import { JingleTimeline } from './JingleTimeline';
-import { projectId } from '/utils/supabase/info';
+import { projectId } from '../../../../utils/supabase/info';
 
 type TabView = 'rules' | 'presets' | 'timeline';
 

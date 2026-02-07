@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { Upload, X, Music, Check } from 'lucide-react';
-import { projectId, publicAnonKey } from '/utils/supabase/info';
+import { projectId, publicAnonKey } from '../../../../utils/supabase/info';
 import { JINGLE_CATEGORIES, CATEGORY_GROUPS } from './jingle-categories';
 
 interface JingleUploadProps {
