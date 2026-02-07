@@ -37,6 +37,12 @@ import { NewsManagement } from './pages/admin/NewsManagement';
 import { UploadTestPage } from './pages/admin/UploadTestPage';
 import { NewsInjection } from './pages/admin/NewsInjection';
 import { SystemTest } from './pages/admin/SystemTest';
+import { LiveDJConsole } from './pages/admin/LiveDJConsole';
+import { SongRequestsManagement } from './pages/admin/SongRequestsManagement';
+import { ShoutoutsManagement } from './pages/admin/ShoutoutsManagement';
+import { CallQueueManagement } from './pages/admin/CallQueueManagement';
+import { RequestSongPage } from './pages/RequestSongPage';
+import { SendShoutoutPage } from './pages/SendShoutoutPage';
 import { Toaster } from './components/ui/sonner';
 import soulFmLogo from 'figma:asset/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png';
 import BeachCarDemo from './pages/BeachCarDemo';
@@ -178,6 +184,10 @@ function AppContent() {
         <Route path="/team/:slug" element={<PublicLayout><ProfileDetailPage /></PublicLayout>} />
         <Route path="/analytics" element={<PublicLayout><AnalyticsPage /></PublicLayout>} />
         <Route path="/stream" element={<PublicLayout><StreamPlayer /></PublicLayout>} />
+        
+        {/* Interactive Features - PUBLIC */}
+        <Route path="/request-song" element={<PublicLayout><RequestSongPage /></PublicLayout>} />
+        <Route path="/send-shoutout" element={<PublicLayout><SendShoutoutPage /></PublicLayout>} />
         
         {/* Beach Car Demo */}
         <Route path="/demo/beach-car" element={<BeachCarDemo />} />
@@ -334,6 +344,54 @@ function AppContent() {
           element={
             <AdminAccess>
               <SystemTest />
+            </AdminAccess>
+          }
+        />
+        <Route
+          path="/admin/live-dj-console"
+          element={
+            <AdminAccess>
+              <LiveDJConsole />
+            </AdminAccess>
+          }
+        />
+        <Route
+          path="/admin/song-requests"
+          element={
+            <AdminAccess>
+              <SongRequestsManagement />
+            </AdminAccess>
+          }
+        />
+        <Route
+          path="/admin/shoutouts"
+          element={
+            <AdminAccess>
+              <ShoutoutsManagement />
+            </AdminAccess>
+          }
+        />
+        <Route
+          path="/admin/call-queue"
+          element={
+            <AdminAccess>
+              <CallQueueManagement />
+            </AdminAccess>
+          }
+        />
+        <Route
+          path="/admin/request-song"
+          element={
+            <AdminAccess>
+              <RequestSongPage />
+            </AdminAccess>
+          }
+        />
+        <Route
+          path="/admin/send-shoutout"
+          element={
+            <AdminAccess>
+              <SendShoutoutPage />
             </AdminAccess>
           }
         />

@@ -12,10 +12,15 @@ import { parseBuffer } from "npm:music-metadata@10";
 import { setupJinglesRoutes } from "./jingles.ts";
 import * as jingleRotation from "./jingle-rotation.ts";
 import * as autoDJHelper from "./auto-dj-helper.ts";
+import * as newsIntegration from "./news-autodj-integration.ts";
+import * as podcastContestIntegration from "./podcast-contest-integration.ts";
+import * as interactive from "./interactive-features.ts";
 import { extractCompleteMetadata } from "./metadata-utils.ts";
 import { setupAutomationRoutes } from "./content-automation-routes.ts";
 import { newsInjectionRoutes } from "./news-injection-routes.ts";
 import { announcementsRoutes } from "./announcements-routes.ts";
+import { setupPodcastContestRoutes } from "./podcast-contest-routes.ts";
+import { setupInteractiveRoutes } from "./interactive-routes.ts";
 
 const app = new Hono();
 
@@ -132,6 +137,12 @@ app.route('/make-server-06086aa3/news-injection', newsInjectionRoutes);
 
 // Setup Announcements routes
 app.route('/make-server-06086aa3/announcements', announcementsRoutes);
+
+// Setup Podcast & Contest routes
+setupPodcastContestRoutes(app, requireAuth);
+
+// Setup Interactive Features routes (Live DJ, Requests, Shoutouts, Calls)
+setupInteractiveRoutes(app, requireAuth);
 
 // Seed endpoint for testing
 app.post('/make-server-06086aa3/seed-news-injection', async (c) => {
@@ -285,6 +296,12 @@ async function checkAndAdvanceTrack() {
   if (!autoDJState.isPlaying || !autoDJState.currentTrack || !autoDJState.currentTrackStartTime) {
     return;
   }
+  
+  // 🔴 CHECK IF LIVE DJ IS ACTIVE - PAUSE AUTO-DJ
+  if (interactive.isLiveDJ()) {
+    console.log('🎧 Live DJ is active - Auto-DJ paused');
+    return;
+  }
 
   const now = new Date();
   const trackStartTime = new Date(autoDJState.currentTrackStartTime);
@@ -294,7 +311,277 @@ async function checkAndAdvanceTrack() {
   if (elapsedSeconds >= trackDuration - 5) {
     console.log(`⏭️  Auto-advancing from "${autoDJState.currentTrack.title}"`);
     
-    // 🔔 CHECK FOR JINGLES BEFORE PLAYING NEXT TRACK
+    // 🎙️ PRIORITY 1: CHECK FOR SCHEDULED PODCAST (VERY HIGH PRIORITY)
+    const podcast = await podcastContestIntegration.checkForScheduledPodcast();
+    
+    if (podcast) {
+      // Play scheduled podcast show
+      console.log(`🎙️ Playing scheduled podcast: "${podcast.title}"`);
+      
+      await podcastContestIntegration.markPodcastAsPlaying(podcast.scheduleId);
+      
+      autoDJState.currentTrack = {
+        id: podcast.scheduleId,
+        title: `🎙️ ${podcast.title}`,
+        artist: 'Podcast',
+        album: podcast.scheduleType,
+        duration: podcast.duration,
+        coverUrl: podcast.coverUrl,
+        isPodcast: true,
+        scheduleId: podcast.scheduleId,
+        podcastId: podcast.podcastId
+      };
+      autoDJState.currentTrackStartTime = new Date().toISOString();
+      
+      await kv.set('stream:nowplaying', {
+        track: {
+          id: podcast.scheduleId,
+          title: `🎙️ ${podcast.title}`,
+          artist: 'Podcast',
+          album: podcast.scheduleType,
+          duration: podcast.duration,
+          cover: podcast.coverUrl
+        },
+        startTime: autoDJState.currentTrackStartTime,
+        updatedAt: new Date().toISOString()
+      });
+      
+      // Reset all counters when podcast plays
+      newsIntegration.resetTrackCounter();
+      podcastContestIntegration.resetContestCounter();
+      
+      console.log(`✅ Now playing podcast: "${podcast.title}" (${podcast.duration}s)`);
+      
+      // Mark as completed after duration
+      setTimeout(async () => {
+        await podcastContestIntegration.markPodcastAsCompleted(
+          podcast.scheduleId, 
+          podcast.podcastId, 
+          podcast.episodeId
+        );
+      }, podcast.duration * 1000);
+      
+      return;
+    }
+    
+    // 📰 PRIORITY 2: CHECK FOR NEWS (HIGHEST PRIORITY)
+    const injection = await newsIntegration.checkInjectionPriority();
+    
+    if (injection.hasNews) {
+      // Play scheduled news
+      const news = injection.news;
+      console.log(`📰 Playing scheduled news: "${news.title}"`);
+      
+      await newsIntegration.markNewsAsPlaying(news.queueId);
+      
+      autoDJState.currentTrack = {
+        id: news.voiceOverId,
+        title: `📰 ${news.title}`,
+        artist: 'News Update',
+        album: news.voiceName,
+        duration: news.duration,
+        coverUrl: null,
+        isNews: true,
+        queueId: news.queueId,
+        voiceOverId: news.voiceOverId
+      };
+      autoDJState.currentTrackStartTime = new Date().toISOString();
+      
+      await kv.set('stream:nowplaying', {
+        track: {
+          id: news.voiceOverId,
+          title: `📰 ${news.title}`,
+          artist: 'News Update',
+          album: news.voiceName,
+          duration: news.duration,
+          cover: null
+        },
+        startTime: autoDJState.currentTrackStartTime,
+        updatedAt: new Date().toISOString()
+      });
+      
+      newsIntegration.resetTrackCounter();
+      console.log(`✅ Now playing news: "${news.title}"`);
+      
+      // Mark as completed after duration
+      setTimeout(async () => {
+        await newsIntegration.markNewsAsCompleted(news.queueId, news.voiceOverId);
+      }, news.duration * 1000);
+      
+      return;
+    }
+    
+    if (injection.hasAnnouncement) {
+      // Play announcement (weather, time, station ID)
+      const announcement = injection.announcement;
+      console.log(`📻 Playing ${announcement.type} announcement`);
+      
+      autoDJState.currentTrack = {
+        id: announcement.id,
+        title: `📻 ${announcement.type.toUpperCase()}`,
+        artist: 'Soul FM',
+        album: announcement.voiceName,
+        duration: announcement.duration,
+        coverUrl: null,
+        isAnnouncement: true,
+        announcementId: announcement.id
+      };
+      autoDJState.currentTrackStartTime = new Date().toISOString();
+      
+      await kv.set('stream:nowplaying', {
+        track: {
+          id: announcement.id,
+          title: `📻 ${announcement.type.replace('_', ' ').toUpperCase()}`,
+          artist: 'Soul FM',
+          album: announcement.voiceName,
+          duration: announcement.duration,
+          cover: null
+        },
+        startTime: autoDJState.currentTrackStartTime,
+        updatedAt: new Date().toISOString()
+      });
+      
+      await newsIntegration.markAnnouncementPlayed(announcement.id);
+      newsIntegration.resetTrackCounter();
+      podcastContestIntegration.resetContestCounter();
+      console.log(`✅ Now playing ${announcement.type} announcement`);
+      return;
+    }
+    
+    // 🎁 PRIORITY 3: CHECK FOR CONTEST ANNOUNCEMENTS (HIGH PRIORITY)
+    const contest = await podcastContestIntegration.checkForContestAnnouncement();
+    
+    if (contest) {
+      // Play contest announcement
+      console.log(`🎁 Playing contest announcement: "${contest.title}"`);
+      
+      await podcastContestIntegration.markContestAnnouncementPlaying(contest.queueId, contest.contestId);
+      
+      autoDJState.currentTrack = {
+        id: contest.contestId,
+        title: `🎁 ${contest.title}`,
+        artist: 'Contest',
+        album: contest.announcementType,
+        duration: contest.duration,
+        coverUrl: null,
+        isContest: true,
+        contestId: contest.contestId,
+        queueId: contest.queueId
+      };
+      autoDJState.currentTrackStartTime = new Date().toISOString();
+      
+      await kv.set('stream:nowplaying', {
+        track: {
+          id: contest.contestId,
+          title: `🎁 ${contest.title}`,
+          artist: 'Contest',
+          album: contest.announcementType,
+          duration: contest.duration,
+          cover: null
+        },
+        startTime: autoDJState.currentTrackStartTime,
+        updatedAt: new Date().toISOString()
+      });
+      
+      podcastContestIntegration.resetContestCounter();
+      console.log(`✅ Now playing contest: "${contest.title}"`);
+      
+      // Mark as completed after duration
+      setTimeout(async () => {
+        await podcastContestIntegration.markContestAnnouncementCompleted(
+          contest.queueId,
+          contest.contestId
+        );
+      }, contest.duration * 1000);
+      
+      return;
+    }
+    
+    // 🎵 PRIORITY 4: CHECK FOR SONG REQUESTS (HIGH PRIORITY)
+    if (interactive.shouldPlayRequest()) {
+      const request = await interactive.getNextApprovedRequest();
+      
+      if (request) {
+        console.log(`🎵 Playing song request: "${request.title}" by ${request.artist}`);
+        console.log(`   Requested by: ${request.requesterName}`);
+        
+        await interactive.markRequestAsPlayed(request.requestId);
+        
+        autoDJState.currentTrack = {
+          id: request.trackId,
+          title: `🎵 ${request.title}`,
+          artist: request.artist,
+          album: `Request from ${request.requesterName}`,
+          duration: 240, // TODO: Get actual duration from track
+          coverUrl: null,
+          isRequest: true,
+          requestId: request.requestId,
+          requesterName: request.requesterName
+        };
+        autoDJState.currentTrackStartTime = new Date().toISOString();
+        
+        await kv.set('stream:nowplaying', {
+          track: {
+            id: request.trackId,
+            title: `🎵 ${request.title}`,
+            artist: request.artist,
+            album: `Request from ${request.requesterName}`,
+            duration: 240,
+            cover: null
+          },
+          startTime: autoDJState.currentTrackStartTime,
+          updatedAt: new Date().toISOString()
+        });
+        
+        interactive.resetRequestCounter();
+        console.log(`✅ Now playing request: "${request.title}"`);
+        
+        return;
+      }
+    }
+    
+    // 💬 PRIORITY 5: CHECK FOR SHOUTOUTS (MEDIUM-HIGH PRIORITY)
+    if (interactive.shouldPlayShoutout()) {
+      const shoutout = await interactive.getNextShoutout();
+      
+      if (shoutout) {
+        console.log(`💬 Playing shoutout for ${shoutout.recipientName}`);
+        
+        await interactive.markShoutoutAsPlayed(shoutout.shoutoutId);
+        
+        autoDJState.currentTrack = {
+          id: shoutout.shoutoutId,
+          title: `💬 Shoutout to ${shoutout.recipientName}`,
+          artist: 'Soul FM Listener',
+          album: shoutout.occasion || 'Special Message',
+          duration: shoutout.duration,
+          coverUrl: null,
+          isShoutout: true,
+          shoutoutId: shoutout.shoutoutId
+        };
+        autoDJState.currentTrackStartTime = new Date().toISOString();
+        
+        await kv.set('stream:nowplaying', {
+          track: {
+            id: shoutout.shoutoutId,
+            title: `💬 Shoutout to ${shoutout.recipientName}`,
+            artist: 'Soul FM Listener',
+            album: shoutout.occasion || 'Special Message',
+            duration: shoutout.duration,
+            cover: null
+          },
+          startTime: autoDJState.currentTrackStartTime,
+          updatedAt: new Date().toISOString()
+        });
+        
+        interactive.resetShoutoutCounter();
+        console.log(`✅ Now playing shoutout for ${shoutout.recipientName}`);
+        
+        return;
+      }
+    }
+    
+    // 🔔 PRIORITY 6: CHECK FOR JINGLES BEFORE PLAYING NEXT TRACK
     const jingle = await autoDJHelper.checkAndPlayJingle(autoDJState);
     
     if (jingle) {
@@ -325,8 +612,12 @@ async function checkAndAdvanceTrack() {
     // No jingle to play, continue with regular track
     autoDJState.isPlayingJingle = false;
     
-    // Increment track count for jingle rules
+    // Increment track count for jingle rules, news injection, contest announcements, requests, AND shoutouts
     autoDJHelper.incrementMusicTrackCount();
+    newsIntegration.incrementTrackCounter();
+    podcastContestIntegration.incrementContestCounter();
+    interactive.incrementRequestCounter();
+    interactive.incrementShoutoutCounter();
     
     const currentSchedule = await getCurrentScheduledPlaylist();
     
