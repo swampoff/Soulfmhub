@@ -7,12 +7,15 @@ import * as profiles from "./profiles.ts";
 import * as podcasts from "./podcasts.ts";
 import { seedProfiles } from "./seed-profiles.ts";
 import { seedPodcasts } from "./seed-podcasts.ts";
+import { seedNewsInjectionData, createSampleRules } from "./seed-news-injection.ts";
 import { parseBuffer } from "npm:music-metadata@10";
 import { setupJinglesRoutes } from "./jingles.ts";
 import * as jingleRotation from "./jingle-rotation.ts";
 import * as autoDJHelper from "./auto-dj-helper.ts";
 import { extractCompleteMetadata } from "./metadata-utils.ts";
 import { setupAutomationRoutes } from "./content-automation-routes.ts";
+import { newsInjectionRoutes } from "./news-injection-routes.ts";
+import { announcementsRoutes } from "./announcements-routes.ts";
 
 const app = new Hono();
 
@@ -46,6 +49,8 @@ async function initializeStorageBuckets() {
       { name: 'make-06086aa3-tracks', public: false },
       { name: 'make-06086aa3-covers', public: true },
       { name: 'make-06086aa3-jingles', public: false },
+      { name: 'make-06086aa3-news-voiceovers', public: false },
+      { name: 'make-06086aa3-announcements', public: false },
     ];
 
     const { data: buckets } = await supabase.storage.listBuckets();
@@ -121,6 +126,23 @@ setupJinglesRoutes(app, supabase, requireAuth);
 
 // Setup Content Automation routes
 setupAutomationRoutes(app, supabase, requireAuth);
+
+// Setup News Injection routes
+app.route('/make-server-06086aa3/news-injection', newsInjectionRoutes);
+
+// Setup Announcements routes
+app.route('/make-server-06086aa3/announcements', announcementsRoutes);
+
+// Seed endpoint for testing
+app.post('/make-server-06086aa3/seed-news-injection', async (c) => {
+  try {
+    const result = await seedNewsInjectionData();
+    await createSampleRules();
+    return c.json({ success: true, ...result });
+  } catch (error: any) {
+    return c.json({ success: false, error: error.message }, 500);
+  }
+});
 
 // Health check endpoint
 app.get("/make-server-06086aa3/health", (c) => {

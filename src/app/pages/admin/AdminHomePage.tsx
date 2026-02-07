@@ -827,32 +827,21 @@ export function AdminHomePage() {
               <h2 className="text-base lg:text-lg font-semibold mb-4">Quick Actions</h2>
               <div className="space-y-2">
                 <button 
-                  onClick={() => navigate('/admin/media')}
-                  className="w-full flex items-center gap-3 p-3 bg-white/5 hover:bg-white/10 rounded-lg transition-all text-left group"
-                >
-                  <Upload className="size-4 text-[#00d9ff] group-hover:scale-110 transition-transform" />
-                  <span className="text-sm">Upload Media</span>
-                </button>
-                <button 
-                  onClick={() => navigate('/admin/schedule')}
-                  className="w-full flex items-center gap-3 p-3 bg-white/5 hover:bg-white/10 rounded-lg transition-all text-left group"
-                >
-                  <Calendar className="size-4 text-[#00d9ff] group-hover:scale-110 transition-transform" />
-                  <span className="text-sm">Manage Schedule</span>
-                </button>
-                <button 
-                  onClick={() => navigate('/admin/jingles')}
-                  className="w-full flex items-center gap-3 p-3 bg-white/5 hover:bg-white/10 rounded-lg transition-all text-left group"
-                >
-                  <Mic2 className="size-4 text-[#00d9ff] group-hover:scale-110 transition-transform" />
-                  <span className="text-sm">Configure Jingles</span>
-                </button>
-                <button 
                   onClick={() => navigate('/admin/stream-settings')}
                   className="w-full flex items-center gap-3 p-3 bg-white/5 hover:bg-white/10 rounded-lg transition-all text-left group"
                 >
                   <Settings className="size-4 text-[#00d9ff] group-hover:scale-110 transition-transform" />
                   <span className="text-sm">Stream Settings</span>
+                </button>
+                <button 
+                  onClick={() => navigate('/admin/upload-test')}
+                  className="w-full flex items-center gap-3 p-3 bg-gradient-to-r from-[#00d9ff]/10 to-[#00ffaa]/10 hover:from-[#00d9ff]/20 hover:to-[#00ffaa]/20 border border-[#00d9ff]/30 rounded-lg transition-all text-left group"
+                >
+                  <Upload className="size-4 text-[#00ffaa] group-hover:scale-110 transition-transform" />
+                  <div className="flex-1">
+                    <div className="text-sm font-semibold text-white">🧪 Upload Test Lab</div>
+                    <div className="text-xs text-gray-400">Test image & audio uploads</div>
+                  </div>
                 </button>
               </div>
             </motion.div>

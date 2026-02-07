@@ -12,6 +12,7 @@ import {
   Upload,
   ListMusic,
   Sparkles,
+  RadioTower,
 } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -22,6 +23,7 @@ const menuItems = [
   { path: '/admin/playlists', label: 'Playlists', icon: ListMusic },
   { path: '/admin/shows', label: 'Shows & Podcasts', icon: Radio },
   { path: '/admin/automation', label: 'Automation', icon: Sparkles },
+  { path: '/admin/news-injection', label: 'News Injection', icon: RadioTower },
   { path: '/analytics', label: 'Analytics', icon: BarChart3 },
 ];
 

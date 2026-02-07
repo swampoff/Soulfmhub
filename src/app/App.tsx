@@ -34,6 +34,9 @@ import ContentAutomationDashboard from './pages/dashboards/ContentAutomationDash
 import { StreamSettings } from './pages/dashboards/StreamSettings';
 import { AnalyticsPage as AdminAnalyticsPage } from './pages/admin/AnalyticsPage';
 import { NewsManagement } from './pages/admin/NewsManagement';
+import { UploadTestPage } from './pages/admin/UploadTestPage';
+import { NewsInjection } from './pages/admin/NewsInjection';
+import { SystemTest } from './pages/admin/SystemTest';
 import { Toaster } from './components/ui/sonner';
 import soulFmLogo from 'figma:asset/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png';
 import BeachCarDemo from './pages/BeachCarDemo';
@@ -307,6 +310,30 @@ function AppContent() {
               <AdminLayout>
                 <NewsManagement />
               </AdminLayout>
+            </AdminAccess>
+          }
+        />
+        <Route
+          path="/admin/upload-test"
+          element={
+            <AdminAccess>
+              <UploadTestPage />
+            </AdminAccess>
+          }
+        />
+        <Route
+          path="/admin/news-injection"
+          element={
+            <AdminAccess>
+              <NewsInjection />
+            </AdminAccess>
+          }
+        />
+        <Route
+          path="/admin/system-test"
+          element={
+            <AdminAccess>
+              <SystemTest />
             </AdminAccess>
           }
         />
