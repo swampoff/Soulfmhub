@@ -9,7 +9,7 @@ import AutomationScheduleManager from '../../components/admin/AutomationSchedule
 import AutomationVoicesManager from '../../components/admin/AutomationVoicesManager';
 import { Radio, Sparkles, BarChart3, Settings, Play, Calendar, CheckCircle2, XCircle, Clock, Loader2, Mic, Volume2, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
-import { projectId } from '/utils/supabase/info';
+import { projectId } from '../../../../utils/supabase/info';
 import { supabase } from '../../../lib/supabase';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';

@@ -35,7 +35,7 @@ import { StreamSettings } from './pages/dashboards/StreamSettings';
 import { AnalyticsPage as AdminAnalyticsPage } from './pages/admin/AnalyticsPage';
 import { NewsManagement } from './pages/admin/NewsManagement';
 import { Toaster } from './components/ui/sonner';
-import soulFmLogo from 'figma:asset/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png';
+import soulFmLogo from '@/assets/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png';
 import BeachCarDemo from './pages/BeachCarDemo';
 import { Footer } from './components/Footer';
 import { AnimatedPalm } from './components/AnimatedPalm';

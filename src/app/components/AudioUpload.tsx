@@ -3,7 +3,7 @@ import { Upload, X, Music, Loader2, FileAudio } from 'lucide-react';
 import { Button } from './ui/button';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
-import { projectId, publicAnonKey } from '/utils/supabase/info';
+import { projectId, publicAnonKey } from '../../../utils/supabase/info';
 
 interface AudioUploadProps {
   onUpload: (url: string, metadata?: any) => void;
