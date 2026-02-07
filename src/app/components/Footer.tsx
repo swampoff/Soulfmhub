@@ -17,7 +17,7 @@ import {
   Linkedin,
   Github
 } from 'lucide-react';
-import soulFmLogo from 'figma:asset/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png';
+import soulFmLogo from '@/assets/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png';
 import { AnimatedBeach } from './AnimatedBeach';
 import { AnimatedWaves } from './AnimatedWaves';
 
