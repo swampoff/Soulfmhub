@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { Button } from '../../components/ui/button';
 import { Card } from '../../components/ui/card';
-import { projectId, publicAnonKey } from '/utils/supabase/info';
+import { projectId } from '/utils/supabase/info';
+import { getAuthHeaders } from '../../../lib/api';
 import { toast } from 'sonner';
 import { 
   PhoneCall, 
@@ -44,18 +45,37 @@ export function CallQueueManagement() {
 
   useEffect(() => {
     loadCalls();
+    fetchCurrentDJSession();
     const interval = setInterval(loadCalls, 5000);
     return () => clearInterval(interval);
   }, []);
 
+  async function fetchCurrentDJSession() {
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(
+        `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/dj-sessions/current`,
+        {
+          headers
+        }
+      );
+      if (!response.ok) return;
+      const data = await response.json();
+      if (data.isLive && data.session?.id) {
+        setSessionId(data.session.id);
+      }
+    } catch (error) {
+      console.error('Error fetching DJ session:', error);
+    }
+  }
+
   async function loadCalls() {
     try {
+      const headers = await getAuthHeaders();
       const response = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/call-queue`,
         {
-          headers: {
-            'Authorization': `Bearer ${publicAnonKey}`
-          }
+          headers
         }
       );
 
@@ -76,14 +96,12 @@ export function CallQueueManagement() {
 
   async function screenCall(callId: string, status: 'approved' | 'rejected', notes: string = '') {
     try {
+      const headers = await getAuthHeaders();
       const response = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/call-queue/${callId}/screen`,
         {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${publicAnonKey}`
-          },
+          headers,
           body: JSON.stringify({ status, notes })
         }
       );
@@ -100,19 +118,17 @@ export function CallQueueManagement() {
 
   async function connectCall(callId: string) {
     if (!sessionId) {
-      toast.error('No active DJ session. Start a session first.');
+      toast.error('No active DJ session. Go to Live DJ Console to start a session first.');
       return;
     }
 
     try {
+      const headers = await getAuthHeaders();
       const response = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/call-queue/${callId}/connect`,
         {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${publicAnonKey}`
-          },
+          headers,
           body: JSON.stringify({ session_id: sessionId })
         }
       );
@@ -129,13 +145,12 @@ export function CallQueueManagement() {
 
   async function disconnectCall(callId: string) {
     try {
+      const headers = await getAuthHeaders();
       const response = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/call-queue/${callId}/disconnect`,
         {
           method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${publicAnonKey}`
-          }
+          headers
         }
       );
 

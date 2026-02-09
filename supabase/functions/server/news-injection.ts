@@ -1,50 +1,52 @@
 /**
  * Soul FM - News Injection System
- * Автоматическая озвучка и встраивание новостей в эфир
+ * Automatic voice-over generation and news injection into the stream
+ * 
+ * IMPORTANT: All interfaces use snake_case to match Supabase/Postgres column names.
  */
 
-import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { createClient } from 'npm:@supabase/supabase-js@2';
 import { generateAudioWithElevenLabs } from './content-automation-api.ts';
 
-// ==================== TYPES ====================
+// ==================== TYPES (snake_case to match DB) ====================
 
 export interface NewsVoiceOver {
   id: string;
-  newsId: string;
-  newsTitle: string;
-  newsContent: string;
-  audioUrl: string;
-  voiceId: string;
-  voiceName: string;
+  news_id: string;
+  news_title: string;
+  news_content: string;
+  audio_url: string;
+  voice_id: string;
+  voice_name: string;
   duration: number;
-  isActive: boolean;
-  playCount: number;
-  lastPlayed?: string;
-  createdAt: string;
+  is_active: boolean;
+  play_count: number;
+  last_played?: string;
+  created_at: string;
 }
 
 export interface InjectionRule {
   id: string;
   name: string;
   frequency: 'hourly' | 'every2h' | 'every3h' | 'custom';
-  customTimes?: string[]; // ['08:00', '12:00', '18:00']
-  daysOfWeek?: number[]; // [1,2,3,4,5] = Mon-Fri
-  newsCategories?: string[]; // ['breaking', 'music', 'local']
-  maxNewsPerSlot: number;
-  priorityOrder: 'latest' | 'random' | 'priority';
-  introJingleId?: string;
-  outroJingleId?: string;
-  isActive: boolean;
-  createdAt: string;
+  custom_times?: string[]; // ['08:00', '12:00', '18:00']
+  days_of_week?: number[]; // [1,2,3,4,5] = Mon-Fri
+  news_categories?: string[]; // ['breaking', 'music', 'local']
+  max_news_per_slot: number;
+  priority_order: 'latest' | 'random' | 'priority';
+  intro_jingle_id?: string;
+  outro_jingle_id?: string;
+  is_active: boolean;
+  created_at: string;
 }
 
 export interface NewsQueueItem {
   id: string;
-  newsVoiceOverId: string;
-  scheduledTime: string;
+  news_voice_over_id: string;
+  scheduled_time: string;
   status: 'pending' | 'playing' | 'completed' | 'skipped';
-  playedAt?: string;
-  ruleId: string;
+  played_at?: string;
+  rule_id: string;
 }
 
 // ==================== GENERATE NEWS VOICE-OVER ====================
@@ -57,7 +59,7 @@ export async function generateNewsVoiceOver(
   voiceName: string,
   elevenLabsApiKey: string
 ): Promise<{ audioUrl: string; duration: number }> {
-  console.log(`📰 Generating voice-over for news: ${newsTitle}`);
+  console.log(`Generating voice-over for news: ${newsTitle}`);
   
   // Prepare the script for TTS
   const script = prepareNewsScript(newsTitle, newsContent);
@@ -80,22 +82,26 @@ export async function generateNewsVoiceOver(
     });
   
   if (uploadError) {
-    throw new Error(`Failed to upload audio: ${uploadError.message}`);
+    throw new Error(`Failed to upload news audio to storage: ${uploadError.message}`);
   }
   
   // Get signed URL (valid for 1 year)
-  const { data: urlData } = await supabase.storage
+  const { data: urlData, error: urlError } = await supabase.storage
     .from('make-06086aa3-news-voiceovers')
     .createSignedUrl(fileName, 365 * 24 * 60 * 60);
+  
+  if (urlError || !urlData?.signedUrl) {
+    throw new Error(`Failed to create signed URL for news audio: ${urlError?.message || 'no URL returned'}`);
+  }
   
   // Estimate duration (rough calculation: ~150 words per minute)
   const wordCount = script.split(/\s+/).length;
   const duration = Math.ceil((wordCount / 150) * 60); // in seconds
   
-  console.log(`✅ Voice-over generated: ${fileName} (${duration}s)`);
+  console.log(`Voice-over generated: ${fileName} (${duration}s)`);
   
   return {
-    audioUrl: urlData!.signedUrl,
+    audioUrl: urlData.signedUrl,
     duration
   };
 }
@@ -132,55 +138,62 @@ export async function calculateNextInjectionTimes(
   // Calculate for next 24 hours
   const endTime = new Date(now.getTime() + 24 * 60 * 60 * 1000);
   
+  // Use snake_case fields from DB
+  const daysOfWeek = rule.days_of_week;
+  const customTimes = rule.custom_times;
+  
   switch (rule.frequency) {
-    case 'hourly':
+    case 'hourly': {
       // Every hour on the hour
       let currentHour = new Date(now);
       currentHour.setMinutes(0, 0, 0);
       currentHour.setHours(currentHour.getHours() + 1); // Next hour
       
       while (currentHour < endTime) {
-        if (shouldPlayOnDay(currentHour, rule.daysOfWeek)) {
+        if (shouldPlayOnDay(currentHour, daysOfWeek)) {
           times.push(new Date(currentHour));
         }
         currentHour = new Date(currentHour.getTime() + 60 * 60 * 1000);
       }
       break;
+    }
       
-    case 'every2h':
+    case 'every2h': {
       let current2h = new Date(now);
       current2h.setMinutes(0, 0, 0);
       current2h.setHours(current2h.getHours() + 2 - (current2h.getHours() % 2));
       
       while (current2h < endTime) {
-        if (shouldPlayOnDay(current2h, rule.daysOfWeek)) {
+        if (shouldPlayOnDay(current2h, daysOfWeek)) {
           times.push(new Date(current2h));
         }
         current2h = new Date(current2h.getTime() + 2 * 60 * 60 * 1000);
       }
       break;
+    }
       
-    case 'every3h':
+    case 'every3h': {
       let current3h = new Date(now);
       current3h.setMinutes(0, 0, 0);
       current3h.setHours(current3h.getHours() + 3 - (current3h.getHours() % 3));
       
       while (current3h < endTime) {
-        if (shouldPlayOnDay(current3h, rule.daysOfWeek)) {
+        if (shouldPlayOnDay(current3h, daysOfWeek)) {
           times.push(new Date(current3h));
         }
         current3h = new Date(current3h.getTime() + 3 * 60 * 60 * 1000);
       }
       break;
+    }
       
     case 'custom':
-      if (rule.customTimes && rule.customTimes.length > 0) {
+      if (customTimes && customTimes.length > 0) {
         for (let day = 0; day < 2; day++) { // Today and tomorrow
           const date = new Date(now.getTime() + day * 24 * 60 * 60 * 1000);
           
-          if (!shouldPlayOnDay(date, rule.daysOfWeek)) continue;
+          if (!shouldPlayOnDay(date, daysOfWeek)) continue;
           
-          for (const timeStr of rule.customTimes) {
+          for (const timeStr of customTimes) {
             const [hours, minutes] = timeStr.split(':').map(Number);
             const scheduleTime = new Date(date);
             scheduleTime.setHours(hours, minutes, 0, 0);
@@ -213,6 +226,8 @@ export async function selectNewsForInjection(
 ): Promise<NewsVoiceOver[]> {
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
   
+  const maxPerSlot = rule.max_news_per_slot || 1;
+  
   // Build query
   let query = supabase
     .from('news_voice_overs_06086aa3')
@@ -220,13 +235,13 @@ export async function selectNewsForInjection(
     .eq('is_active', true);
   
   // Filter by categories if specified
-  if (rule.newsCategories && rule.newsCategories.length > 0) {
+  if (rule.news_categories && rule.news_categories.length > 0) {
     // This would need a join with news table to filter by category
     // For now, we'll get all active voice-overs
   }
   
   // Order by priority
-  switch (rule.priorityOrder) {
+  switch (rule.priority_order) {
     case 'latest':
       query = query.order('created_at', { ascending: false });
       break;
@@ -238,22 +253,22 @@ export async function selectNewsForInjection(
       break;
   }
   
-  const { data: newsVoiceOvers, error } = await query.limit(rule.maxNewsPerSlot || 1);
+  const { data: newsVoiceOvers, error } = await query.limit(maxPerSlot * 3); // Fetch extra for random selection
   
   if (error) {
-    console.error('Error fetching news voice-overs:', error);
+    console.error('Error fetching news voice-overs for injection:', error);
     return [];
   }
   
-  if (rule.priorityOrder === 'random' && newsVoiceOvers) {
-    // Shuffle array
+  if (rule.priority_order === 'random' && newsVoiceOvers) {
+    // Fisher-Yates shuffle
     for (let i = newsVoiceOvers.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [newsVoiceOvers[i], newsVoiceOvers[j]] = [newsVoiceOvers[j], newsVoiceOvers[i]];
     }
   }
   
-  return (newsVoiceOvers || []).slice(0, rule.maxNewsPerSlot || 1);
+  return (newsVoiceOvers || []).slice(0, maxPerSlot);
 }
 
 // ==================== QUEUE NEWS FOR PLAYBACK ====================
@@ -278,10 +293,10 @@ export async function queueNewsForPlayback(
   
   if (error) {
     console.error('Error queueing news:', error);
-    throw new Error(`Failed to queue news: ${error.message}`);
+    throw new Error(`Failed to queue news for playback: ${error.message}`);
   }
   
-  console.log(`✅ News queued for ${scheduledTime.toISOString()}`);
+  console.log(`News queued for ${scheduledTime.toISOString()}`);
 }
 
 // ==================== GET NEXT NEWS TO PLAY ====================
@@ -306,7 +321,7 @@ export async function getNextNewsToPlay(
     .single();
   
   if (error && error.code !== 'PGRST116') { // PGRST116 = no rows
-    console.error('Error fetching next news:', error);
+    console.error('Error fetching next news to play:', error);
     return null;
   }
   
@@ -324,7 +339,7 @@ export async function markNewsAsPlayed(
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
   
   // Update queue item
-  await supabase
+  const { error: queueError } = await supabase
     .from('news_queue_06086aa3')
     .update({
       status: 'completed',
@@ -332,12 +347,40 @@ export async function markNewsAsPlayed(
     })
     .eq('id', queueItemId);
   
-  // Increment play count
-  await supabase.rpc('increment_news_play_count', {
+  if (queueError) {
+    console.error(`Error marking news queue item ${queueItemId} as completed:`, queueError);
+  }
+  
+  // Increment play count - use direct update as fallback if RPC doesn't exist
+  const { error: rpcError } = await supabase.rpc('increment_news_play_count', {
     voice_over_id: newsVoiceOverId
   });
   
-  console.log(`✅ News marked as played: ${queueItemId}`);
+  if (rpcError) {
+    console.error('RPC increment_news_play_count failed, trying direct update:', rpcError);
+    // Fallback: direct increment
+    try {
+      const { data: vo } = await supabase
+        .from('news_voice_overs_06086aa3')
+        .select('play_count')
+        .eq('id', newsVoiceOverId)
+        .single();
+      
+      if (vo) {
+        await supabase
+          .from('news_voice_overs_06086aa3')
+          .update({ 
+            play_count: (vo.play_count || 0) + 1,
+            last_played: new Date().toISOString()
+          })
+          .eq('id', newsVoiceOverId);
+      }
+    } catch (fallbackError) {
+      console.error('Fallback play count increment also failed:', fallbackError);
+    }
+  }
+  
+  console.log(`News marked as played: queue=${queueItemId}, voiceOver=${newsVoiceOverId}`);
 }
 
 // ==================== SCHEDULE MANAGER ====================
@@ -346,7 +389,7 @@ export async function scheduleNewsInjections(
   supabaseUrl: string,
   supabaseServiceKey: string
 ): Promise<number> {
-  console.log('📅 Scheduling news injections...');
+  console.log('Scheduling news injections...');
   
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
   
@@ -356,7 +399,12 @@ export async function scheduleNewsInjections(
     .select('*')
     .eq('is_active', true);
   
-  if (rulesError || !rules || rules.length === 0) {
+  if (rulesError) {
+    console.error('Error fetching injection rules:', rulesError);
+    return 0;
+  }
+  
+  if (!rules || rules.length === 0) {
     console.log('No active injection rules found');
     return 0;
   }
@@ -364,30 +412,35 @@ export async function scheduleNewsInjections(
   let scheduledCount = 0;
   
   for (const rule of rules) {
-    // Calculate next injection times
-    const times = await calculateNextInjectionTimes(rule);
-    
-    // Select news for each time slot
-    for (const time of times) {
-      const newsItems = await selectNewsForInjection(rule, supabaseUrl, supabaseServiceKey);
+    try {
+      // Calculate next injection times (rule comes from DB with snake_case fields)
+      const times = await calculateNextInjectionTimes(rule as InjectionRule);
       
-      for (const newsItem of newsItems) {
-        // Check if already queued
-        const { data: existing } = await supabase
-          .from('news_queue_06086aa3')
-          .select('id')
-          .eq('news_voice_over_id', newsItem.id)
-          .eq('scheduled_time', time.toISOString())
-          .single();
+      // Select news for each time slot
+      for (const time of times) {
+        const newsItems = await selectNewsForInjection(rule as InjectionRule, supabaseUrl, supabaseServiceKey);
         
-        if (!existing) {
-          await queueNewsForPlayback(rule.id, newsItem.id, time, supabaseUrl, supabaseServiceKey);
-          scheduledCount++;
+        for (const newsItem of newsItems) {
+          // Check if already queued
+          const { data: existing } = await supabase
+            .from('news_queue_06086aa3')
+            .select('id')
+            .eq('news_voice_over_id', newsItem.id)
+            .eq('scheduled_time', time.toISOString())
+            .single();
+          
+          if (!existing) {
+            await queueNewsForPlayback(rule.id, newsItem.id, time, supabaseUrl, supabaseServiceKey);
+            scheduledCount++;
+          }
         }
       }
+    } catch (ruleError) {
+      console.error(`Error scheduling for rule "${rule.name}":`, ruleError);
+      // Continue with other rules
     }
   }
   
-  console.log(`✅ Scheduled ${scheduledCount} news injections`);
+  console.log(`Scheduled ${scheduledCount} news injections`);
   return scheduledCount;
 }

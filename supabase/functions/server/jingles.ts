@@ -342,12 +342,16 @@ export function setupJinglesRoutes(app: Hono, supabase: any, requireAuth: any) {
       const rule = {
         id: ruleId,
         jingleId: body.jingleId,
-        ruleType: body.ruleType || 'interval', // interval, time_based, track_count, show_based
+        ruleType: body.ruleType || 'interval', // interval, time_based, track_count, show_based, schedule_based
         intervalMinutes: body.intervalMinutes || null, // For interval type
         specificTimes: body.specificTimes || [], // For time_based type, e.g., ["09:00", "12:00"]
         daysOfWeek: body.daysOfWeek || null, // null = all days, or array [0-6] where 0=Sunday
         trackInterval: body.trackInterval || null, // For track_count type
         showId: body.showId || null, // For show_based type
+        // Schedule-based fields
+        scheduleId: body.scheduleId || null, // For schedule_based type — specific schedule slot
+        schedulePosition: body.schedulePosition || null, // 'intro' | 'outro' | 'during'
+        playlistId: body.playlistId || null, // For schedule_based — match by playlist
         position: body.position || 'before_track', // before_track, after_track, between_tracks
         minGapMinutes: body.minGapMinutes || 15, // Minimum gap between plays of this jingle
         active: body.active !== undefined ? body.active : true,

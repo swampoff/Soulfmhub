@@ -29,6 +29,7 @@ import {
   X,
   ChevronRight,
   Home,
+  ListMusic,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { api } from '../../../lib/api';
@@ -102,29 +103,48 @@ export function AdminHomePage() {
     if (!silent) setLoading(true);
     try {
       const { nowPlaying: np } = await api.getNowPlaying();
-      if (np) {
-        setNowPlaying(np);
+      if (np && np.track) {
+        const elapsed = np.startTime
+          ? Math.floor((Date.now() - new Date(np.startTime).getTime()) / 1000)
+          : 0;
+        setNowPlaying({
+          title: np.track.title || 'Unknown',
+          artist: np.track.artist || 'Unknown',
+          album: np.track.album,
+          coverUrl: np.track.cover,
+          startTime: np.startTime || new Date().toISOString(),
+          endTime: '',
+          timeElapsed: Math.min(elapsed, np.track.duration || 180),
+          duration: np.track.duration || 180,
+        });
         setStreamStatus('online');
       } else {
         setStreamStatus('offline');
       }
 
-      const { schedule } = await api.getSchedule(format(new Date(), 'yyyy-MM-dd'));
-      const now = new Date();
-      const upcoming = (schedule || [])
-        .filter((show: any) => {
-          const showTime = new Date(show.date + 'T' + show.start_time);
-          return showTime > now;
-        })
-        .slice(0, 5)
-        .map((show: any) => ({
-          id: show.id,
-          title: show.title,
-          startTime: show.start_time,
-          endTime: show.end_time,
-          date: show.date,
-        }));
-      setUpcomingShows(upcoming);
+      // Load upcoming schedule
+      try {
+        const scheduleData = await api.getAllSchedules();
+        const now = new Date();
+        const upcoming = (scheduleData.schedules || [])
+          .filter((show: any) => {
+            if (!show.startTime) return false;
+            const currentTime = now.toTimeString().slice(0, 5);
+            return show.startTime > currentTime;
+          })
+          .slice(0, 5)
+          .map((show: any) => ({
+            id: show.id,
+            title: show.title || show.name || 'Untitled',
+            startTime: show.startTime || '00:00',
+            endTime: show.endTime || '00:00',
+            date: format(new Date(), 'yyyy-MM-dd'),
+          }));
+        setUpcomingShows(upcoming);
+      } catch (schedError) {
+        console.error('Error loading schedule:', schedError);
+        setUpcomingShows([]);
+      }
 
       const [tracksRes, showsRes, podcastsRes] = await Promise.allSettled([
         api.getTracks(),
@@ -827,21 +847,21 @@ export function AdminHomePage() {
               <h2 className="text-base lg:text-lg font-semibold mb-4">Quick Actions</h2>
               <div className="space-y-2">
                 <button 
+                  onClick={() => navigate('/admin/playlists')}
+                  className="w-full flex items-center gap-3 p-3 bg-gradient-to-r from-[#00d9ff]/10 to-[#00ffaa]/10 hover:from-[#00d9ff]/20 hover:to-[#00ffaa]/20 border border-[#00d9ff]/30 rounded-lg transition-all text-left group"
+                >
+                  <ListMusic className="size-4 text-[#00d9ff] group-hover:scale-110 transition-transform" />
+                  <div className="flex-1">
+                    <div className="text-sm font-semibold text-white">Playlists</div>
+                    <div className="text-xs text-gray-400">Manage playlists & send to air</div>
+                  </div>
+                </button>
+                <button 
                   onClick={() => navigate('/admin/stream-settings')}
                   className="w-full flex items-center gap-3 p-3 bg-white/5 hover:bg-white/10 rounded-lg transition-all text-left group"
                 >
                   <Settings className="size-4 text-[#00d9ff] group-hover:scale-110 transition-transform" />
                   <span className="text-sm">Stream Settings</span>
-                </button>
-                <button 
-                  onClick={() => navigate('/admin/upload-test')}
-                  className="w-full flex items-center gap-3 p-3 bg-gradient-to-r from-[#00d9ff]/10 to-[#00ffaa]/10 hover:from-[#00d9ff]/20 hover:to-[#00ffaa]/20 border border-[#00d9ff]/30 rounded-lg transition-all text-left group"
-                >
-                  <Upload className="size-4 text-[#00ffaa] group-hover:scale-110 transition-transform" />
-                  <div className="flex-1">
-                    <div className="text-sm font-semibold text-white">🧪 Upload Test Lab</div>
-                    <div className="text-xs text-gray-400">Test image & audio uploads</div>
-                  </div>
                 </button>
               </div>
             </motion.div>

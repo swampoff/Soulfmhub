@@ -101,15 +101,20 @@ export function PublicPlayer() {
   const loadLiveRadio = async () => {
     try {
       setLoading(true);
-      const streamUrl = api.getLiveRadioURL();
-      const response = await api.getRadioStatus();
+      // Use internal Auto DJ stream (signed URL from Storage)
+      const stream = await api.getCurrentStream();
       
-      if (!response.autoDJ?.isPlaying) {
+      if (!stream?.playing) {
         setError('Radio stream is offline. Please try again later.');
         return;
       }
 
-      const currentTrack = response.autoDJ.currentTrack;
+      if (!stream.audioUrl) {
+        setError('No audio available. Auto DJ may be loading.');
+        return;
+      }
+
+      const currentTrack = stream.track;
       
       setTrack({
         id: 'live',
@@ -118,8 +123,8 @@ export function PublicPlayer() {
         album: currentTrack?.album,
         duration: currentTrack?.duration || 0,
         coverUrl: currentTrack?.coverUrl,
-        genre: currentTrack?.genre,
-        streamUrl
+        genre: undefined,
+        streamUrl: stream.audioUrl,
       });
       
     } catch (err: any) {

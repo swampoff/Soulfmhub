@@ -3,7 +3,7 @@
  * Handles news injection between tracks
  */
 
-import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { createClient } from 'npm:@supabase/supabase-js@2';
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
 const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -41,7 +41,7 @@ export async function checkForScheduledNews(): Promise<any | null> {
     
     const newsItem = queueItems[0];
     
-    console.log(`📰 Found scheduled news: "${newsItem.news_voice_over.news_title}" at ${newsItem.scheduled_time}`);
+    console.log(`Found scheduled news: "${newsItem.news_voice_over.news_title}" at ${newsItem.scheduled_time}`);
     
     return {
       queueId: newsItem.id,
@@ -77,7 +77,7 @@ export async function markNewsAsPlaying(queueId: string): Promise<void> {
     if (error) {
       console.error('Error marking news as playing:', error);
     } else {
-      console.log(`✅ Marked news queue item ${queueId} as playing`);
+      console.log(`Marked news queue item ${queueId} as playing`);
     }
   } catch (error: any) {
     console.error('Error in markNewsAsPlaying:', error);
@@ -100,17 +100,37 @@ export async function markNewsAsCompleted(queueId: string, voiceOverId: string):
       console.error('Error marking news as completed:', queueError);
     }
     
-    // Increment play count on voice-over
-    const { error: voError } = await supabase.rpc(
+    // Increment play count on voice-over - try RPC first, fallback to direct update
+    const { error: rpcError } = await supabase.rpc(
       'increment_news_play_count',
       { voice_over_id: voiceOverId }
     );
     
-    if (voError) {
-      console.error('Error incrementing news play count:', voError);
+    if (rpcError) {
+      console.error('RPC increment_news_play_count failed, using direct update:', rpcError);
+      // Fallback: direct increment
+      try {
+        const { data: vo } = await supabase
+          .from('news_voice_overs_06086aa3')
+          .select('play_count')
+          .eq('id', voiceOverId)
+          .single();
+        
+        if (vo) {
+          await supabase
+            .from('news_voice_overs_06086aa3')
+            .update({ 
+              play_count: (vo.play_count || 0) + 1,
+              last_played: new Date().toISOString()
+            })
+            .eq('id', voiceOverId);
+        }
+      } catch (fallbackError) {
+        console.error('Fallback play count increment also failed:', fallbackError);
+      }
     }
     
-    console.log(`✅ Marked news ${queueId} as completed and incremented play count`);
+    console.log(`Marked news ${queueId} as completed and incremented play count`);
   } catch (error: any) {
     console.error('Error in markNewsAsCompleted:', error);
   }
@@ -140,7 +160,7 @@ export async function checkForScheduledAnnouncement(type?: string): Promise<any 
     // Simple rotation: pick random announcement
     const announcement = data[Math.floor(Math.random() * data.length)];
     
-    console.log(`📻 Selected ${announcement.type} announcement: "${announcement.content.substring(0, 50)}..."`);
+    console.log(`Selected ${announcement.type} announcement: "${(announcement.content || '').substring(0, 50)}..."`);
     
     return {
       id: announcement.id,
@@ -160,15 +180,36 @@ export async function markAnnouncementPlayed(announcementId: string): Promise<vo
   try {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
     
-    const { error } = await supabase.rpc(
+    // Try RPC first, fallback to direct update
+    const { error: rpcError } = await supabase.rpc(
       'increment_announcement_play_count',
       { announcement_id: announcementId }
     );
     
-    if (error) {
-      console.error('Error marking announcement as played:', error);
+    if (rpcError) {
+      console.error('RPC increment_announcement_play_count failed, using direct update:', rpcError);
+      // Fallback: direct increment
+      try {
+        const { data: ann } = await supabase
+          .from('content_announcements_06086aa3')
+          .select('play_count')
+          .eq('id', announcementId)
+          .single();
+        
+        if (ann) {
+          await supabase
+            .from('content_announcements_06086aa3')
+            .update({ 
+              play_count: (ann.play_count || 0) + 1,
+              last_played: new Date().toISOString()
+            })
+            .eq('id', announcementId);
+        }
+      } catch (fallbackError) {
+        console.error('Fallback announcement play count increment also failed:', fallbackError);
+      }
     } else {
-      console.log(`✅ Marked announcement ${announcementId} as played`);
+      console.log(`Marked announcement ${announcementId} as played`);
     }
   } catch (error: any) {
     console.error('Error in markAnnouncementPlayed:', error);

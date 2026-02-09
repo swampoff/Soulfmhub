@@ -4,6 +4,7 @@ import { JingleRuleEditor } from './JingleRuleEditor';
 import { AutomationPresets } from './AutomationPresets';
 import { JingleTimeline } from './JingleTimeline';
 import { projectId } from '/utils/supabase/info';
+import { getAccessToken } from '../../../lib/api';
 
 type TabView = 'rules' | 'presets' | 'timeline';
 
@@ -12,7 +13,7 @@ export function JingleAutomation() {
 
   async function handleApplyPreset(preset: any) {
     try {
-      const token = localStorage.getItem('access_token');
+      const token = await getAccessToken();
       
       // Create rules from preset
       for (const presetRule of preset.rules) {

@@ -3,7 +3,8 @@ import { Upload, X, Image as ImageIcon, Loader2 } from 'lucide-react';
 import { Button } from './ui/button';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
-import { projectId, publicAnonKey } from '/utils/supabase/info';
+import { getAccessToken } from '../../lib/api';
+import { projectId } from '/utils/supabase/info';
 
 interface ImageUploadProps {
   onUpload: (url: string) => void;
@@ -59,7 +60,7 @@ export function ImageUpload({
         {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${publicAnonKey}`,
+            'Authorization': `Bearer ${await getAccessToken()}`,
           },
           body: formData,
         }

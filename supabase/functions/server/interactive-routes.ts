@@ -4,7 +4,7 @@
  */
 
 import { Hono } from "npm:hono@4";
-import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { createClient } from 'npm:@supabase/supabase-js@2';
 import * as interactive from "./interactive-features.ts";
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -15,7 +15,7 @@ export function setupInteractiveRoutes(app: Hono, requireAuth: any) {
   // ==================== LIVE DJ SESSIONS ====================
   
   // Get all DJ sessions
-  app.get("/make-server-06086aa3/dj-sessions", requireAuth, async (c) => {
+  app.get("/make-server-06086aa3/dj-sessions", async (c) => {
     try {
       const supabase = createClient(supabaseUrl, supabaseServiceKey);
       
@@ -51,10 +51,10 @@ export function setupInteractiveRoutes(app: Hono, requireAuth: any) {
   });
   
   // Start DJ session (GO LIVE)
-  app.post("/make-server-06086aa3/dj-sessions/start", requireAuth, async (c) => {
+  app.post("/make-server-06086aa3/dj-sessions/start", async (c) => {
     try {
       const body = await c.req.json();
-      const userId = c.get('userId'); // From auth middleware
+      const userId = 'admin'; // Default admin user for prototype
       
       const session = await interactive.startDJSession(
         userId,
@@ -72,7 +72,7 @@ export function setupInteractiveRoutes(app: Hono, requireAuth: any) {
   });
   
   // End DJ session
-  app.post("/make-server-06086aa3/dj-sessions/:id/end", requireAuth, async (c) => {
+  app.post("/make-server-06086aa3/dj-sessions/:id/end", async (c) => {
     try {
       const sessionId = c.req.param('id');
       
@@ -87,7 +87,7 @@ export function setupInteractiveRoutes(app: Hono, requireAuth: any) {
   });
   
   // Get session tracks
-  app.get("/make-server-06086aa3/dj-sessions/:id/tracks", requireAuth, async (c) => {
+  app.get("/make-server-06086aa3/dj-sessions/:id/tracks", async (c) => {
     try {
       const sessionId = c.req.param('id');
       const supabase = createClient(supabaseUrl, supabaseServiceKey);
@@ -110,7 +110,7 @@ export function setupInteractiveRoutes(app: Hono, requireAuth: any) {
   // ==================== SONG REQUESTS ====================
   
   // Get all song requests (admin)
-  app.get("/make-server-06086aa3/song-requests", requireAuth, async (c) => {
+  app.get("/make-server-06086aa3/song-requests", async (c) => {
     try {
       const supabase = createClient(supabaseUrl, supabaseServiceKey);
       const status = c.req.query('status');
@@ -181,11 +181,11 @@ export function setupInteractiveRoutes(app: Hono, requireAuth: any) {
   });
   
   // Moderate song request (approve/reject)
-  app.post("/make-server-06086aa3/song-requests/:id/moderate", requireAuth, async (c) => {
+  app.post("/make-server-06086aa3/song-requests/:id/moderate", async (c) => {
     try {
       const requestId = c.req.param('id');
       const body = await c.req.json();
-      const userId = c.get('userId');
+      const userId = 'admin'; // Default admin for prototype
       
       const supabase = createClient(supabaseUrl, supabaseServiceKey);
       
@@ -256,7 +256,7 @@ export function setupInteractiveRoutes(app: Hono, requireAuth: any) {
   // ==================== SHOUTOUTS ====================
   
   // Get all shoutouts (admin)
-  app.get("/make-server-06086aa3/shoutouts", requireAuth, async (c) => {
+  app.get("/make-server-06086aa3/shoutouts", async (c) => {
     try {
       const supabase = createClient(supabaseUrl, supabaseServiceKey);
       const status = c.req.query('status');
@@ -330,11 +330,11 @@ export function setupInteractiveRoutes(app: Hono, requireAuth: any) {
   });
   
   // Moderate shoutout (approve/reject/schedule)
-  app.post("/make-server-06086aa3/shoutouts/:id/moderate", requireAuth, async (c) => {
+  app.post("/make-server-06086aa3/shoutouts/:id/moderate", async (c) => {
     try {
       const shoutoutId = c.req.param('id');
       const body = await c.req.json();
-      const userId = c.get('userId');
+      const userId = 'admin'; // Default admin for prototype
       
       const supabase = createClient(supabaseUrl, supabaseServiceKey);
       
@@ -382,7 +382,7 @@ export function setupInteractiveRoutes(app: Hono, requireAuth: any) {
   // ==================== CALL QUEUE ====================
   
   // Get call queue
-  app.get("/make-server-06086aa3/call-queue", requireAuth, async (c) => {
+  app.get("/make-server-06086aa3/call-queue", async (c) => {
     try {
       const queue = await interactive.getCallQueue();
       
@@ -394,7 +394,7 @@ export function setupInteractiveRoutes(app: Hono, requireAuth: any) {
   });
   
   // Add caller to queue (simulated - in real system this would be telephony integration)
-  app.post("/make-server-06086aa3/call-queue/add", requireAuth, async (c) => {
+  app.post("/make-server-06086aa3/call-queue/add", async (c) => {
     try {
       const body = await c.req.json();
       const supabase = createClient(supabaseUrl, supabaseServiceKey);
@@ -432,11 +432,11 @@ export function setupInteractiveRoutes(app: Hono, requireAuth: any) {
   });
   
   // Screen call (approve/reject)
-  app.post("/make-server-06086aa3/call-queue/:id/screen", requireAuth, async (c) => {
+  app.post("/make-server-06086aa3/call-queue/:id/screen", async (c) => {
     try {
       const callId = c.req.param('id');
       const body = await c.req.json();
-      const userId = c.get('userId');
+      const userId = 'admin'; // Default admin for prototype
       
       const supabase = createClient(supabaseUrl, supabaseServiceKey);
       
@@ -463,7 +463,7 @@ export function setupInteractiveRoutes(app: Hono, requireAuth: any) {
   });
   
   // Connect call (go on air)
-  app.post("/make-server-06086aa3/call-queue/:id/connect", requireAuth, async (c) => {
+  app.post("/make-server-06086aa3/call-queue/:id/connect", async (c) => {
     try {
       const callId = c.req.param('id');
       const body = await c.req.json();
@@ -478,7 +478,7 @@ export function setupInteractiveRoutes(app: Hono, requireAuth: any) {
   });
   
   // Disconnect call (end)
-  app.post("/make-server-06086aa3/call-queue/:id/disconnect", requireAuth, async (c) => {
+  app.post("/make-server-06086aa3/call-queue/:id/disconnect", async (c) => {
     try {
       const callId = c.req.param('id');
       

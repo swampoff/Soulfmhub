@@ -8,7 +8,8 @@ import { Badge } from '../ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '../ui/dialog';
 import { Mic, Plus, Edit, Trash2, TestTube } from 'lucide-react';
 import { toast } from 'sonner';
-import { projectId, publicAnonKey } from '/utils/supabase/info';
+import { projectId } from '/utils/supabase/info';
+import { getAccessToken } from '../../../lib/api';
 
 interface Voice {
   id: string;
@@ -49,11 +50,12 @@ export default function AutomationVoicesManager() {
   const loadVoices = async () => {
     setLoading(true);
     try {
+      const token = await getAccessToken();
       const res = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/automation/voices`,
         {
           headers: {
-            'Authorization': `Bearer ${publicAnonKey}`,
+            'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json'
           }
         }
@@ -81,17 +83,19 @@ export default function AutomationVoicesManager() {
 
       const method = editingVoice ? 'PUT' : 'POST';
 
+      const token = await getAccessToken();
       const res = await fetch(url, {
         method,
         headers: {
-          'Authorization': `Bearer ${publicAnonKey}`,
+          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify(formData)
       });
 
       if (!res.ok) {
-        throw new Error('Failed to save voice');
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to save voice (${res.status})`);
       }
 
       toast.success(editingVoice ? 'Голос обновлён' : 'Голос создан');
@@ -124,12 +128,13 @@ export default function AutomationVoicesManager() {
     if (!confirm('Удалить голос?')) return;
 
     try {
+      const token = await getAccessToken();
       const res = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/automation/voices/${id}`,
         {
           method: 'DELETE',
           headers: {
-            'Authorization': `Bearer ${publicAnonKey}`
+            'Authorization': `Bearer ${token}`
           }
         }
       );
@@ -149,17 +154,38 @@ export default function AutomationVoicesManager() {
   const testVoice = async (voiceId: string) => {
     setTestingVoice(voiceId);
     try {
-      // This would test the voice with ElevenLabs API
-      toast.info('Тестирование голоса...');
-      
-      // In a real implementation, you would call the API to generate a test audio
-      setTimeout(() => {
+      const token = await getAccessToken();
+      const res = await fetch(
+        `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/automation/test-voice`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            voiceId: voiceId,
+            text: 'Привет! Это тестовое сообщение для проверки голоса на Soul FM Hub.'
+          })
+        }
+      );
+
+      const data = await res.json();
+
+      if (res.ok && data.success) {
         toast.success('Голос работает корректно');
-        setTestingVoice(null);
-      }, 2000);
-    } catch (error) {
+        // Play audio if URL provided
+        if (data.audioUrl) {
+          const audio = new Audio(data.audioUrl);
+          audio.play();
+        }
+      } else {
+        toast.error(`Ошибка тестирования: ${data.error || 'Неизвестная ошибка'}`);
+      }
+    } catch (error: any) {
       console.error('Test voice error:', error);
-      toast.error('Ошибка тестирования голоса');
+      toast.error('Ошибка тестирования голоса: ' + error.message);
+    } finally {
       setTestingVoice(null);
     }
   };

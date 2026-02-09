@@ -18,7 +18,8 @@ import {
   TrendingUp
 } from 'lucide-react';
 import { motion } from 'motion/react';
-import { projectId, publicAnonKey } from '/utils/supabase/info';
+import { projectId } from '/utils/supabase/info';
+import { getAuthHeaders } from '../../../lib/api';
 
 interface TestResult {
   name: string;
@@ -44,13 +45,14 @@ export function SystemTest() {
     const start = Date.now();
 
     try {
+      const headers = await getAuthHeaders();
       switch (testId) {
         case 'seed-news':
           const seedRes = await fetch(
             `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/seed-news-injection`,
             {
               method: 'POST',
-              headers: { Authorization: `Bearer ${publicAnonKey}` }
+              headers
             }
           );
           const seedData = await seedRes.json();
@@ -67,10 +69,7 @@ export function SystemTest() {
             `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/announcements/weather/generate`,
             {
               method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${publicAnonKey}`
-              },
+              headers,
               body: JSON.stringify({
                 location: 'Miami',
                 voiceId: '21m00Tcm4TlvDq8ikWAM',
@@ -92,10 +91,7 @@ export function SystemTest() {
             `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/announcements/time/generate`,
             {
               method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${publicAnonKey}`
-              },
+              headers,
               body: JSON.stringify({
                 voiceId: '21m00Tcm4TlvDq8ikWAM',
                 voiceName: 'Professional Voice'
@@ -116,10 +112,7 @@ export function SystemTest() {
             `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/announcements/station-id/generate`,
             {
               method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${publicAnonKey}`
-              },
+              headers,
               body: JSON.stringify({
                 voiceId: '21m00Tcm4TlvDq8ikWAM',
                 voiceName: 'Professional Voice'
@@ -140,7 +133,7 @@ export function SystemTest() {
             `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/news-injection/schedule/run`,
             {
               method: 'POST',
-              headers: { Authorization: `Bearer ${publicAnonKey}` }
+              headers
             }
           );
           const scheduleData = await scheduleRes.json();

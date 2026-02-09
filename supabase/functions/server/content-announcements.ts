@@ -3,7 +3,7 @@
  * Weather, Traffic, Time announcements with TTS generation
  */
 
-import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { createClient } from 'npm:@supabase/supabase-js@2';
 import { generateAudioWithElevenLabs } from './content-automation-api.ts';
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL')!;

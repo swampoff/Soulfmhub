@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AdminLayout } from '../../components/admin/AdminLayout';
 import { NewsVoiceOverManager } from '../../components/admin/NewsVoiceOverManager';
 import { NewsInjectionRules } from '../../components/admin/NewsInjectionRules';
@@ -20,7 +20,8 @@ import {
   Loader2
 } from 'lucide-react';
 import { motion } from 'motion/react';
-import { projectId, publicAnonKey } from '/utils/supabase/info';
+import { projectId } from '/utils/supabase/info';
+import { getAuthHeaders } from '../../../lib/api';
 
 export function NewsInjection() {
   const [activeTab, setActiveTab] = useState('voice-overs');
@@ -31,10 +32,11 @@ export function NewsInjection() {
   const loadStats = async () => {
     setLoadingStats(true);
     try {
+      const headers = await getAuthHeaders();
       const response = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/news-injection/stats`,
         {
-          headers: { Authorization: `Bearer ${publicAnonKey}` }
+          headers
         }
       );
 
@@ -52,11 +54,12 @@ export function NewsInjection() {
   const runScheduling = async () => {
     setScheduling(true);
     try {
+      const headers = await getAuthHeaders();
       const response = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/news-injection/schedule/run`,
         {
           method: 'POST',
-          headers: { Authorization: `Bearer ${publicAnonKey}` }
+          headers
         }
       );
 
@@ -281,10 +284,11 @@ function QueueView() {
   const loadQueue = async () => {
     setLoading(true);
     try {
+      const headers = await getAuthHeaders();
       const response = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/news-injection/queue`,
         {
-          headers: { Authorization: `Bearer ${publicAnonKey}` }
+          headers
         }
       );
 

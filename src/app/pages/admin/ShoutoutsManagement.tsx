@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { Button } from '../../components/ui/button';
 import { Card } from '../../components/ui/card';
-import { projectId, publicAnonKey } from '/utils/supabase/info';
+import { projectId } from '/utils/supabase/info';
+import { getAuthHeaders } from '../../../lib/api';
 import { toast } from 'sonner';
 import { 
   MessageCircle, 
@@ -54,12 +55,11 @@ export function ShoutoutsManagement() {
 
   async function loadShoutouts() {
     try {
+      const headers = await getAuthHeaders();
       const url = `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/shoutouts${filter !== 'all' ? `?status=${filter}` : ''}`;
       
       const response = await fetch(url, {
-        headers: {
-          'Authorization': `Bearer ${publicAnonKey}`
-        }
+        headers
       });
 
       if (!response.ok) throw new Error('Failed to load shoutouts');
@@ -76,12 +76,11 @@ export function ShoutoutsManagement() {
 
   async function loadStats() {
     try {
+      const headers = await getAuthHeaders();
       const response = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/shoutouts/stats`,
         {
-          headers: {
-            'Authorization': `Bearer ${publicAnonKey}`
-          }
+          headers
         }
       );
 
@@ -102,14 +101,12 @@ export function ShoutoutsManagement() {
     ttsScript?: string
   ) {
     try {
+      const headers = await getAuthHeaders();
       const response = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/shoutouts/${shoutoutId}/moderate`,
         {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${publicAnonKey}`
-          },
+          headers,
           body: JSON.stringify({
             status,
             scheduled_date: scheduledDate,

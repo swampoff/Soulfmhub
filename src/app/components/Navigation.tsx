@@ -148,7 +148,7 @@ export function Navigation() {
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : (
-              <Link to="/auth">
+              <Link to="/setup">
                 <Button 
                   size="sm" 
                   className="bg-[#00d9ff] hover:bg-[#00b8dd] text-[#0a1628] font-semibold"

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, Component, ErrorInfo, ReactNode } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
 import { AppProvider, useApp } from '../context/AppContext';
 import { Navigation } from './components/Navigation';
@@ -51,12 +51,67 @@ import { AnimatedPalm } from './components/AnimatedPalm';
 import { motion } from 'motion/react';
 import { Button } from './components/ui/button';
 
+// Error Boundary Component
+class ErrorBoundary extends Component<
+  { children: ReactNode; fallback?: ReactNode },
+  { hasError: boolean; error: Error | null }
+> {
+  constructor(props: { children: ReactNode; fallback?: ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error('[ErrorBoundary] Caught error:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      if (this.props.fallback) {
+        return this.props.fallback;
+      }
+      return (
+        <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-[#0a1628] via-[#0d1a2d] to-[#0a1628]">
+          <div className="text-center max-w-md px-6">
+            <img 
+              src={soulFmLogo} 
+              alt="Soul FM" 
+              className="h-20 w-auto mx-auto mb-6"
+              style={{
+                filter: 'drop-shadow(0 0 20px rgba(0, 217, 255, 0.4))'
+              }}
+            />
+            <h1 className="text-2xl font-bold text-[#00d9ff] mb-3">
+              Something went wrong
+            </h1>
+            <p className="text-cyan-100/60 mb-6 text-sm">
+              {this.state.error?.message || 'An unexpected error occurred'}
+            </p>
+            <Button
+              onClick={() => {
+                this.setState({ hasError: false, error: null });
+                window.location.reload();
+              }}
+              className="bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] text-slate-900 font-bold px-6 py-3"
+            >
+              Reload App
+            </Button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // Simple Admin Access Component (no auth required)
 function AdminAccess({ children }: { children: React.ReactNode }) {
   const [isAdmin, setIsAdmin] = useState(false);
   
-  console.log('AdminAccess rendered, isAdmin:', isAdmin);
-
   if (!isAdmin) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-[#0a1628] via-[#0d1a2d] to-[#0a1628]">
@@ -78,10 +133,7 @@ function AdminAccess({ children }: { children: React.ReactNode }) {
           </h1>
           <p className="text-cyan-100/60 mb-8">Click to enter admin dashboard</p>
           <Button
-            onClick={() => {
-              console.log('Enter Admin button clicked!');
-              setIsAdmin(true);
-            }}
+            onClick={() => setIsAdmin(true)}
             className="bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] text-slate-900 text-lg px-8 py-6 hover:shadow-lg hover:shadow-cyan-500/30"
           >
             Enter Admin
@@ -91,7 +143,6 @@ function AdminAccess({ children }: { children: React.ReactNode }) {
     );
   }
 
-  console.log('AdminAccess rendering children...');
   return <>{children}</>;
 }
 
@@ -259,9 +310,7 @@ function AppContent() {
           path="/admin/playlists"
           element={
             <AdminAccess>
-              <AdminLayout>
-                <PlaylistsManagement />
-              </AdminLayout>
+              <PlaylistsManagement />
             </AdminAccess>
           }
         />
@@ -431,8 +480,10 @@ function AppContent() {
 
 export default function App() {
   return (
-    <AppProvider>
-      <AppContent />
-    </AppProvider>
+    <ErrorBoundary>
+      <AppProvider>
+        <AppContent />
+      </AppProvider>
+    </ErrorBoundary>
   );
 }

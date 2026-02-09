@@ -65,6 +65,7 @@ export function StreamSettings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     loadSettings();
@@ -72,13 +73,18 @@ export function StreamSettings() {
   }, []);
 
   const loadSettings = async () => {
+    setLoadError(null);
+    setLoading(true);
     try {
       const response = await api.getStreamSettings();
       if (response.settings) {
         setSettings(response.settings);
       }
-    } catch (error) {
-      console.error('Error loading settings:', error);
+    } catch (error: any) {
+      const msg = error?.message || String(error);
+      console.error('Error loading settings:', msg);
+      setLoadError(msg);
+      toast.error('Could not load stream settings — the server may still be starting up.');
     } finally {
       setLoading(false);
     }
@@ -88,8 +94,8 @@ export function StreamSettings() {
     try {
       const response = await api.getPlaylists();
       setPlaylists(response.playlists || []);
-    } catch (error) {
-      console.error('Error loading playlists:', error);
+    } catch (error: any) {
+      console.error('Error loading playlists:', error?.message || error);
     }
   };
 
@@ -122,6 +128,27 @@ export function StreamSettings() {
       <AdminLayout>
         <div className="flex items-center justify-center py-12 sm:py-20">
           <RefreshCw className="size-6 sm:size-8 text-[#00d9ff] animate-spin" />
+        </div>
+      </AdminLayout>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <AdminLayout>
+        <div className="flex flex-col items-center justify-center py-12 sm:py-20 gap-4">
+          <AlertCircle className="size-10 text-red-400" />
+          <p className="text-white/70 text-sm text-center max-w-md">
+            Could not connect to the server. It may still be starting up (cold start).
+          </p>
+          <p className="text-white/40 text-xs text-center font-mono max-w-md">{loadError}</p>
+          <Button
+            onClick={loadSettings}
+            className="bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] text-black font-medium"
+          >
+            <RefreshCw className="size-4 mr-2" />
+            Retry
+          </Button>
         </div>
       </AdminLayout>
     );

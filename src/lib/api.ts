@@ -1,6 +1,35 @@
 import { API_BASE, supabase } from './supabase';
 import { publicAnonKey } from '../../utils/supabase/info';
 
+// ── Retry-aware fetch (handles cold-start / transient failures) ──────
+async function fetchWithRetry(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+  retries = 3,
+  backoff = 1500,
+): Promise<Response> {
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000); // 15 s timeout
+      const response = await fetch(input, { ...init, signal: controller.signal });
+      clearTimeout(timeout);
+      return response;
+    } catch (err: any) {
+      lastError = err;
+      console.warn(
+        `[API] Fetch attempt ${attempt + 1}/${retries} failed:`,
+        err?.message || err,
+      );
+      if (attempt < retries - 1) {
+        await new Promise((r) => setTimeout(r, backoff * (attempt + 1)));
+      }
+    }
+  }
+  throw lastError ?? new Error('Fetch failed after retries');
+}
+
 async function getAuthHeaders() {
   const { data: { session } } = await supabase.auth.getSession();
   return {
@@ -21,6 +50,9 @@ async function getAccessToken() {
   return session?.access_token || publicAnonKey;
 }
 
+// Exported helpers for admin components that make direct fetch calls
+export { getAuthHeaders, getAccessToken, getPublicHeaders };
+
 export const api = {
   // Auth
   async signUp(email: string, password: string, name: string, role: string = 'listener') {
@@ -28,7 +60,7 @@ export const api = {
     
     try {
       const headers = await getPublicHeaders();
-      const response = await fetch(`${API_BASE}/auth/signup`, {
+      const response = await fetchWithRetry(`${API_BASE}/auth/signup`, {
         method: 'POST',
         headers,
         body: JSON.stringify({ email, password, name, role }),
@@ -76,19 +108,19 @@ export const api = {
 
   async getProfile() {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/auth/profile`, { headers });
+    const response = await fetchWithRetry(`${API_BASE}/auth/profile`, { headers });
     return response.json();
   },
 
   // Stream
   async getNowPlaying() {
-    const response = await fetch(`${API_BASE}/stream/nowplaying`);
+    const response = await fetchWithRetry(`${API_BASE}/stream/nowplaying`);
     return response.json();
   },
 
   async updateNowPlaying(track: any, show: any) {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/stream/nowplaying`, {
+    const response = await fetchWithRetry(`${API_BASE}/stream/nowplaying`, {
       method: 'POST',
       headers,
       body: JSON.stringify({ track, show }),
@@ -97,13 +129,13 @@ export const api = {
   },
 
   async getHistory(limit = 20) {
-    const response = await fetch(`${API_BASE}/stream/history?limit=${limit}`);
+    const response = await fetchWithRetry(`${API_BASE}/stream/history?limit=${limit}`);
     return response.json();
   },
 
   async updateStreamStatus(status: any) {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/stream/status`, {
+    const response = await fetchWithRetry(`${API_BASE}/stream/status`, {
       method: 'POST',
       headers,
       body: JSON.stringify(status),
@@ -114,18 +146,18 @@ export const api = {
   // Tracks
   async getTracks(filters?: { genre?: string; search?: string }) {
     const params = new URLSearchParams(filters as any);
-    const response = await fetch(`${API_BASE}/tracks?${params}`);
+    const response = await fetchWithRetry(`${API_BASE}/tracks?${params}`);
     return response.json();
   },
 
   async getTrack(id: string) {
-    const response = await fetch(`${API_BASE}/tracks/${id}`);
+    const response = await fetchWithRetry(`${API_BASE}/tracks/${id}`);
     return response.json();
   },
 
   async createTrack(track: any) {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/tracks`, {
+    const response = await fetchWithRetry(`${API_BASE}/tracks`, {
       method: 'POST',
       headers,
       body: JSON.stringify(track),
@@ -135,7 +167,7 @@ export const api = {
 
   async updateTrack(id: string, track: any) {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/tracks/${id}`, {
+    const response = await fetchWithRetry(`${API_BASE}/tracks/${id}`, {
       method: 'PUT',
       headers,
       body: JSON.stringify(track),
@@ -145,7 +177,7 @@ export const api = {
 
   async deleteTrack(id: string) {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/tracks/${id}`, {
+    const response = await fetchWithRetry(`${API_BASE}/tracks/${id}`, {
       method: 'DELETE',
       headers,
     });
@@ -154,7 +186,7 @@ export const api = {
 
   async bulkUpdateTags(trackIds: string[], options: { action: 'add' | 'remove' | 'replace'; tags: string[] }) {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/tracks/bulk-update-tags`, {
+    const response = await fetchWithRetry(`${API_BASE}/tracks/bulk-update-tags`, {
       method: 'POST',
       headers,
       body: JSON.stringify({ trackIds, ...options }),
@@ -163,11 +195,11 @@ export const api = {
   },
 
   async uploadTrackCover(trackId: string, coverFile: File) {
-    const token = await getAuthToken();
+    const token = await getAccessToken();
     const formData = new FormData();
     formData.append('cover', coverFile);
     
-    const response = await fetch(`${API_BASE}/tracks/${trackId}/cover`, {
+    const response = await fetchWithRetry(`${API_BASE}/tracks/${trackId}/cover`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -179,7 +211,7 @@ export const api = {
 
   async extractTrackMetadata(trackId: string) {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/tracks/${trackId}/extract-metadata`, {
+    const response = await fetchWithRetry(`${API_BASE}/tracks/${trackId}/extract-metadata`, {
       method: 'POST',
       headers,
     });
@@ -188,23 +220,23 @@ export const api = {
 
   // Playlists
   async getPlaylists() {
-    const response = await fetch(`${API_BASE}/playlists`);
+    const response = await fetchWithRetry(`${API_BASE}/playlists`);
     return response.json();
   },
 
   async getAllPlaylists() {
-    const response = await fetch(`${API_BASE}/playlists`);
+    const response = await fetchWithRetry(`${API_BASE}/playlists`);
     return response.json();
   },
 
   async getPlaylist(id: string) {
-    const response = await fetch(`${API_BASE}/playlists/${id}`);
+    const response = await fetchWithRetry(`${API_BASE}/playlists/${id}`);
     return response.json();
   },
 
   async createPlaylist(playlist: any) {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/playlists`, {
+    const response = await fetchWithRetry(`${API_BASE}/playlists`, {
       method: 'POST',
       headers,
       body: JSON.stringify(playlist),
@@ -214,7 +246,7 @@ export const api = {
 
   async updatePlaylist(id: string, updates: any) {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/playlists/${id}`, {
+    const response = await fetchWithRetry(`${API_BASE}/playlists/${id}`, {
       method: 'PUT',
       headers,
       body: JSON.stringify(updates),
@@ -224,7 +256,7 @@ export const api = {
 
   async deletePlaylist(id: string) {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/playlists/${id}`, {
+    const response = await fetchWithRetry(`${API_BASE}/playlists/${id}`, {
       method: 'DELETE',
       headers,
     });
@@ -233,7 +265,7 @@ export const api = {
 
   async addTrackToPlaylist(playlistId: string, trackId: string, position?: 'start' | 'end') {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/playlists/${playlistId}/tracks`, {
+    const response = await fetchWithRetry(`${API_BASE}/playlists/${playlistId}/tracks`, {
       method: 'POST',
       headers,
       body: JSON.stringify({ trackId, position: position || 'end' }),
@@ -243,7 +275,7 @@ export const api = {
 
   async removeTrackFromPlaylist(playlistId: string, trackId: string) {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/playlists/${playlistId}/tracks/${trackId}`, {
+    const response = await fetchWithRetry(`${API_BASE}/playlists/${playlistId}/tracks/${trackId}`, {
       method: 'DELETE',
       headers,
     });
@@ -252,18 +284,18 @@ export const api = {
 
   // Schedules
   async getAllSchedules() {
-    const response = await fetch(`${API_BASE}/schedule`);
+    const response = await fetchWithRetry(`${API_BASE}/schedule`);
     return response.json();
   },
 
   async getSchedule(id: string) {
-    const response = await fetch(`${API_BASE}/schedule/${id}`);
+    const response = await fetchWithRetry(`${API_BASE}/schedule/${id}`);
     return response.json();
   },
 
   async createSchedule(schedule: any) {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/schedule`, {
+    const response = await fetchWithRetry(`${API_BASE}/schedule`, {
       method: 'POST',
       headers,
       body: JSON.stringify(schedule),
@@ -273,7 +305,7 @@ export const api = {
 
   async updateSchedule(id: string, schedule: any) {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/schedule/${id}`, {
+    const response = await fetchWithRetry(`${API_BASE}/schedule/${id}`, {
       method: 'PUT',
       headers,
       body: JSON.stringify(schedule),
@@ -283,22 +315,37 @@ export const api = {
 
   async deleteSchedule(id: string) {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/schedule/${id}`, {
+    const response = await fetchWithRetry(`${API_BASE}/schedule/${id}`, {
       method: 'DELETE',
       headers,
     });
     return response.json();
   },
 
+  // Jingles
+  async getAllJingles(params?: { category?: string; active?: string }) {
+    const search = new URLSearchParams();
+    if (params?.category) search.set('category', params.category);
+    if (params?.active) search.set('active', params.active);
+    const qs = search.toString();
+    const response = await fetchWithRetry(`${API_BASE}/jingles${qs ? `?${qs}` : ''}`);
+    return response.json();
+  },
+
+  async getScheduleJingleMap() {
+    const response = await fetchWithRetry(`${API_BASE}/schedule/jingle-map`);
+    return response.json();
+  },
+
   // Donations
   async getDonations() {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/donations`, { headers });
+    const response = await fetchWithRetry(`${API_BASE}/donations`, { headers });
     return response.json();
   },
 
   async createDonation(donation: any) {
-    const response = await fetch(`${API_BASE}/donations`, {
+    const response = await fetchWithRetry(`${API_BASE}/donations`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(donation),
@@ -307,20 +354,20 @@ export const api = {
   },
 
   async getDonationStats() {
-    const response = await fetch(`${API_BASE}/donations/stats`);
+    const response = await fetchWithRetry(`${API_BASE}/donations/stats`);
     return response.json();
   },
 
   // Users Management
   async getAllUsers() {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/users`, { headers });
+    const response = await fetchWithRetry(`${API_BASE}/users`, { headers });
     return response.json();
   },
 
   async updateUserRole(userId: string, role: string) {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/users/${userId}/role`, {
+    const response = await fetchWithRetry(`${API_BASE}/users/${userId}/role`, {
       method: 'PUT',
       headers,
       body: JSON.stringify({ role }),
@@ -330,7 +377,7 @@ export const api = {
 
   async deleteUser(userId: string) {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/users/${userId}`, {
+    const response = await fetchWithRetry(`${API_BASE}/users/${userId}`, {
       method: 'DELETE',
       headers,
     });
@@ -339,13 +386,13 @@ export const api = {
 
   // Icecast Integration
   async getIcecastStatus() {
-    const response = await fetch(`${API_BASE}/icecast/status`);
+    const response = await fetchWithRetry(`${API_BASE}/icecast/status`);
     return response.json();
   },
 
   async updateIcecastMetadata(metadata: any) {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/icecast/metadata`, {
+    const response = await fetchWithRetry(`${API_BASE}/icecast/metadata`, {
       method: 'POST',
       headers,
       body: JSON.stringify(metadata),
@@ -404,18 +451,18 @@ export const api = {
 
   // Podcasts
   async getPodcasts() {
-    const response = await fetch(`${API_BASE}/podcasts`);
+    const response = await fetchWithRetry(`${API_BASE}/podcasts`);
     return response.json();
   },
 
   async getPodcast(id: string) {
-    const response = await fetch(`${API_BASE}/podcasts/${id}`);
+    const response = await fetchWithRetry(`${API_BASE}/podcasts/${id}`);
     return response.json();
   },
 
   async createPodcast(podcast: any) {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/podcasts`, {
+    const response = await fetchWithRetry(`${API_BASE}/podcasts`, {
       method: 'POST',
       headers,
       body: JSON.stringify(podcast),
@@ -425,7 +472,7 @@ export const api = {
 
   async updatePodcast(id: string, podcast: any) {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/podcasts/${id}`, {
+    const response = await fetchWithRetry(`${API_BASE}/podcasts/${id}`, {
       method: 'PUT',
       headers,
       body: JSON.stringify(podcast),
@@ -435,7 +482,7 @@ export const api = {
 
   async deletePodcast(id: string) {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/podcasts/${id}`, {
+    const response = await fetchWithRetry(`${API_BASE}/podcasts/${id}`, {
       method: 'DELETE',
       headers,
     });
@@ -444,18 +491,18 @@ export const api = {
 
   // Shows
   async getShows() {
-    const response = await fetch(`${API_BASE}/shows`);
+    const response = await fetchWithRetry(`${API_BASE}/shows`);
     return response.json();
   },
 
   async getShow(id: string) {
-    const response = await fetch(`${API_BASE}/shows/${id}`);
+    const response = await fetchWithRetry(`${API_BASE}/shows/${id}`);
     return response.json();
   },
 
   async createShow(show: any) {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/shows`, {
+    const response = await fetchWithRetry(`${API_BASE}/shows`, {
       method: 'POST',
       headers,
       body: JSON.stringify(show),
@@ -465,7 +512,7 @@ export const api = {
 
   async updateShow(id: string, show: any) {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/shows/${id}`, {
+    const response = await fetchWithRetry(`${API_BASE}/shows/${id}`, {
       method: 'PUT',
       headers,
       body: JSON.stringify(show),
@@ -475,7 +522,7 @@ export const api = {
 
   async deleteShow(id: string) {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/shows/${id}`, {
+    const response = await fetchWithRetry(`${API_BASE}/shows/${id}`, {
       method: 'DELETE',
       headers,
     });
@@ -484,18 +531,18 @@ export const api = {
 
   // Profiles
   async getProfiles() {
-    const response = await fetch(`${API_BASE}/profiles`);
+    const response = await fetchWithRetry(`${API_BASE}/profiles`);
     return response.json();
   },
 
   async getProfileById(id: string) {
-    const response = await fetch(`${API_BASE}/profiles/${id}`);
+    const response = await fetchWithRetry(`${API_BASE}/profiles/${id}`);
     return response.json();
   },
 
   async createProfile(profile: any) {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/profiles`, {
+    const response = await fetchWithRetry(`${API_BASE}/profiles`, {
       method: 'POST',
       headers,
       body: JSON.stringify(profile),
@@ -505,7 +552,7 @@ export const api = {
 
   async updateProfile(id: string, profile: any) {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/profiles/${id}`, {
+    const response = await fetchWithRetry(`${API_BASE}/profiles/${id}`, {
       method: 'PUT',
       headers,
       body: JSON.stringify(profile),
@@ -515,7 +562,7 @@ export const api = {
 
   async deleteProfile(id: string) {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/profiles/${id}`, {
+    const response = await fetchWithRetry(`${API_BASE}/profiles/${id}`, {
       method: 'DELETE',
       headers,
     });
@@ -525,29 +572,29 @@ export const api = {
   // Analytics
   async getAnalytics(filters?: { startDate?: string; endDate?: string; metric?: string }) {
     const params = new URLSearchParams(filters as any);
-    const response = await fetch(`${API_BASE}/analytics?${params}`);
+    const response = await fetchWithRetry(`${API_BASE}/analytics?${params}`);
     return response.json();
   },
 
   async getListenerStats() {
-    const response = await fetch(`${API_BASE}/analytics/listeners`);
+    const response = await fetchWithRetry(`${API_BASE}/analytics/listeners`);
     return response.json();
   },
 
   async getTrackStats() {
-    const response = await fetch(`${API_BASE}/analytics/tracks`);
+    const response = await fetchWithRetry(`${API_BASE}/analytics/tracks`);
     return response.json();
   },
 
   async getShowStats() {
-    const response = await fetch(`${API_BASE}/analytics/shows`);
+    const response = await fetchWithRetry(`${API_BASE}/analytics/shows`);
     return response.json();
   },
 
   // Radio/Auto DJ
   async startAutoDJ() {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/radio/start`, {
+    const response = await fetchWithRetry(`${API_BASE}/radio/start`, {
       method: 'POST',
       headers,
     });
@@ -556,7 +603,7 @@ export const api = {
 
   async stopAutoDJ() {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/radio/stop`, {
+    const response = await fetchWithRetry(`${API_BASE}/radio/stop`, {
       method: 'POST',
       headers,
     });
@@ -565,7 +612,7 @@ export const api = {
 
   async skipToNextTrack() {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/radio/next`, {
+    const response = await fetchWithRetry(`${API_BASE}/radio/next`, {
       method: 'POST',
       headers,
     });
@@ -573,11 +620,17 @@ export const api = {
   },
 
   async getRadioStatus() {
-    const response = await fetch(`${API_BASE}/radio/status`);
+    const response = await fetchWithRetry(`${API_BASE}/radio/status`);
     return response.json();
   },
 
-  // Get live radio stream URL
+  // Get current stream info with signed audio URL for direct playback
+  async getCurrentStream() {
+    const response = await fetchWithRetry(`${API_BASE}/radio/current-stream`);
+    return response.json();
+  },
+
+  // Get live radio stream URL (legacy)
   getLiveRadioURL() {
     return `${API_BASE}/radio/live`;
   },
@@ -589,113 +642,33 @@ export const api = {
 
   // Get stream info for public player
   async getStreamInfo(shortId: string) {
-    const response = await fetch(`${API_BASE}/stream/info/${shortId}`);
+    const response = await fetchWithRetry(`${API_BASE}/stream/info/${shortId}`);
     return response.json();
   },
 
   // Active Listeners
   async getActiveListeners() {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/analytics/active-listeners`, { headers });
+    const response = await fetchWithRetry(`${API_BASE}/analytics/active-listeners`, { headers });
     return response.json();
   },
 
   // Usage Stats (Storage & Bandwidth)
   async getUsageStats() {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/analytics/usage`, { headers });
-    return response.json();
-  },
-
-  // Shows Management
-  async getShows() {
-    const response = await fetch(`${API_BASE}/shows`);
-    return response.json();
-  },
-
-  async getShow(id: string) {
-    const response = await fetch(`${API_BASE}/shows/${id}`);
-    return response.json();
-  },
-
-  async createShow(show: any) {
-    const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/shows`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(show),
-    });
-    return response.json();
-  },
-
-  async updateShow(id: string, show: any) {
-    const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/shows/${id}`, {
-      method: 'PUT',
-      headers,
-      body: JSON.stringify(show),
-    });
-    return response.json();
-  },
-
-  async deleteShow(id: string) {
-    const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/shows/${id}`, {
-      method: 'DELETE',
-      headers,
-    });
-    return response.json();
-  },
-
-  // Podcasts Management
-  async getPodcasts() {
-    const response = await fetch(`${API_BASE}/podcasts`);
-    return response.json();
-  },
-
-  async getPodcast(id: string) {
-    const response = await fetch(`${API_BASE}/podcasts/${id}`);
-    return response.json();
-  },
-
-  async createPodcast(podcast: any) {
-    const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/podcasts`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(podcast),
-    });
-    return response.json();
-  },
-
-  async updatePodcast(id: string, podcast: any) {
-    const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/podcasts/${id}`, {
-      method: 'PUT',
-      headers,
-      body: JSON.stringify(podcast),
-    });
-    return response.json();
-  },
-
-  async deletePodcast(id: string) {
-    const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/podcasts/${id}`, {
-      method: 'DELETE',
-      headers,
-    });
+    const response = await fetchWithRetry(`${API_BASE}/analytics/usage`, { headers });
     return response.json();
   },
 
   // Podcast Episodes
   async getPodcastEpisodes(podcastId: string) {
-    const response = await fetch(`${API_BASE}/podcasts/${podcastId}/episodes`);
+    const response = await fetchWithRetry(`${API_BASE}/podcasts/${podcastId}/episodes`);
     return response.json();
   },
 
   async createEpisode(episode: any) {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/podcasts/${episode.podcastId}/episodes`, {
+    const response = await fetchWithRetry(`${API_BASE}/podcasts/${episode.podcastId}/episodes`, {
       method: 'POST',
       headers,
       body: JSON.stringify(episode),
@@ -705,7 +678,7 @@ export const api = {
 
   async updateEpisode(id: string, episode: any) {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/episodes/${id}`, {
+    const response = await fetchWithRetry(`${API_BASE}/episodes/${id}`, {
       method: 'PUT',
       headers,
       body: JSON.stringify(episode),
@@ -715,7 +688,7 @@ export const api = {
 
   async deleteEpisode(id: string) {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/episodes/${id}`, {
+    const response = await fetchWithRetry(`${API_BASE}/episodes/${id}`, {
       method: 'DELETE',
       headers,
     });
@@ -725,7 +698,7 @@ export const api = {
   // Schedule Slots
   async createScheduleSlot(slot: any) {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/schedule/slots`, {
+    const response = await fetchWithRetry(`${API_BASE}/schedule/slots`, {
       method: 'POST',
       headers,
       body: JSON.stringify(slot),
@@ -735,7 +708,7 @@ export const api = {
 
   async deleteScheduleSlot(slotId: string) {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/schedule/slots/${slotId}`, {
+    const response = await fetchWithRetry(`${API_BASE}/schedule/slots/${slotId}`, {
       method: 'DELETE',
       headers,
     });
@@ -745,13 +718,13 @@ export const api = {
   // Stream Settings
   async getStreamSettings() {
     const headers = await getPublicHeaders();
-    const response = await fetch(`${API_BASE}/settings/stream`, { headers });
+    const response = await fetchWithRetry(`${API_BASE}/settings/stream`, { headers });
     return response.json();
   },
 
   async updateStreamSettings(settings: any) {
     const headers = await getAuthHeaders();
-    const response = await fetch(`${API_BASE}/settings/stream`, {
+    const response = await fetchWithRetry(`${API_BASE}/settings/stream`, {
       method: 'POST',
       headers,
       body: JSON.stringify(settings),
@@ -760,6 +733,158 @@ export const api = {
       const error = await response.json();
       throw new Error(error.error || 'Failed to update settings');
     }
+    return response.json();
+  },
+
+  // ==================== INTERACTIVE FEATURES ====================
+
+  // DJ Sessions
+  async getDJSessions() {
+    const response = await fetchWithRetry(`${API_BASE}/dj-sessions`);
+    return response.json();
+  },
+
+  async getCurrentDJSession() {
+    const response = await fetchWithRetry(`${API_BASE}/dj-sessions/current`);
+    return response.json();
+  },
+
+  async startDJSession(data: { dj_name: string; title: string; session_type?: string }) {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/dj-sessions/start`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(data),
+    });
+    return response.json();
+  },
+
+  async endDJSession(sessionId: string) {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/dj-sessions/${sessionId}/end`, {
+      method: 'POST',
+      headers,
+    });
+    return response.json();
+  },
+
+  // Song Requests
+  async getSongRequests(status?: string) {
+    const url = status && status !== 'all'
+      ? `${API_BASE}/song-requests?status=${status}`
+      : `${API_BASE}/song-requests`;
+    const response = await fetchWithRetry(url);
+    return response.json();
+  },
+
+  async submitSongRequest(data: any) {
+    const response = await fetchWithRetry(`${API_BASE}/song-requests/submit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    return response.json();
+  },
+
+  async moderateSongRequest(requestId: string, data: any) {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/song-requests/${requestId}/moderate`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(data),
+    });
+    return response.json();
+  },
+
+  async getSongRequestStats() {
+    const response = await fetchWithRetry(`${API_BASE}/song-requests/stats`);
+    return response.json();
+  },
+
+  async voteOnSongRequest(requestId: string, data: any) {
+    const response = await fetchWithRetry(`${API_BASE}/song-requests/${requestId}/vote`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    return response.json();
+  },
+
+  // Shoutouts
+  async getShoutouts(status?: string) {
+    const url = status && status !== 'all'
+      ? `${API_BASE}/shoutouts?status=${status}`
+      : `${API_BASE}/shoutouts`;
+    const response = await fetchWithRetry(url);
+    return response.json();
+  },
+
+  async submitShoutout(data: any) {
+    const response = await fetchWithRetry(`${API_BASE}/shoutouts/submit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    return response.json();
+  },
+
+  async moderateShoutout(shoutoutId: string, data: any) {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/shoutouts/${shoutoutId}/moderate`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(data),
+    });
+    return response.json();
+  },
+
+  async getShoutoutStats() {
+    const response = await fetchWithRetry(`${API_BASE}/shoutouts/stats`);
+    return response.json();
+  },
+
+  // Call Queue
+  async getCallQueue() {
+    const response = await fetchWithRetry(`${API_BASE}/call-queue`);
+    return response.json();
+  },
+
+  async addToCallQueue(data: any) {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/call-queue/add`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(data),
+    });
+    return response.json();
+  },
+
+  async screenCall(callId: string, data: any) {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/call-queue/${callId}/screen`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(data),
+    });
+    return response.json();
+  },
+
+  async connectCallToAir(callId: string, sessionId: string) {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/call-queue/${callId}/connect`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ session_id: sessionId }),
+    });
+    return response.json();
+  },
+
+  async disconnectCall(callId: string) {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/call-queue/${callId}/disconnect`, {
+      method: 'POST',
+      headers,
+    });
     return response.json();
   },
 };

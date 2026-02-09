@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Button } from '../../components/ui/button';
 import { Card } from '../../components/ui/card';
-import { projectId, publicAnonKey } from '/utils/supabase/info';
+import { projectId } from '/utils/supabase/info';
+import { getAuthHeaders } from '../../../lib/api';
 import { toast } from 'sonner';
 import { 
   Radio, 
@@ -64,12 +65,11 @@ export function LiveDJConsole() {
 
   async function checkDJStatus() {
     try {
+      const headers = await getAuthHeaders();
       const response = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/dj-sessions/current`,
         {
-          headers: {
-            'Authorization': `Bearer ${publicAnonKey}`
-          }
+          headers
         }
       );
 
@@ -91,14 +91,12 @@ export function LiveDJConsole() {
 
     setLoading(true);
     try {
+      const headers = await getAuthHeaders();
       const response = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/dj-sessions/start`,
         {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${publicAnonKey}`
-          },
+          headers,
           body: JSON.stringify({
             dj_name: djName,
             title: showTitle,
@@ -132,13 +130,12 @@ export function LiveDJConsole() {
 
     setLoading(true);
     try {
+      const headers = await getAuthHeaders();
       const response = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/dj-sessions/${currentSession.id}/end`,
         {
           method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${publicAnonKey}`
-          }
+          headers
         }
       );
 

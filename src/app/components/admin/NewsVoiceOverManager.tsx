@@ -33,7 +33,8 @@ import {
   RadioTower
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { projectId, publicAnonKey } from '/utils/supabase/info';
+import { projectId } from '/utils/supabase/info';
+import { getAuthHeaders } from '../../../lib/api';
 
 interface NewsVoiceOver {
   id: string;
@@ -86,15 +87,16 @@ export function NewsVoiceOverManager() {
   const loadData = async () => {
     setLoading(true);
     try {
+      const headers = await getAuthHeaders();
       const [voiceOversRes, voicesRes, newsRes] = await Promise.all([
         fetch(`https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/news-injection/news-voiceovers`, {
-          headers: { Authorization: `Bearer ${publicAnonKey}` }
+          headers
         }),
-        fetch(`https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/content-automation/voices`, {
-          headers: { Authorization: `Bearer ${publicAnonKey}` }
+        fetch(`https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/automation/voices`, {
+          headers
         }),
-        fetch(`https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/kv/getByPrefix?prefix=news_`, {
-          headers: { Authorization: `Bearer ${publicAnonKey}` }
+        fetch(`https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/news`, {
+          headers
         })
       ]);
 
@@ -105,9 +107,9 @@ export function NewsVoiceOverManager() {
       setVoiceOvers(voiceOversData.voiceOvers || []);
       setVoices(voicesData.voices || []);
       
-      // Parse news from KV
-      const newsArticles = (newsData.values || []).map((item: any) => item.value);
-      setNews(newsArticles.filter((n: any) => n.is_published));
+      // Parse news from /news endpoint
+      const newsArticles = (newsData.news || []);
+      setNews(newsArticles.filter((n: any) => n.is_published !== false));
     } catch (error) {
       console.error('Error loading data:', error);
       toast.error('Failed to load data');
@@ -132,14 +134,12 @@ export function NewsVoiceOverManager() {
 
     setGenerating(selectedNewsId);
     try {
+      const headers = await getAuthHeaders();
       const response = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/news-injection/news-voiceovers/generate`,
         {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${publicAnonKey}`
-          },
+          headers,
           body: JSON.stringify({
             newsId: newsArticle.id,
             newsTitle: newsArticle.title,
@@ -171,14 +171,12 @@ export function NewsVoiceOverManager() {
 
   const toggleActive = async (id: string, currentActive: boolean) => {
     try {
+      const headers = await getAuthHeaders();
       const response = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/news-injection/news-voiceovers/${id}`,
         {
           method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${publicAnonKey}`
-          },
+          headers,
           body: JSON.stringify({ is_active: !currentActive })
         }
       );
@@ -201,11 +199,12 @@ export function NewsVoiceOverManager() {
     if (!confirm('Are you sure you want to delete this voice-over?')) return;
 
     try {
+      const headers = await getAuthHeaders();
       const response = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/news-injection/news-voiceovers/${id}`,
         {
           method: 'DELETE',
-          headers: { Authorization: `Bearer ${publicAnonKey}` }
+          headers
         }
       );
 

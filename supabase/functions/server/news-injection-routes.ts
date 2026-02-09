@@ -3,7 +3,7 @@
  */
 
 import { Hono } from 'npm:hono@4';
-import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { createClient } from 'npm:@supabase/supabase-js@2';
 import {
   generateNewsVoiceOver,
   calculateNextInjectionTimes,
@@ -314,13 +314,17 @@ newsInjectionRoutes.get('/next', async (c) => {
       return c.json({ success: true, news: null });
     }
 
-    // Get full voice-over data
+    // Get full voice-over data using snake_case field from DB
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
-    const { data: voiceOver } = await supabase
+    const { data: voiceOver, error: voError } = await supabase
       .from('news_voice_overs_06086aa3')
       .select('*')
-      .eq('id', newsItem.newsVoiceOverId)
+      .eq('id', newsItem.news_voice_over_id)
       .single();
+
+    if (voError) {
+      console.error('Error fetching voice-over for next news:', voError);
+    }
 
     return c.json({
       success: true,

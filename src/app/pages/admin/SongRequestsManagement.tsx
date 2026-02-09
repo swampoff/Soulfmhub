@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { Button } from '../../components/ui/button';
 import { Card } from '../../components/ui/card';
-import { projectId, publicAnonKey } from '/utils/supabase/info';
+import { projectId } from '/utils/supabase/info';
+import { getAuthHeaders } from '../../../lib/api';
 import { toast } from 'sonner';
 import { 
   Music, 
@@ -49,12 +50,11 @@ export function SongRequestsManagement() {
 
   async function loadRequests() {
     try {
+      const headers = await getAuthHeaders();
       const url = `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/song-requests${filter !== 'all' ? `?status=${filter}` : ''}`;
       
       const response = await fetch(url, {
-        headers: {
-          'Authorization': `Bearer ${publicAnonKey}`
-        }
+        headers
       });
 
       if (!response.ok) throw new Error('Failed to load requests');
@@ -71,12 +71,11 @@ export function SongRequestsManagement() {
 
   async function loadStats() {
     try {
+      const headers = await getAuthHeaders();
       const response = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/song-requests/stats`,
         {
-          headers: {
-            'Authorization': `Bearer ${publicAnonKey}`
-          }
+          headers
         }
       );
 
@@ -91,14 +90,12 @@ export function SongRequestsManagement() {
 
   async function moderateRequest(requestId: string, status: 'approved' | 'rejected', priority: number = 0) {
     try {
+      const headers = await getAuthHeaders();
       const response = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/song-requests/${requestId}/moderate`,
         {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${publicAnonKey}`
-          },
+          headers,
           body: JSON.stringify({
             status,
             priority,

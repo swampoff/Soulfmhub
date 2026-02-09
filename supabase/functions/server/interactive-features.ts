@@ -3,7 +3,7 @@
  * Live DJ, Song Requests, Shoutouts, Call-Ins
  */
 
-import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { createClient } from 'npm:@supabase/supabase-js@2';
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
 const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -122,14 +122,22 @@ export async function trackPlayedInSession(
       return;
     }
     
-    // Increment session track count
-    await supabase
+    // Increment session track count - read then update
+    const { data: session } = await supabase
       .from('dj_sessions_06086aa3')
-      .update({ 
-        tracks_played: supabase.raw('tracks_played + 1'),
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', sessionId);
+      .select('tracks_played')
+      .eq('id', sessionId)
+      .single();
+    
+    if (session) {
+      await supabase
+        .from('dj_sessions_06086aa3')
+        .update({ 
+          tracks_played: (session.tracks_played || 0) + 1,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', sessionId);
+    }
     
     console.log(`✅ Logged track in DJ session: "${title}" by ${artist}`);
   } catch (error: any) {
@@ -193,12 +201,20 @@ export async function markRequestAsPlayed(requestId: string, sessionId?: string)
       return;
     }
     
-    // Increment session request count if in session
+    // Increment session request count if in session - read then update
     if (sessionId) {
-      await supabase
+      const { data: session } = await supabase
         .from('dj_sessions_06086aa3')
-        .update({ requests_played: supabase.raw('requests_played + 1') })
-        .eq('id', sessionId);
+        .select('requests_played')
+        .eq('id', sessionId)
+        .single();
+      
+      if (session) {
+        await supabase
+          .from('dj_sessions_06086aa3')
+          .update({ requests_played: (session.requests_played || 0) + 1 })
+          .eq('id', sessionId);
+      }
     }
     
     console.log(`✅ Marked request ${requestId} as played`);
@@ -348,11 +364,19 @@ export async function connectCall(callId: string, sessionId: string): Promise<vo
       return;
     }
     
-    // Increment session caller count
-    await supabase
+    // Increment session caller count - read then update
+    const { data: session } = await supabase
       .from('dj_sessions_06086aa3')
-      .update({ callers_taken: supabase.raw('callers_taken + 1') })
-      .eq('id', sessionId);
+      .select('callers_taken')
+      .eq('id', sessionId)
+      .single();
+    
+    if (session) {
+      await supabase
+        .from('dj_sessions_06086aa3')
+        .update({ callers_taken: (session.callers_taken || 0) + 1 })
+        .eq('id', sessionId);
+    }
     
     console.log(`📞 Call connected: ${callId}`);
   } catch (error: any) {

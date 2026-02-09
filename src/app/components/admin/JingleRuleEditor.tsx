@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Trash2, Clock, Hash, Calendar, Radio, Save, X, Zap, Copy } from 'lucide-react';
-import { projectId, publicAnonKey } from '/utils/supabase/info';
+import { projectId } from '/utils/supabase/info';
+import { getAccessToken } from '../../../lib/api';
 import { JINGLE_CATEGORIES, getCategoryInfo } from './jingle-categories';
 import { AutomationPresets } from './AutomationPresets';
 import { JingleTimeline } from './JingleTimeline';
@@ -67,11 +68,12 @@ export function JingleRuleEditor() {
 
   async function loadJingles() {
     try {
+      const token = await getAccessToken();
       const response = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/jingles?active=true`,
         {
           headers: {
-            'Authorization': `Bearer ${publicAnonKey}`,
+            'Authorization': `Bearer ${token}`,
           },
         }
       );
@@ -87,11 +89,12 @@ export function JingleRuleEditor() {
 
   async function loadRules() {
     try {
+      const token = await getAccessToken();
       const response = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/jingle-rules`,
         {
           headers: {
-            'Authorization': `Bearer ${publicAnonKey}`,
+            'Authorization': `Bearer ${token}`,
           },
         }
       );
@@ -112,7 +115,7 @@ export function JingleRuleEditor() {
     }
 
     try {
-      const token = localStorage.getItem('access_token');
+      const token = await getAccessToken();
       const response = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/jingle-rules`,
         {
@@ -150,7 +153,7 @@ export function JingleRuleEditor() {
     if (!confirm('Delete this rule?')) return;
 
     try {
-      const token = localStorage.getItem('access_token');
+      const token = await getAccessToken();
       const response = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/jingle-rules/${id}`,
         {
@@ -172,7 +175,7 @@ export function JingleRuleEditor() {
 
   async function toggleRuleActive(rule: JingleRule) {
     try {
-      const token = localStorage.getItem('access_token');
+      const token = await getAccessToken();
       const response = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/jingle-rules/${rule.id}`,
         {

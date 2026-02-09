@@ -10,7 +10,8 @@ import { Badge } from '../ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '../ui/dialog';
 import { Clock, Plus, Edit, Trash2, Radio, Sparkles, Wind } from 'lucide-react';
 import { toast } from 'sonner';
-import { projectId, publicAnonKey } from '/utils/supabase/info';
+import { projectId } from '/utils/supabase/info';
+import { getAccessToken } from '../../../lib/api';
 
 interface ScheduleItem {
   id: string;
@@ -69,12 +70,13 @@ export default function AutomationScheduleManager() {
   const loadData = async () => {
     setLoading(true);
     try {
+      const token = await getAccessToken();
       // Load schedule items
       const scheduleRes = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/automation/schedule`,
         {
           headers: {
-            'Authorization': `Bearer ${publicAnonKey}`,
+            'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json'
           }
         }
@@ -90,7 +92,7 @@ export default function AutomationScheduleManager() {
         `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/automation/voices`,
         {
           headers: {
-            'Authorization': `Bearer ${publicAnonKey}`,
+            'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json'
           }
         }
@@ -118,10 +120,11 @@ export default function AutomationScheduleManager() {
 
       const method = editingItem ? 'PUT' : 'POST';
 
+      const token = await getAccessToken();
       const res = await fetch(url, {
         method,
         headers: {
-          'Authorization': `Bearer ${publicAnonKey}`,
+          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify(formData)
@@ -163,12 +166,13 @@ export default function AutomationScheduleManager() {
     if (!confirm('Удалить элемент расписания?')) return;
 
     try {
+      const token = await getAccessToken();
       const res = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/automation/schedule/${id}`,
         {
           method: 'DELETE',
           headers: {
-            'Authorization': `Bearer ${publicAnonKey}`
+            'Authorization': `Bearer ${token}`
           }
         }
       );

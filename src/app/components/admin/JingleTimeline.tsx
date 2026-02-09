@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Clock, Calendar, AlertCircle, Eye, EyeOff } from 'lucide-react';
-import { projectId, publicAnonKey } from '/utils/supabase/info';
+import { projectId } from '/utils/supabase/info';
+import { getAccessToken } from '../../../lib/api';
 import { getCategoryInfo } from './jingle-categories';
 
 interface JingleRule {
@@ -62,11 +63,12 @@ export function JingleTimeline() {
 
   async function loadRules() {
     try {
+      const token = await getAccessToken();
       const response = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/jingle-rules`,
         {
           headers: {
-            'Authorization': `Bearer ${publicAnonKey}`,
+            'Authorization': `Bearer ${token}`,
           },
         }
       );
@@ -80,11 +82,12 @@ export function JingleTimeline() {
 
   async function loadJingles() {
     try {
+      const token = await getAccessToken();
       const response = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/jingles`,
         {
           headers: {
-            'Authorization': `Bearer ${publicAnonKey}`,
+            'Authorization': `Bearer ${token}`,
           },
         }
       );

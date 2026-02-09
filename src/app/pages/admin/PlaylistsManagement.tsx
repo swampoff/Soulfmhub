@@ -1,544 +1,1394 @@
-import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { List, Plus, Search, Edit2, Trash2, X, Play, Music, Clock, Shuffle } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { motion, AnimatePresence, Reorder } from 'motion/react';
+import { AdminLayout } from '../../components/admin/AdminLayout';
 import { Button } from '../../components/ui/button';
 import { Card } from '../../components/ui/card';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
+import { Badge } from '../../components/ui/badge';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../../components/ui/dialog';
 import { api } from '../../../lib/api';
 import { toast } from 'sonner';
+import {
+  ListMusic,
+  Plus,
+  Edit,
+  Trash2,
+  Music,
+  Loader2,
+  Search,
+  ChevronLeft,
+  GripVertical,
+  Radio,
+  Shuffle,
+  Play,
+  Clock,
+  ArrowUpDown,
+  Zap,
+  Check,
+  X,
+  Filter,
+  Hash,
+  LayoutGrid,
+  PlusCircle,
+  MinusCircle,
+  ArrowRight,
+  Volume2,
+  SkipForward,
+  Calendar,
+  ExternalLink,
+} from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+
+// ==================== TYPES ====================
+
+interface Track {
+  id: string;
+  title: string;
+  artist: string;
+  album?: string;
+  genre?: string;
+  duration: number;
+  tags?: string[];
+  coverUrl?: string;
+  bpm?: number;
+}
 
 interface Playlist {
   id: string;
   name: string;
   description?: string;
+  color?: string;
   genre?: string;
-  trackCount: number;
-  duration: number;
-  coverUrl?: string;
-  isPublic: boolean;
+  trackIds: string[];
+  isPublic?: boolean;
   createdAt: string;
-  createdBy: string;
-  tracks: string[];
+  updatedAt?: string;
 }
 
-export function PlaylistsManagement() {
-  const [playlists, setPlaylists] = useState<Playlist[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-  const [selectedPlaylist, setSelectedPlaylist] = useState<Playlist | null>(null);
+interface ScheduleSlot {
+  id: string;
+  playlistId: string;
+  dayOfWeek: number | null;
+  startTime: string;
+  endTime: string;
+  title: string;
+  isActive: boolean;
+}
 
+const DAYS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+// ==================== CONSTANTS ====================
+
+const COLORS = [
+  { value: '#00d9ff', label: 'Cyan' },
+  { value: '#00ffaa', label: 'Mint' },
+  { value: '#FF8C42', label: 'Sunset' },
+  { value: '#E91E63', label: 'Pink' },
+  { value: '#9C27B0', label: 'Purple' },
+  { value: '#2196F3', label: 'Blue' },
+  { value: '#4CAF50', label: 'Green' },
+  { value: '#FF5722', label: 'Red' },
+  { value: '#FFD700', label: 'Gold' },
+];
+
+const GENRES = ['all', 'soul', 'funk', 'jazz', 'disco', 'r&b', 'reggae', 'blues', 'afrobeat', 'house', 'lofi'];
+
+// ==================== MAIN COMPONENT ====================
+
+export function PlaylistsManagement() {
+  // State
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const [allTracks, setAllTracks] = useState<Track[]>([]);
+  const [schedules, setSchedules] = useState<ScheduleSlot[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedPlaylist, setSelectedPlaylist] = useState<Playlist | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [editPlaylist, setEditPlaylist] = useState<Playlist | null>(null);
+
+  // Load data
   useEffect(() => {
-    loadPlaylists();
+    loadData();
   }, []);
 
-  const loadPlaylists = async () => {
+  // Handle deep-link from Schedule: ?open=playlistId
+  useEffect(() => {
+    const openId = searchParams.get('open');
+    if (openId && playlists.length > 0) {
+      const pl = playlists.find(p => p.id === openId);
+      if (pl) setSelectedPlaylist(pl);
+    }
+  }, [searchParams, playlists]);
+
+  const loadData = async () => {
+    setLoading(true);
     try {
-      setLoading(true);
-      const response = await api.getPlaylists();
-      setPlaylists(response.playlists || []);
+      const [playlistsRes, tracksRes, schedRes] = await Promise.all([
+        api.getAllPlaylists(),
+        api.getTracks(),
+        api.getAllSchedules().catch(() => ({ schedules: [] })),
+      ]);
+      setPlaylists(playlistsRes.playlists || []);
+      setAllTracks(tracksRes.tracks || []);
+      setSchedules(schedRes.schedules || []);
     } catch (error) {
-      console.error('Error loading playlists:', error);
-      toast.error('Failed to load playlists');
+      console.error('Load error:', error);
+      toast.error('Failed to load data');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleDeletePlaylist = async (playlistId: string) => {
-    if (!confirm('Are you sure you want to delete this playlist?')) return;
+  // Get schedule slots for a given playlist
+  const getPlaylistSchedules = useCallback((playlistId: string) => {
+    return schedules.filter(s => s.playlistId === playlistId);
+  }, [schedules]);
+
+  // When a playlist is selected, keep it in sync with playlists array
+  useEffect(() => {
+    if (selectedPlaylist) {
+      const updated = playlists.find(p => p.id === selectedPlaylist.id);
+      if (updated) {
+        setSelectedPlaylist(updated);
+      }
+    }
+  }, [playlists]);
+
+  // Handlers
+  const handleDeletePlaylist = async (id: string) => {
+    if (id === 'livestream') {
+      toast.error('Cannot delete the Live Stream playlist');
+      return;
+    }
+    if (!confirm('Delete this playlist? This cannot be undone.')) return;
+    try {
+      await api.deletePlaylist(id);
+      setPlaylists(prev => prev.filter(p => p.id !== id));
+      if (selectedPlaylist?.id === id) setSelectedPlaylist(null);
+      toast.success('Playlist deleted');
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to delete');
+    }
+  };
+
+  const handleSetAsLiveStream = async (playlist: Playlist) => {
+    if (playlist.id === 'livestream') {
+      toast.info('This is already the Live Stream playlist');
+      return;
+    }
+    if (!confirm(`Copy all ${playlist.trackIds?.length || 0} tracks from "${playlist.name}" to the Live Stream playlist? This replaces the current Live Stream queue.`)) return;
 
     try {
-      await api.deletePlaylist(playlistId);
-      setPlaylists(playlists.filter(p => p.id !== playlistId));
-      toast.success('Playlist deleted successfully');
-    } catch (error) {
-      console.error('Error deleting playlist:', error);
-      toast.error('Failed to delete playlist');
+      // Get or create livestream playlist
+      let livePlaylist: Playlist;
+      const existingLive = playlists.find(p => p.id === 'livestream');
+      if (existingLive) {
+        livePlaylist = existingLive;
+      } else {
+        const res = await api.createPlaylist({
+          id: 'livestream',
+          name: 'Live Stream',
+          description: 'Main broadcast playlist for Auto DJ',
+          trackIds: []
+        });
+        livePlaylist = res.playlist;
+      }
+
+      // Copy tracks to livestream
+      await api.updatePlaylist('livestream', {
+        ...livePlaylist,
+        trackIds: [...(playlist.trackIds || [])],
+        description: `Loaded from: ${playlist.name}`
+      });
+
+      toast.success(`Loaded ${playlist.trackIds?.length || 0} tracks into Live Stream!`);
+      loadData();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to set as live stream');
     }
   };
 
-  const handleEditPlaylist = (playlist: Playlist) => {
-    setSelectedPlaylist(playlist);
-    setIsEditModalOpen(true);
-  };
+  const isLiveStream = (id: string) => id === 'livestream';
 
-  const filteredPlaylists = playlists.filter(playlist =>
-    playlist.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    playlist.description?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  const formatDuration = (seconds: number) => {
-    const hours = Math.floor(seconds / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
-    if (hours > 0) {
-      return `${hours}h ${mins}m`;
-    }
-    return `${mins}m`;
-  };
+  // Stats
+  const totalTracks = playlists.reduce((sum, p) => sum + (p.trackIds?.length || 0), 0);
+  const livePlaylist = playlists.find(p => p.id === 'livestream');
+  const scheduledCount = new Set(schedules.map(s => s.playlistId)).size;
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-white text-sm sm:text-base">Loading playlists...</div>
-      </div>
+      <AdminLayout>
+        <div className="flex items-center justify-center min-h-[500px]">
+          <Loader2 className="w-8 h-8 text-[#00d9ff] animate-spin" />
+        </div>
+      </AdminLayout>
     );
   }
+
+  // ==================== DETAIL VIEW ====================
+  if (selectedPlaylist) {
+    return (
+      <AdminLayout maxWidth="wide">
+        <PlaylistDetail
+          playlist={selectedPlaylist}
+          allTracks={allTracks}
+          scheduleSlots={getPlaylistSchedules(selectedPlaylist.id)}
+          onBack={() => setSelectedPlaylist(null)}
+          onUpdate={(updated) => {
+            setPlaylists(prev => prev.map(p => p.id === updated.id ? updated : p));
+            setSelectedPlaylist(updated);
+          }}
+          onSetAsLive={() => handleSetAsLiveStream(selectedPlaylist)}
+          isLive={isLiveStream(selectedPlaylist.id)}
+          onViewSchedule={() => navigate(`/admin/schedule?highlight=${selectedPlaylist.id}`)}
+          onScheduleCreated={() => loadData()}
+        />
+      </AdminLayout>
+    );
+  }
+
+  // ==================== GRID VIEW ====================
+  const filteredPlaylists = playlists.filter(p =>
+    p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    p.genre?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    p.description?.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  return (
+    <AdminLayout maxWidth="wide">
+      <div className="space-y-6">
+        {/* Header */}
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+        >
+          <div className="flex items-center gap-3">
+            <div className="p-3 bg-gradient-to-br from-[#00d9ff] to-[#00ffaa] rounded-xl">
+              <ListMusic className="w-7 h-7 text-[#0a1628]" />
+            </div>
+            <div>
+              <h1 className="text-2xl sm:text-3xl font-bold text-white" style={{ fontFamily: 'var(--font-family-display)' }}>
+                Playlists
+              </h1>
+              <p className="text-white/60 text-sm">Manage playlists and assign tracks to go on air</p>
+            </div>
+          </div>
+
+          <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+            <DialogTrigger asChild>
+              <Button className="bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] text-[#0a1628] font-semibold">
+                <Plus className="w-4 h-4 mr-2" />
+                New Playlist
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="bg-[#0f1c2e] border-[#00d9ff]/30 text-white max-w-md">
+              <DialogHeader>
+                <DialogTitle>Create Playlist</DialogTitle>
+              </DialogHeader>
+              <CreatePlaylistForm
+                onSuccess={(newPl) => {
+                  setPlaylists(prev => [newPl, ...prev]);
+                  setIsCreateOpen(false);
+                }}
+                onCancel={() => setIsCreateOpen(false)}
+              />
+            </DialogContent>
+          </Dialog>
+        </motion.div>
+
+        {/* Stats Bar */}
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+          <StatCard
+            icon={<ListMusic className="w-5 h-5" />}
+            label="Playlists"
+            value={playlists.length}
+            color="#00d9ff"
+          />
+          <StatCard
+            icon={<Music className="w-5 h-5" />}
+            label="Total Tracks"
+            value={totalTracks}
+            color="#00ffaa"
+          />
+          <StatCard
+            icon={<Radio className="w-5 h-5" />}
+            label="On Air"
+            value={livePlaylist ? `${livePlaylist.trackIds?.length || 0} tracks` : 'None'}
+            color="#FF8C42"
+          />
+          <StatCard
+            icon={<Calendar className="w-5 h-5" />}
+            label="Scheduled"
+            value={`${scheduledCount} of ${playlists.length}`}
+            color="#9C27B0"
+          />
+          <StatCard
+            icon={<Clock className="w-5 h-5" />}
+            label="Library"
+            value={allTracks.length}
+            color="#2196F3"
+          />
+        </div>
+
+        {/* Search */}
+        <Card className="bg-[#0f1c2e]/90 border-[#00d9ff]/20 p-4">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40" />
+            <Input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search playlists..."
+              className="pl-10 bg-[#0a1628] border-white/10 text-white"
+            />
+          </div>
+        </Card>
+
+        {/* Playlists Grid */}
+        {filteredPlaylists.length === 0 ? (
+          <Card className="bg-[#0f1c2e]/90 border-[#00d9ff]/20 p-12 text-center">
+            <ListMusic className="w-16 h-16 mx-auto mb-4 text-white/20" />
+            <h3 className="text-xl font-semibold text-white mb-2">
+              {searchQuery ? 'No results' : 'No Playlists Yet'}
+            </h3>
+            <p className="text-white/50 mb-6">
+              {searchQuery ? 'Try a different search' : 'Create your first playlist and add tracks for Auto DJ'}
+            </p>
+          </Card>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            <AnimatePresence>
+              {filteredPlaylists.map((playlist, i) => (
+                <PlaylistCard
+                  key={playlist.id}
+                  playlist={playlist}
+                  index={i}
+                  isLive={isLiveStream(playlist.id)}
+                  allTracks={allTracks}
+                  scheduleSlots={getPlaylistSchedules(playlist.id)}
+                  onClick={() => setSelectedPlaylist(playlist)}
+                  onEdit={() => {
+                    setEditPlaylist(playlist);
+                    setIsEditOpen(true);
+                  }}
+                  onDelete={() => handleDeletePlaylist(playlist.id)}
+                  onSetAsLive={() => handleSetAsLiveStream(playlist)}
+                  onViewSchedule={() => navigate('/admin/schedule')}
+                />
+              ))}
+            </AnimatePresence>
+          </div>
+        )}
+      </div>
+
+      {/* Edit Dialog */}
+      <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
+        <DialogContent className="bg-[#0f1c2e] border-[#00d9ff]/30 text-white max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit Playlist</DialogTitle>
+          </DialogHeader>
+          {editPlaylist && (
+            <EditPlaylistForm
+              playlist={editPlaylist}
+              onSuccess={(updated) => {
+                setPlaylists(prev => prev.map(p => p.id === updated.id ? updated : p));
+                setIsEditOpen(false);
+              }}
+              onCancel={() => setIsEditOpen(false)}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+    </AdminLayout>
+  );
+}
+
+// ==================== STAT CARD ====================
+
+function StatCard({ icon, label, value, color }: { icon: React.ReactNode; label: string; value: string | number; color: string }) {
+  return (
+    <Card className="bg-[#0f1c2e]/90 border-white/10 p-4">
+      <div className="flex items-center gap-3">
+        <div className="p-2 rounded-lg" style={{ backgroundColor: `${color}20` }}>
+          <div style={{ color }}>{icon}</div>
+        </div>
+        <div className="min-w-0">
+          <p className="text-white/50 text-xs">{label}</p>
+          <p className="text-white font-bold text-lg truncate">{value}</p>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+// ==================== PLAYLIST CARD ====================
+
+function PlaylistCard({
+  playlist,
+  index,
+  isLive,
+  allTracks,
+  scheduleSlots,
+  onClick,
+  onEdit,
+  onDelete,
+  onSetAsLive,
+  onViewSchedule
+}: {
+  playlist: Playlist;
+  index: number;
+  isLive: boolean;
+  allTracks: Track[];
+  scheduleSlots: ScheduleSlot[];
+  onClick: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  onSetAsLive: () => void;
+  onViewSchedule: () => void;
+}) {
+  const trackCount = playlist.trackIds?.length || 0;
+  const color = playlist.color || '#00d9ff';
+
+  // Calculate total duration
+  const totalDuration = useMemo(() => {
+    return (playlist.trackIds || []).reduce((sum, id) => {
+      const track = allTracks.find(t => t.id === id);
+      return sum + (track?.duration || 0);
+    }, 0);
+  }, [playlist.trackIds, allTracks]);
+
+  const formatDuration = (seconds: number) => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    return h > 0 ? `${h}h ${m}m` : `${m}m`;
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.9 }}
+      transition={{ delay: index * 0.04 }}
+    >
+      <Card
+        className={`bg-[#0f1c2e]/90 border overflow-hidden hover:shadow-lg hover:shadow-[${color}]/10 transition-all cursor-pointer group ${
+          isLive ? 'border-[#00ffaa]/50 ring-1 ring-[#00ffaa]/20' : 'border-white/10 hover:border-white/20'
+        }`}
+        onClick={onClick}
+      >
+        {/* Color Header */}
+        <div
+          className="h-2 w-full"
+          style={{ background: `linear-gradient(90deg, ${color}, ${color}80)` }}
+        />
+
+        <div className="p-4 sm:p-5">
+          {/* Title Row */}
+          <div className="flex items-start justify-between mb-3">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 mb-1">
+                {isLive && (
+                  <Badge className="bg-[#00ffaa]/20 text-[#00ffaa] border-[#00ffaa]/30 text-[10px] px-1.5 py-0 flex-shrink-0">
+                    <Radio className="w-2.5 h-2.5 mr-1 animate-pulse" />
+                    ON AIR
+                  </Badge>
+                )}
+              </div>
+              <h3 className="text-white font-bold text-lg truncate">{playlist.name}</h3>
+              {playlist.description && (
+                <p className="text-white/50 text-sm mt-1 line-clamp-2">{playlist.description}</p>
+              )}
+            </div>
+          </div>
+
+          {/* Genre */}
+          {playlist.genre && (
+            <Badge variant="outline" className="mb-3 text-xs" style={{ borderColor: `${color}40`, color }}>
+              {playlist.genre}
+            </Badge>
+          )}
+
+          {/* Stats */}
+          <div className="flex items-center gap-4 text-sm text-white/50 mb-3">
+            <span className="flex items-center gap-1.5">
+              <Music className="w-3.5 h-3.5" />
+              {trackCount} {trackCount === 1 ? 'track' : 'tracks'}
+            </span>
+            {totalDuration > 0 && (
+              <span className="flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5" />
+                {formatDuration(totalDuration)}
+              </span>
+            )}
+          </div>
+
+          {/* Schedule Badges */}
+          {scheduleSlots.length > 0 && (
+            <div className="mb-3 flex flex-wrap gap-1">
+              {scheduleSlots.slice(0, 3).map(slot => (
+                <span
+                  key={slot.id}
+                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${
+                    slot.isActive
+                      ? 'bg-[#00d9ff]/15 text-[#00d9ff]/80'
+                      : 'bg-white/5 text-white/30 line-through'
+                  }`}
+                >
+                  <Calendar className="w-2.5 h-2.5" />
+                  {slot.dayOfWeek !== null ? DAYS_SHORT[slot.dayOfWeek] : 'Daily'} {slot.startTime}
+                </span>
+              ))}
+              {scheduleSlots.length > 3 && (
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] bg-white/5 text-white/30">
+                  +{scheduleSlots.length - 3} more
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* Actions */}
+          <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={onClick}
+              className="flex-1 border-white/10 text-white hover:bg-white/5 text-xs"
+            >
+              <ArrowRight className="w-3.5 h-3.5 mr-1.5" />
+              Open
+            </Button>
+            {!isLive && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={onSetAsLive}
+                className="border-[#00ffaa]/30 text-[#00ffaa] hover:bg-[#00ffaa]/10 text-xs"
+                title="Send to Live Stream"
+              >
+                <Radio className="w-3.5 h-3.5" />
+              </Button>
+            )}
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={onEdit}
+              className="text-white/50 hover:text-white hover:bg-white/5"
+            >
+              <Edit className="w-3.5 h-3.5" />
+            </Button>
+            {!isLive && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={onDelete}
+                className="text-red-400/50 hover:text-red-400 hover:bg-red-400/10"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </Button>
+            )}
+            {scheduleSlots.length > 0 && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={onViewSchedule}
+                className="text-[#00ffaa]/50 hover:text-[#00ffaa] hover:bg-[#00ffaa]/10"
+              >
+                <Calendar className="w-3.5 h-3.5" />
+              </Button>
+            )}
+          </div>
+        </div>
+      </Card>
+    </motion.div>
+  );
+}
+
+// ==================== PLAYLIST DETAIL VIEW ====================
+
+function PlaylistDetail({
+  playlist,
+  allTracks,
+  scheduleSlots,
+  onBack,
+  onUpdate,
+  onSetAsLive,
+  isLive,
+  onViewSchedule,
+  onScheduleCreated
+}: {
+  playlist: Playlist;
+  allTracks: Track[];
+  scheduleSlots: ScheduleSlot[];
+  onBack: () => void;
+  onUpdate: (p: Playlist) => void;
+  onSetAsLive: () => void;
+  isLive: boolean;
+  onViewSchedule: () => void;
+  onScheduleCreated: () => void;
+}) {
+  const [librarySearch, setLibrarySearch] = useState('');
+  const [libraryGenre, setLibraryGenre] = useState('all');
+  const [saving, setSaving] = useState(false);
+  const [showLibrary, setShowLibrary] = useState(false);
+  const [quickScheduleOpen, setQuickScheduleOpen] = useState(false);
+  const [quickScheduleForm, setQuickScheduleForm] = useState({
+    dayOfWeek: new Date().getDay().toString(),
+    startTime: '08:00',
+    endTime: '10:00',
+  });
+  const [quickScheduleSaving, setQuickScheduleSaving] = useState(false);
+
+  const DAYS_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const QUICK_TIME_SLOTS = Array.from({ length: 24 }, (_, i) => `${i.toString().padStart(2, '0')}:00`);
+
+  const handleQuickSchedule = async () => {
+    const dayOfWeek = quickScheduleForm.dayOfWeek === 'daily' ? null : parseInt(quickScheduleForm.dayOfWeek);
+    setQuickScheduleSaving(true);
+    try {
+      await api.createSchedule({
+        playlistId: playlist.id,
+        dayOfWeek,
+        startTime: quickScheduleForm.startTime,
+        endTime: quickScheduleForm.endTime,
+        title: playlist.name,
+        isActive: true,
+        repeatWeekly: true,
+      });
+      toast.success(`Scheduled "${playlist.name}" at ${quickScheduleForm.dayOfWeek === 'daily' ? 'Daily' : DAYS_SHORT[parseInt(quickScheduleForm.dayOfWeek)]} ${quickScheduleForm.startTime}`);
+      setQuickScheduleOpen(false);
+      onScheduleCreated();
+    } catch (error: any) {
+      console.error('Quick schedule error:', error);
+      toast.error('Failed to schedule');
+    } finally {
+      setQuickScheduleSaving(false);
+    }
+  };
+
+  // Build ordered tracks list
+  const orderedTracks = useMemo(() => {
+    return (playlist.trackIds || [])
+      .map(id => allTracks.find(t => t.id === id))
+      .filter(Boolean) as Track[];
+  }, [playlist.trackIds, allTracks]);
+
+  // Filter library tracks (exclude already in playlist)
+  const libraryTracks = useMemo(() => {
+    const inPlaylist = new Set(playlist.trackIds || []);
+    return allTracks.filter(t => {
+      if (inPlaylist.has(t.id)) return false;
+      const matchSearch = !librarySearch ||
+        t.title.toLowerCase().includes(librarySearch.toLowerCase()) ||
+        t.artist.toLowerCase().includes(librarySearch.toLowerCase());
+      const matchGenre = libraryGenre === 'all' || t.genre?.toLowerCase() === libraryGenre;
+      return matchSearch && matchGenre;
+    });
+  }, [allTracks, playlist.trackIds, librarySearch, libraryGenre]);
+
+  const totalDuration = orderedTracks.reduce((sum, t) => sum + (t.duration || 0), 0);
+
+  const formatDuration = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
+
+  const formatTotalDuration = (seconds: number) => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    return h > 0 ? `${h}h ${m}m` : `${m} min`;
+  };
+
+  // Save track order
+  const saveOrder = useCallback(async (newTrackIds: string[]) => {
+    setSaving(true);
+    try {
+      await api.updatePlaylist(playlist.id, {
+        ...playlist,
+        trackIds: newTrackIds
+      });
+      onUpdate({ ...playlist, trackIds: newTrackIds });
+    } catch (error: any) {
+      toast.error('Failed to save order');
+    } finally {
+      setSaving(false);
+    }
+  }, [playlist, onUpdate]);
+
+  const handleReorder = (newOrder: Track[]) => {
+    const newIds = newOrder.map(t => t.id);
+    onUpdate({ ...playlist, trackIds: newIds });
+    saveOrder(newIds);
+  };
+
+  const handleAddTrack = async (trackId: string) => {
+    const newIds = [...(playlist.trackIds || []), trackId];
+    setSaving(true);
+    try {
+      await api.updatePlaylist(playlist.id, { ...playlist, trackIds: newIds });
+      onUpdate({ ...playlist, trackIds: newIds });
+      toast.success('Track added');
+    } catch {
+      toast.error('Failed to add track');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleRemoveTrack = async (trackId: string) => {
+    const newIds = (playlist.trackIds || []).filter(id => id !== trackId);
+    setSaving(true);
+    try {
+      await api.updatePlaylist(playlist.id, { ...playlist, trackIds: newIds });
+      onUpdate({ ...playlist, trackIds: newIds });
+      toast.success('Track removed');
+    } catch {
+      toast.error('Failed to remove track');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleShuffle = async () => {
+    if (orderedTracks.length < 2) return;
+    if (!confirm('Shuffle all tracks in this playlist?')) return;
+    const shuffled = [...(playlist.trackIds || [])].sort(() => Math.random() - 0.5);
+    setSaving(true);
+    try {
+      await api.updatePlaylist(playlist.id, { ...playlist, trackIds: shuffled });
+      onUpdate({ ...playlist, trackIds: shuffled });
+      toast.success('Playlist shuffled');
+    } catch {
+      toast.error('Failed to shuffle');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleAddAll = async () => {
+    if (libraryTracks.length === 0) return;
+    const count = Math.min(libraryTracks.length, 50);
+    if (!confirm(`Add ${count} tracks to the playlist?`)) return;
+    const newIds = [...(playlist.trackIds || []), ...libraryTracks.slice(0, 50).map(t => t.id)];
+    setSaving(true);
+    try {
+      await api.updatePlaylist(playlist.id, { ...playlist, trackIds: newIds });
+      onUpdate({ ...playlist, trackIds: newIds });
+      toast.success(`${count} tracks added`);
+    } catch {
+      toast.error('Failed to add tracks');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const color = playlist.color || '#00d9ff';
 
   return (
     <div className="space-y-4 sm:space-y-6">
       {/* Header */}
       <motion.div
-        initial={{ opacity: 0, y: 20 }}
+        initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
-        className="flex flex-col xs:flex-row xs:items-center xs:justify-between gap-3 sm:gap-4"
       >
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-righteous text-white mb-1 sm:mb-2">Playlist Management</h1>
-          <p className="text-white/70 text-sm sm:text-base">Create and manage playlists for Auto DJ • {playlists.length} playlists</p>
-        </div>
-        <Button
-          onClick={() => setIsCreateModalOpen(true)}
-          className="bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] hover:from-[#00b8dd] hover:to-[#00dd88] text-[#0a1628] w-full xs:w-auto flex-shrink-0"
-        >
-          <Plus className="w-4 h-4 mr-2" />
-          Create Playlist
-        </Button>
-      </motion.div>
-
-      {/* Search Bar */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.1 }}
-      >
-        <Card className="bg-white/10 backdrop-blur-sm border-white/20 p-3 sm:p-4">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/50" />
-            <Input
-              type="text"
-              placeholder="Search playlists..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10 bg-white/5 border-white/20 text-white placeholder:text-white/50 text-sm sm:text-base"
-            />
-          </div>
-        </Card>
-      </motion.div>
-
-      {/* Playlists Grid */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.2 }}
-        className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6"
-      >
-        {filteredPlaylists.length === 0 ? (
-          <div className="col-span-full text-center py-12 text-white/50">
-            <List className="w-10 h-10 sm:w-12 sm:h-12 mx-auto mb-4 opacity-50" />
-            <p className="text-sm sm:text-base">No playlists found</p>
-            <p className="text-xs sm:text-sm mt-2">Create your first playlist to get started</p>
-          </div>
-        ) : (
-          filteredPlaylists.map((playlist, index) => (
-            <motion.div
-              key={playlist.id}
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: index * 0.05 }}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3 min-w-0">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onBack}
+              className="text-white/70 hover:text-white flex-shrink-0"
             >
-              <Card className="bg-white/10 backdrop-blur-sm border-white/20 overflow-hidden hover:border-[#00d9ff]/50 transition-all group">
-                {/* Cover */}
-                <div className="relative aspect-square bg-gradient-to-br from-[#00d9ff]/20 to-[#00ffaa]/20 overflow-hidden">
-                  {playlist.coverUrl ? (
-                    <img
-                      src={playlist.coverUrl}
-                      alt={playlist.name}
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center">
-                      <List className="w-16 sm:w-20 h-16 sm:h-20 text-[#00d9ff]/50" />
-                    </div>
-                  )}
-                  
-                  {/* Play Button Overlay */}
-                  <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                    <Button
-                      size="icon"
-                      className="w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-[#00d9ff] hover:bg-[#00b8dd] text-[#0a1628]"
-                    >
-                      <Play className="w-5 h-5 sm:w-6 sm:h-6 ml-1" fill="currentColor" />
-                    </Button>
-                  </div>
+              <ChevronLeft className="w-5 h-5" />
+            </Button>
+            <div
+              className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0"
+              style={{ background: `linear-gradient(135deg, ${color}, ${color}80)` }}
+            >
+              {isLive ? <Radio className="w-6 h-6 text-[#0a1628]" /> : <ListMusic className="w-6 h-6 text-[#0a1628]" />}
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="text-xl sm:text-2xl font-bold text-white truncate" style={{ fontFamily: 'var(--font-family-display)' }}>
+                  {playlist.name}
+                </h1>
+                {isLive && (
+                  <Badge className="bg-[#00ffaa]/20 text-[#00ffaa] border-[#00ffaa]/30 text-xs flex-shrink-0">
+                    <Radio className="w-3 h-3 mr-1 animate-pulse" />
+                    ON AIR
+                  </Badge>
+                )}
+                {saving && (
+                  <Loader2 className="w-4 h-4 text-[#00d9ff] animate-spin flex-shrink-0" />
+                )}
+              </div>
+              <p className="text-white/50 text-sm">
+                {orderedTracks.length} tracks &bull; {formatTotalDuration(totalDuration)}
+                {playlist.genre && <> &bull; {playlist.genre}</>}
+              </p>
+            </div>
+          </div>
 
-                  {/* Public Badge */}
-                  {playlist.isPublic && (
-                    <div className="absolute top-2 sm:top-3 right-2 sm:right-3 px-2 py-1 rounded-full bg-green-500/80 text-white text-xs font-semibold backdrop-blur-sm">
-                      Public
-                    </div>
-                  )}
-                </div>
-
-                {/* Content */}
-                <div className="p-3 sm:p-4">
-                  <h3 className="text-white font-bold text-base sm:text-lg mb-1 truncate">{playlist.name}</h3>
-                  <p className="text-white/60 text-xs sm:text-sm mb-3 line-clamp-2 min-h-[2.5rem]">
-                    {playlist.description || 'No description'}
-                  </p>
-
-                  {/* Stats */}
-                  <div className="flex items-center gap-3 sm:gap-4 text-xs sm:text-sm text-white/50 mb-3 sm:mb-4">
-                    <div className="flex items-center gap-1">
-                      <Music className="w-3 h-3 sm:w-3.5 sm:h-3.5 flex-shrink-0" />
-                      <span>{playlist.trackCount} tracks</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Clock className="w-3 h-3 sm:w-3.5 sm:h-3.5 flex-shrink-0" />
-                      <span>{formatDuration(playlist.duration)}</span>
-                    </div>
-                  </div>
-
-                  {/* Genre Tag */}
-                  {playlist.genre && (
-                    <div className="mb-3 sm:mb-4">
-                      <span className="px-2 py-1 rounded text-xs font-semibold bg-[#00d9ff]/20 text-[#00d9ff]">
-                        {playlist.genre}
-                      </span>
-                    </div>
-                  )}
-
-                  {/* Actions */}
-                  <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleEditPlaylist(playlist)}
-                      className="flex-1 bg-white/5 text-white border-white/20 hover:bg-white/10 text-xs sm:text-sm"
-                    >
-                      <Edit2 className="w-3 h-3 sm:w-3.5 sm:h-3.5 mr-1 sm:mr-2" />
-                      <span className="hidden xs:inline">Edit</span>
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleDeletePlaylist(playlist.id)}
-                      className="bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/20 flex-shrink-0"
-                    >
-                      <Trash2 className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-                    </Button>
-                  </div>
-                </div>
-              </Card>
-            </motion.div>
-          ))
-        )}
+          <div className="flex items-center gap-2 flex-wrap">
+            {!isLive && (
+              <Button
+                onClick={onSetAsLive}
+                variant="outline"
+                size="sm"
+                className="border-[#00ffaa]/30 text-[#00ffaa] hover:bg-[#00ffaa]/10"
+              >
+                <Radio className="w-4 h-4 mr-2" />
+                Send to Live Stream
+              </Button>
+            )}
+            <Button
+              onClick={handleShuffle}
+              variant="outline"
+              size="sm"
+              className="border-white/10 text-white/70 hover:bg-white/5"
+              disabled={orderedTracks.length < 2}
+            >
+              <Shuffle className="w-4 h-4 mr-2" />
+              Shuffle
+            </Button>
+            <Button
+              onClick={() => setShowLibrary(!showLibrary)}
+              size="sm"
+              className={showLibrary
+                ? 'bg-[#00d9ff] text-[#0a1628]'
+                : 'bg-[#00d9ff]/10 text-[#00d9ff] border border-[#00d9ff]/30'
+              }
+            >
+              <PlusCircle className="w-4 h-4 mr-2" />
+              {showLibrary ? 'Hide Library' : 'Add Tracks'}
+            </Button>
+            <Button
+              onClick={() => setQuickScheduleOpen(true)}
+              size="sm"
+              className="bg-[#00ffaa] text-[#0a1628] hover:bg-[#00ffaa]/90"
+            >
+              <Calendar className="w-4 h-4 mr-2" />
+              Quick Schedule
+            </Button>
+          </div>
+        </div>
       </motion.div>
 
-      {/* Create Modal */}
-      <CreatePlaylistModal
-        isOpen={isCreateModalOpen}
-        onClose={() => setIsCreateModalOpen(false)}
-        onSuccess={() => {
-          loadPlaylists();
-          setIsCreateModalOpen(false);
-        }}
-      />
-
-      {/* Edit Modal */}
-      {selectedPlaylist && (
-        <EditPlaylistModal
-          isOpen={isEditModalOpen}
-          playlist={selectedPlaylist}
-          onClose={() => {
-            setIsEditModalOpen(false);
-            setSelectedPlaylist(null);
-          }}
-          onSuccess={() => {
-            loadPlaylists();
-            setIsEditModalOpen(false);
-            setSelectedPlaylist(null);
-          }}
-        />
+      {/* Schedule Info Strip */}
+      {scheduleSlots.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: -5 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+        >
+          <Card className="bg-[#0f1c2e]/90 border-[#00d9ff]/15 p-3 sm:p-4">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="p-1.5 rounded-lg bg-[#00d9ff]/15 flex-shrink-0">
+                  <Calendar className="w-4 h-4 text-[#00d9ff]" />
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-white/60 text-sm font-medium">Scheduled:</span>
+                  {scheduleSlots.map(slot => (
+                    <Badge
+                      key={slot.id}
+                      variant="outline"
+                      className={`text-xs ${
+                        slot.isActive
+                          ? 'border-[#00d9ff]/30 text-[#00d9ff]'
+                          : 'border-white/10 text-white/30 line-through'
+                      }`}
+                    >
+                      {slot.dayOfWeek !== null ? DAYS_SHORT[slot.dayOfWeek] : 'Daily'} {slot.startTime}–{slot.endTime}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+              <Button
+                onClick={onViewSchedule}
+                size="sm"
+                variant="outline"
+                className="border-[#00d9ff]/30 text-[#00d9ff] hover:bg-[#00d9ff]/10 text-xs flex-shrink-0"
+              >
+                <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
+                View in Schedule
+              </Button>
+            </div>
+          </Card>
+        </motion.div>
       )}
+
+      {/* Content */}
+      <div className={`grid gap-4 sm:gap-6 ${showLibrary ? 'grid-cols-1 lg:grid-cols-5' : 'grid-cols-1'}`}>
+        {/* Playlist Tracks */}
+        <div className={showLibrary ? 'lg:col-span-3' : ''}>
+          <Card className="bg-[#0f1c2e]/90 border-white/10">
+            <div className="p-4 sm:p-5 border-b border-white/5 flex items-center justify-between">
+              <h2 className="text-white font-semibold flex items-center gap-2">
+                <ArrowUpDown className="w-4 h-4 text-white/40" />
+                Queue &mdash; {orderedTracks.length} tracks
+              </h2>
+              {isLive && (
+                <Badge variant="outline" className="text-[#00ffaa] border-[#00ffaa]/30 text-xs">
+                  <Zap className="w-3 h-3 mr-1" />
+                  Auto DJ will play these
+                </Badge>
+              )}
+            </div>
+
+            {orderedTracks.length === 0 ? (
+              <div className="p-12 text-center">
+                <Music className="w-16 h-16 mx-auto mb-4 text-white/10" />
+                <p className="text-white/40 mb-2">No tracks in this playlist</p>
+                <p className="text-white/30 text-sm mb-4">Click "Add Tracks" to browse your library</p>
+                <Button
+                  onClick={() => setShowLibrary(true)}
+                  size="sm"
+                  className="bg-[#00d9ff]/10 text-[#00d9ff] border border-[#00d9ff]/30"
+                >
+                  <PlusCircle className="w-4 h-4 mr-2" />
+                  Browse Library
+                </Button>
+              </div>
+            ) : (
+              <div className="p-2 sm:p-3">
+                <Reorder.Group
+                  axis="y"
+                  values={orderedTracks}
+                  onReorder={handleReorder}
+                  className="space-y-1"
+                >
+                  {orderedTracks.map((track, index) => (
+                    <Reorder.Item key={track.id} value={track}>
+                      <motion.div
+                        layout
+                        className="flex items-center gap-2 sm:gap-3 p-2.5 sm:p-3 rounded-lg bg-[#0a1628]/40 border border-white/5 hover:border-[#00d9ff]/20 transition-colors cursor-grab active:cursor-grabbing group"
+                      >
+                        <GripVertical className="w-4 h-4 text-white/20 group-hover:text-white/40 flex-shrink-0 hidden sm:block" />
+
+                        <div className="w-7 h-7 rounded bg-white/5 flex items-center justify-center text-white/40 text-xs font-mono flex-shrink-0">
+                          {index + 1}
+                        </div>
+
+                        {track.coverUrl ? (
+                          <img src={track.coverUrl} alt="" className="w-10 h-10 rounded object-cover flex-shrink-0" />
+                        ) : (
+                          <div className="w-10 h-10 rounded flex items-center justify-center flex-shrink-0"
+                            style={{ background: `linear-gradient(135deg, ${color}20, ${color}10)` }}
+                          >
+                            <Music className="w-5 h-5" style={{ color }} />
+                          </div>
+                        )}
+
+                        <div className="flex-1 min-w-0">
+                          <h4 className="text-white text-sm font-medium truncate">{track.title}</h4>
+                          <p className="text-white/50 text-xs truncate">{track.artist}{track.album ? ` — ${track.album}` : ''}</p>
+                        </div>
+
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          {track.genre && (
+                            <Badge variant="outline" className="border-white/10 text-white/40 text-[10px] hidden md:flex">
+                              {track.genre}
+                            </Badge>
+                          )}
+                          <span className="text-white/30 text-xs font-mono w-10 text-right">
+                            {formatDuration(track.duration || 0)}
+                          </span>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => handleRemoveTrack(track.id)}
+                            className="w-7 h-7 text-red-400/40 hover:text-red-400 hover:bg-red-400/10 opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            <MinusCircle className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </motion.div>
+                    </Reorder.Item>
+                  ))}
+                </Reorder.Group>
+              </div>
+            )}
+          </Card>
+        </div>
+
+        {/* Library Browser */}
+        {showLibrary && (
+          <div className="lg:col-span-2">
+            <Card className="bg-[#0f1c2e]/90 border-white/10 lg:sticky lg:top-4">
+              <div className="p-4 border-b border-white/5">
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="text-white font-semibold flex items-center gap-2">
+                    <LayoutGrid className="w-4 h-4 text-[#00d9ff]" />
+                    Track Library
+                  </h2>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setShowLibrary(false)}
+                    className="text-white/40 hover:text-white lg:hidden"
+                  >
+                    <X className="w-4 h-4" />
+                  </Button>
+                </div>
+
+                {/* Search */}
+                <div className="relative mb-3">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white/30" />
+                  <Input
+                    value={librarySearch}
+                    onChange={(e) => setLibrarySearch(e.target.value)}
+                    placeholder="Search tracks..."
+                    className="pl-9 h-9 bg-[#0a1628] border-white/10 text-white text-sm"
+                  />
+                </div>
+
+                {/* Genre filter */}
+                <div className="flex gap-1.5 flex-wrap">
+                  {GENRES.slice(0, 6).map(g => (
+                    <Button
+                      key={g}
+                      size="sm"
+                      variant={libraryGenre === g ? 'default' : 'outline'}
+                      onClick={() => setLibraryGenre(g)}
+                      className={`h-7 px-2.5 text-[11px] ${
+                        libraryGenre === g
+                          ? 'bg-[#00d9ff] text-[#0a1628]'
+                          : 'border-white/10 text-white/50 hover:bg-white/5'
+                      }`}
+                    >
+                      {g === 'all' ? 'All' : g.charAt(0).toUpperCase() + g.slice(1)}
+                    </Button>
+                  ))}
+                </div>
+
+                {/* Bulk add */}
+                {libraryTracks.length > 0 && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleAddAll}
+                    className="w-full mt-3 h-8 text-xs border-[#00d9ff]/20 text-[#00d9ff] hover:bg-[#00d9ff]/10"
+                  >
+                    <PlusCircle className="w-3.5 h-3.5 mr-1.5" />
+                    Add All ({Math.min(libraryTracks.length, 50)})
+                  </Button>
+                )}
+              </div>
+
+              {/* Track list */}
+              <div className="p-2 max-h-[60vh] overflow-y-auto space-y-1">
+                {libraryTracks.length === 0 ? (
+                  <div className="p-8 text-center text-white/30 text-sm">
+                    {allTracks.length === 0 ? 'No tracks uploaded yet' : 'All tracks already in playlist'}
+                  </div>
+                ) : (
+                  libraryTracks.map(track => (
+                    <motion.div
+                      key={track.id}
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="flex items-center gap-2 p-2 rounded-lg hover:bg-white/5 transition-colors group"
+                    >
+                      {track.coverUrl ? (
+                        <img src={track.coverUrl} alt="" className="w-9 h-9 rounded object-cover flex-shrink-0" />
+                      ) : (
+                        <div className="w-9 h-9 rounded bg-[#00d9ff]/10 flex items-center justify-center flex-shrink-0">
+                          <Music className="w-4 h-4 text-[#00d9ff]/50" />
+                        </div>
+                      )}
+
+                      <div className="flex-1 min-w-0">
+                        <h4 className="text-white text-sm truncate">{track.title}</h4>
+                        <p className="text-white/40 text-xs truncate">{track.artist}</p>
+                      </div>
+
+                      <span className="text-white/20 text-xs font-mono flex-shrink-0">
+                        {formatDuration(track.duration || 0)}
+                      </span>
+
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={() => handleAddTrack(track.id)}
+                        className="w-7 h-7 text-[#00ffaa]/60 hover:text-[#00ffaa] hover:bg-[#00ffaa]/10 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+                      >
+                        <PlusCircle className="w-4 h-4" />
+                      </Button>
+                    </motion.div>
+                  ))
+                )}
+              </div>
+            </Card>
+          </div>
+        )}
+      </div>
+
+      {/* Quick Schedule Dialog */}
+      <Dialog open={quickScheduleOpen} onOpenChange={setQuickScheduleOpen}>
+        <DialogContent className="bg-[#0f1c2e] border-[#00d9ff]/30 text-white max-w-md">
+          <DialogHeader>
+            <DialogTitle>Quick Schedule</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-2">
+            <div className="flex items-center gap-3 p-3 rounded-lg" style={{ backgroundColor: `${color}15`, borderLeft: `3px solid ${color}` }}>
+              <ListMusic className="w-5 h-5 flex-shrink-0" style={{ color }} />
+              <div className="min-w-0">
+                <p className="text-white font-medium truncate">{playlist.name}</p>
+                <p className="text-white/40 text-xs">{orderedTracks.length} tracks &bull; {formatTotalDuration(totalDuration)}</p>
+              </div>
+            </div>
+            <div>
+              <Label className="text-white/80">Day of Week</Label>
+              <select
+                value={quickScheduleForm.dayOfWeek}
+                onChange={e => setQuickScheduleForm({ ...quickScheduleForm, dayOfWeek: e.target.value })}
+                className="w-full h-10 px-3 rounded-md bg-[#0a1628] border border-white/10 text-white text-sm"
+              >
+                <option value="daily">Daily</option>
+                {DAYS_FULL.map((day, index) => (
+                  <option key={index} value={index.toString()}>{day}</option>
+                ))}
+              </select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-white/80">Start Time</Label>
+                <select
+                  value={quickScheduleForm.startTime}
+                  onChange={e => setQuickScheduleForm({ ...quickScheduleForm, startTime: e.target.value })}
+                  className="w-full h-10 px-3 rounded-md bg-[#0a1628] border border-white/10 text-white text-sm"
+                >
+                  {QUICK_TIME_SLOTS.map(time => (
+                    <option key={time} value={time}>{time}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <Label className="text-white/80">End Time</Label>
+                <select
+                  value={quickScheduleForm.endTime}
+                  onChange={e => setQuickScheduleForm({ ...quickScheduleForm, endTime: e.target.value })}
+                  className="w-full h-10 px-3 rounded-md bg-[#0a1628] border border-white/10 text-white text-sm"
+                >
+                  {QUICK_TIME_SLOTS.map(time => (
+                    <option key={time} value={time}>{time}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="flex gap-3 pt-2">
+              <Button variant="outline" onClick={() => setQuickScheduleOpen(false)} className="flex-1 border-white/10 text-white/70">
+                Cancel
+              </Button>
+              <Button
+                onClick={handleQuickSchedule}
+                disabled={quickScheduleSaving}
+                className="flex-1 bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] text-[#0a1628] font-semibold"
+              >
+                {quickScheduleSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Schedule'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
 
-// Create Modal Component
-function CreatePlaylistModal({ isOpen, onClose, onSuccess }: { isOpen: boolean; onClose: () => void; onSuccess: () => void }) {
-  const [creating, setCreating] = useState(false);
-  const [formData, setFormData] = useState({
+// ==================== CREATE FORM ====================
+
+function CreatePlaylistForm({ onSuccess, onCancel }: { onSuccess: (p: Playlist) => void; onCancel: () => void }) {
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
     name: '',
     description: '',
     genre: '',
-    isPublic: false,
+    color: '#00d9ff'
   });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setCreating(true);
-
-    try {
-      await api.createPlaylist(formData);
-      toast.success('Playlist created successfully');
-      onSuccess();
-    } catch (error) {
-      console.error('Error creating playlist:', error);
-      toast.error('Failed to create playlist');
-    } finally {
-      setCreating(false);
+    if (!form.name.trim()) {
+      toast.error('Enter a playlist name');
+      return;
     }
-  };
-
-  return (
-    <AnimatePresence>
-      {isOpen && (
-        <>
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50"
-            onClick={onClose}
-          />
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.9, y: 20 }}
-            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[calc(100%-2rem)] sm:w-full max-w-lg bg-[#0a1628] rounded-xl border border-[#00d9ff]/30 shadow-2xl z-50 max-h-[90vh] overflow-y-auto"
-          >
-            <div className="p-4 sm:p-6">
-              <div className="flex items-center justify-between mb-4 sm:mb-6">
-                <h2 className="text-xl sm:text-2xl font-bold text-white">Create New Playlist</h2>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  onClick={onClose}
-                  className="text-white/70 hover:text-white flex-shrink-0"
-                >
-                  <X className="w-4 h-4 sm:w-5 sm:h-5" />
-                </Button>
-              </div>
-
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div>
-                  <Label htmlFor="name" className="text-white text-sm sm:text-base">Playlist Name *</Label>
-                  <Input
-                    id="name"
-                    required
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    className="bg-white/5 border-white/20 text-white text-sm sm:text-base"
-                    placeholder="Sunday Soul Classics"
-                  />
-                </div>
-
-                <div>
-                  <Label htmlFor="description" className="text-white text-sm sm:text-base">Description</Label>
-                  <textarea
-                    id="description"
-                    value={formData.description}
-                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                    className="w-full h-20 sm:h-24 px-3 py-2 rounded-md bg-white/5 border border-white/20 text-white placeholder:text-white/50 resize-none text-sm sm:text-base"
-                    placeholder="Smooth soul grooves for a relaxing Sunday..."
-                  />
-                </div>
-
-                <div>
-                  <Label htmlFor="genre" className="text-white text-sm sm:text-base">Genre</Label>
-                  <select
-                    id="genre"
-                    value={formData.genre}
-                    onChange={(e) => setFormData({ ...formData, genre: e.target.value })}
-                    className="w-full h-10 px-3 rounded-md bg-white/5 border border-white/20 text-white text-sm sm:text-base"
-                  >
-                    <option value="">All Genres</option>
-                    <option value="soul">Soul</option>
-                    <option value="funk">Funk</option>
-                    <option value="jazz">Jazz</option>
-                    <option value="disco">Disco</option>
-                    <option value="reggae">Reggae</option>
-                    <option value="blues">Blues</option>
-                    <option value="r&b">R&B</option>
-                    <option value="afrobeat">Afrobeat</option>
-                  </select>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id="isPublic"
-                    checked={formData.isPublic}
-                    onChange={(e) => setFormData({ ...formData, isPublic: e.target.checked })}
-                    className="w-4 h-4 rounded bg-white/5 border-white/20 text-[#00d9ff] focus:ring-[#00d9ff]"
-                  />
-                  <Label htmlFor="isPublic" className="text-white cursor-pointer text-sm sm:text-base">
-                    Make this playlist public
-                  </Label>
-                </div>
-
-                <div className="flex flex-col xs:flex-row gap-3 pt-4">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={onClose}
-                    className="flex-1 bg-white/5 text-white border-white/20 hover:bg-white/10 text-sm sm:text-base order-2 xs:order-1"
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    type="submit"
-                    disabled={creating}
-                    className="flex-1 bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] hover:from-[#00b8dd] hover:to-[#00dd88] text-[#0a1628] text-sm sm:text-base order-1 xs:order-2"
-                  >
-                    {creating ? 'Creating...' : 'Create Playlist'}
-                  </Button>
-                </div>
-              </form>
-            </div>
-          </motion.div>
-        </>
-      )}
-    </AnimatePresence>
-  );
-}
-
-// Edit Modal Component  
-function EditPlaylistModal({ isOpen, playlist, onClose, onSuccess }: { isOpen: boolean; playlist: Playlist; onClose: () => void; onSuccess: () => void }) {
-  const [saving, setSaving] = useState(false);
-  const [formData, setFormData] = useState({
-    name: playlist.name,
-    description: playlist.description || '',
-    genre: playlist.genre || '',
-    isPublic: playlist.isPublic,
-  });
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
     setSaving(true);
-
     try {
-      await api.updatePlaylist(playlist.id, formData);
-      toast.success('Playlist updated successfully');
-      onSuccess();
-    } catch (error) {
-      console.error('Error updating playlist:', error);
-      toast.error('Failed to update playlist');
+      const res = await api.createPlaylist({
+        ...form,
+        trackIds: []
+      });
+      toast.success('Playlist created');
+      onSuccess(res.playlist || { ...form, id: Date.now().toString(), trackIds: [], createdAt: new Date().toISOString() });
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to create');
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <AnimatePresence>
-      {isOpen && (
-        <>
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50"
-            onClick={onClose}
-          />
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.9, y: 20 }}
-            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[calc(100%-2rem)] sm:w-full max-w-lg bg-[#0a1628] rounded-xl border border-[#00d9ff]/30 shadow-2xl z-50 max-h-[90vh] overflow-y-auto"
-          >
-            <div className="p-4 sm:p-6">
-              <div className="flex items-center justify-between mb-4 sm:mb-6">
-                <h2 className="text-xl sm:text-2xl font-bold text-white">Edit Playlist</h2>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  onClick={onClose}
-                  className="text-white/70 hover:text-white flex-shrink-0"
-                >
-                  <X className="w-4 h-4 sm:w-5 sm:h-5" />
-                </Button>
-              </div>
+    <form onSubmit={handleSubmit} className="space-y-4 mt-2">
+      <div>
+        <Label className="text-white/80">Name *</Label>
+        <Input
+          required
+          value={form.name}
+          onChange={e => setForm({ ...form, name: e.target.value })}
+          placeholder="Sunday Soul Grooves"
+          className="bg-[#0a1628] border-white/10 text-white"
+        />
+      </div>
+      <div>
+        <Label className="text-white/80">Description</Label>
+        <Input
+          value={form.description}
+          onChange={e => setForm({ ...form, description: e.target.value })}
+          placeholder="Smooth soul tracks for lazy Sundays"
+          className="bg-[#0a1628] border-white/10 text-white"
+        />
+      </div>
+      <div>
+        <Label className="text-white/80">Genre</Label>
+        <select
+          value={form.genre}
+          onChange={e => setForm({ ...form, genre: e.target.value })}
+          className="w-full h-10 px-3 rounded-md bg-[#0a1628] border border-white/10 text-white text-sm"
+        >
+          <option value="">Any genre</option>
+          {GENRES.filter(g => g !== 'all').map(g => (
+            <option key={g} value={g}>{g.charAt(0).toUpperCase() + g.slice(1)}</option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <Label className="text-white/80">Color</Label>
+        <div className="flex gap-2 flex-wrap mt-1">
+          {COLORS.map(c => (
+            <button
+              key={c.value}
+              type="button"
+              onClick={() => setForm({ ...form, color: c.value })}
+              className={`w-8 h-8 rounded-lg border-2 transition-all ${
+                form.color === c.value ? 'border-white scale-110' : 'border-transparent opacity-60 hover:opacity-100'
+              }`}
+              style={{ backgroundColor: c.value }}
+              title={c.label}
+            />
+          ))}
+        </div>
+      </div>
+      <div className="flex gap-3 pt-2">
+        <Button type="button" variant="outline" onClick={onCancel} className="flex-1 border-white/10 text-white/70">
+          Cancel
+        </Button>
+        <Button
+          type="submit"
+          disabled={saving}
+          className="flex-1 bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] text-[#0a1628] font-semibold"
+        >
+          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Create'}
+        </Button>
+      </div>
+    </form>
+  );
+}
 
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div>
-                  <Label htmlFor="edit-name" className="text-white text-sm sm:text-base">Playlist Name *</Label>
-                  <Input
-                    id="edit-name"
-                    required
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    className="bg-white/5 border-white/20 text-white text-sm sm:text-base"
-                  />
-                </div>
+// ==================== EDIT FORM ====================
 
-                <div>
-                  <Label htmlFor="edit-description" className="text-white text-sm sm:text-base">Description</Label>
-                  <textarea
-                    id="edit-description"
-                    value={formData.description}
-                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                    className="w-full h-20 sm:h-24 px-3 py-2 rounded-md bg-white/5 border border-white/20 text-white placeholder:text-white/50 resize-none text-sm sm:text-base"
-                  />
-                </div>
+function EditPlaylistForm({ playlist, onSuccess, onCancel }: { playlist: Playlist; onSuccess: (p: Playlist) => void; onCancel: () => void }) {
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    name: playlist.name,
+    description: playlist.description || '',
+    genre: playlist.genre || '',
+    color: playlist.color || '#00d9ff'
+  });
 
-                <div>
-                  <Label htmlFor="edit-genre" className="text-white text-sm sm:text-base">Genre</Label>
-                  <select
-                    id="edit-genre"
-                    value={formData.genre}
-                    onChange={(e) => setFormData({ ...formData, genre: e.target.value })}
-                    className="w-full h-10 px-3 rounded-md bg-white/5 border border-white/20 text-white text-sm sm:text-base"
-                  >
-                    <option value="">All Genres</option>
-                    <option value="soul">Soul</option>
-                    <option value="funk">Funk</option>
-                    <option value="jazz">Jazz</option>
-                    <option value="disco">Disco</option>
-                    <option value="reggae">Reggae</option>
-                    <option value="blues">Blues</option>
-                    <option value="r&b">R&B</option>
-                    <option value="afrobeat">Afrobeat</option>
-                  </select>
-                </div>
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.name.trim()) {
+      toast.error('Enter a playlist name');
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.updatePlaylist(playlist.id, { ...playlist, ...form });
+      toast.success('Playlist updated');
+      onSuccess({ ...playlist, ...form });
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to update');
+    } finally {
+      setSaving(false);
+    }
+  };
 
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id="edit-isPublic"
-                    checked={formData.isPublic}
-                    onChange={(e) => setFormData({ ...formData, isPublic: e.target.checked })}
-                    className="w-4 h-4 rounded bg-white/5 border-white/20 text-[#00d9ff] focus:ring-[#00d9ff]"
-                  />
-                  <Label htmlFor="edit-isPublic" className="text-white cursor-pointer text-sm sm:text-base">
-                    Make this playlist public
-                  </Label>
-                </div>
-
-                <div className="flex flex-col xs:flex-row gap-3 pt-4">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={onClose}
-                    className="flex-1 bg-white/5 text-white border-white/20 hover:bg-white/10 text-sm sm:text-base order-2 xs:order-1"
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    type="submit"
-                    disabled={saving}
-                    className="flex-1 bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] hover:from-[#00b8dd] hover:to-[#00dd88] text-[#0a1628] text-sm sm:text-base order-1 xs:order-2"
-                  >
-                    {saving ? 'Saving...' : 'Save Changes'}
-                  </Button>
-                </div>
-              </form>
-            </div>
-          </motion.div>
-        </>
-      )}
-    </AnimatePresence>
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4 mt-2">
+      <div>
+        <Label className="text-white/80">Name *</Label>
+        <Input
+          required
+          value={form.name}
+          onChange={e => setForm({ ...form, name: e.target.value })}
+          className="bg-[#0a1628] border-white/10 text-white"
+        />
+      </div>
+      <div>
+        <Label className="text-white/80">Description</Label>
+        <Input
+          value={form.description}
+          onChange={e => setForm({ ...form, description: e.target.value })}
+          className="bg-[#0a1628] border-white/10 text-white"
+        />
+      </div>
+      <div>
+        <Label className="text-white/80">Genre</Label>
+        <select
+          value={form.genre}
+          onChange={e => setForm({ ...form, genre: e.target.value })}
+          className="w-full h-10 px-3 rounded-md bg-[#0a1628] border border-white/10 text-white text-sm"
+        >
+          <option value="">Any genre</option>
+          {GENRES.filter(g => g !== 'all').map(g => (
+            <option key={g} value={g}>{g.charAt(0).toUpperCase() + g.slice(1)}</option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <Label className="text-white/80">Color</Label>
+        <div className="flex gap-2 flex-wrap mt-1">
+          {COLORS.map(c => (
+            <button
+              key={c.value}
+              type="button"
+              onClick={() => setForm({ ...form, color: c.value })}
+              className={`w-8 h-8 rounded-lg border-2 transition-all ${
+                form.color === c.value ? 'border-white scale-110' : 'border-transparent opacity-60 hover:opacity-100'
+              }`}
+              style={{ backgroundColor: c.value }}
+              title={c.label}
+            />
+          ))}
+        </div>
+      </div>
+      <div className="flex gap-3 pt-2">
+        <Button type="button" variant="outline" onClick={onCancel} className="flex-1 border-white/10 text-white/70">
+          Cancel
+        </Button>
+        <Button
+          type="submit"
+          disabled={saving}
+          className="flex-1 bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] text-[#0a1628] font-semibold"
+        >
+          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save'}
+        </Button>
+      </div>
+    </form>
   );
 }

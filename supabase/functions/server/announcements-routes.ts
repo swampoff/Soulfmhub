@@ -3,7 +3,7 @@
  */
 
 import { Hono } from 'npm:hono@4';
-import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { createClient } from 'npm:@supabase/supabase-js@2';
 import {
   getWeatherData,
   generateWeatherScript,

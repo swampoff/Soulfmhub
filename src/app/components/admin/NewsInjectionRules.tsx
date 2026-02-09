@@ -34,7 +34,8 @@ import {
   Eye
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { projectId, publicAnonKey } from '/utils/supabase/info';
+import { projectId } from '/utils/supabase/info';
+import { getAuthHeaders } from '../../../lib/api';
 
 interface InjectionRule {
   id: string;
@@ -99,10 +100,11 @@ export function NewsInjectionRules() {
   const loadRules = async () => {
     setLoading(true);
     try {
+      const headers = await getAuthHeaders();
       const response = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/news-injection/injection-rules`,
         {
-          headers: { Authorization: `Bearer ${publicAnonKey}` }
+          headers
         }
       );
 
@@ -123,16 +125,14 @@ export function NewsInjectionRules() {
     }
 
     try {
+      const headers = await getAuthHeaders();
       const url = editingRule
         ? `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/news-injection/injection-rules/${editingRule.id}`
         : `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/news-injection/injection-rules`;
 
       const response = await fetch(url, {
         method: editingRule ? 'PUT' : 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${publicAnonKey}`
-        },
+        headers,
         body: JSON.stringify(formData)
       });
 
@@ -156,11 +156,12 @@ export function NewsInjectionRules() {
     if (!confirm('Are you sure you want to delete this rule?')) return;
 
     try {
+      const headers = await getAuthHeaders();
       const response = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/news-injection/injection-rules/${id}`,
         {
           method: 'DELETE',
-          headers: { Authorization: `Bearer ${publicAnonKey}` }
+          headers
         }
       );
 
@@ -178,14 +179,12 @@ export function NewsInjectionRules() {
 
   const toggleActive = async (id: string, currentActive: boolean) => {
     try {
+      const headers = await getAuthHeaders();
       const response = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/news-injection/injection-rules/${id}`,
         {
           method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${publicAnonKey}`
-          },
+          headers,
           body: JSON.stringify({ is_active: !currentActive })
         }
       );
@@ -205,10 +204,11 @@ export function NewsInjectionRules() {
   const previewRule = async (ruleId: string) => {
     setLoadingPreview(true);
     try {
+      const headers = await getAuthHeaders();
       const response = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/news-injection/injection-rules/${ruleId}/preview`,
         {
-          headers: { Authorization: `Bearer ${publicAnonKey}` }
+          headers
         }
       );
 

@@ -10,6 +10,7 @@ import AutomationVoicesManager from '../../components/admin/AutomationVoicesMana
 import { Radio, Sparkles, BarChart3, Settings, Play, Calendar, CheckCircle2, XCircle, Clock, Loader2, Mic, Volume2, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { projectId } from '/utils/supabase/info';
+import { getAuthHeaders } from '../../../lib/api';
 import { supabase } from '../../../lib/supabase';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
@@ -103,14 +104,13 @@ export default function ContentAutomationDashboard() {
     setGenerating(true);
     try {
       const today = new Date().toISOString().split('T')[0];
+      const headers = await getAuthHeaders();
       
       const res = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/automation/generate-all`,
         {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
+          headers,
           body: JSON.stringify({ date: today })
         }
       );
@@ -186,14 +186,13 @@ export default function ContentAutomationDashboard() {
 
     try {
       toast.info('🎙️ Проверка подключения к ElevenLabs...');
+      const headers = await getAuthHeaders();
 
       const res = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/automation/test-elevenlabs`,
         {
           method: 'GET',
-          headers: {
-            'Content-Type': 'application/json'
-          }
+          headers
         }
       );
 
@@ -232,14 +231,13 @@ export default function ContentAutomationDashboard() {
 
     try {
       toast.info('🎙️ Генерация тестового аудио...');
+      const headers = await getAuthHeaders();
 
       const res = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/automation/test-voice`,
         {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
+          headers,
           body: JSON.stringify({
             voiceId: testVoiceId,
             text: testText
@@ -473,13 +471,12 @@ export default function ContentAutomationDashboard() {
                         if (!confirm('Создать начальные данные? (Голоса, расписание, промпты)')) return;
                         
                         try {
+                          const headers = await getAuthHeaders();
                           const res = await fetch(
                             `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/automation/seed`,
                             {
                               method: 'POST',
-                              headers: {
-                                'Content-Type': 'application/json'
-                              }
+                              headers
                             }
                           );
 

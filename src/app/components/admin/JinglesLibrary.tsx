@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Play, Pause, Upload, Plus, Filter, Grid3x3, List, Trash2, Edit2, Volume2 } from 'lucide-react';
-import { projectId, publicAnonKey } from '/utils/supabase/info';
+import { projectId } from '/utils/supabase/info';
+import { getAccessToken } from '../../../lib/api';
 import { JingleUploadButton } from './JingleUploadButton';
 import { JINGLE_CATEGORIES, getCategoryInfo, CATEGORY_GROUPS } from './jingle-categories';
 
@@ -39,11 +40,12 @@ export function JinglesLibrary() {
       if (filterCategory) params.append('category', filterCategory);
       if (filterActive !== null) params.append('active', filterActive.toString());
 
+      const token = await getAccessToken();
       const response = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/jingles?${params}`,
         {
           headers: {
-            'Authorization': `Bearer ${publicAnonKey}`,
+            'Authorization': `Bearer ${token}`,
           },
         }
       );
@@ -65,7 +67,7 @@ export function JinglesLibrary() {
     if (!confirm('Are you sure you want to delete this jingle?')) return;
 
     try {
-      const token = localStorage.getItem('access_token');
+      const token = await getAccessToken();
       const response = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/jingles/${id}`,
         {
@@ -89,7 +91,7 @@ export function JinglesLibrary() {
 
   async function toggleActive(jingle: Jingle) {
     try {
-      const token = localStorage.getItem('access_token');
+      const token = await getAccessToken();
       const response = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/jingles/${jingle.id}`,
         {
@@ -128,11 +130,12 @@ export function JinglesLibrary() {
       }
 
       // Get signed URL for audio
+      const token = await getAccessToken();
       const response = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/jingles/${jingle.id}/audio`,
         {
           headers: {
-            'Authorization': `Bearer ${publicAnonKey}`,
+            'Authorization': `Bearer ${token}`,
           },
         }
       );

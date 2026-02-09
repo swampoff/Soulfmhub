@@ -51,11 +51,11 @@ async function initializeStorageBuckets() {
     console.log('🗄️  Initializing storage buckets...');
     
     const bucketsToCreate = [
-      { name: 'make-06086aa3-tracks', public: false },
-      { name: 'make-06086aa3-covers', public: true },
-      { name: 'make-06086aa3-jingles', public: false },
-      { name: 'make-06086aa3-news-voiceovers', public: false },
-      { name: 'make-06086aa3-announcements', public: false },
+      { name: 'make-06086aa3-tracks', public: false, fileType: 'audio' as const },
+      { name: 'make-06086aa3-covers', public: true, fileType: 'image' as const },
+      { name: 'make-06086aa3-jingles', public: false, fileType: 'audio' as const },
+      { name: 'make-06086aa3-news-voiceovers', public: false, fileType: 'audio' as const },
+      { name: 'make-06086aa3-announcements', public: false, fileType: 'audio' as const },
     ];
 
     const { data: buckets } = await supabase.storage.listBuckets();
@@ -70,8 +70,8 @@ async function initializeStorageBuckets() {
       
       const { error } = await supabase.storage.createBucket(bucketConfig.name, {
         public: bucketConfig.public,
-        fileSizeLimit: bucketConfig.name.includes('tracks') ? 52428800 : 5242880, // 50MB for tracks, 5MB for covers
-        allowedMimeTypes: bucketConfig.name.includes('tracks') 
+        fileSizeLimit: bucketConfig.fileType === 'audio' ? 52428800 : 5242880, // 50MB for audio, 5MB for images
+        allowedMimeTypes: bucketConfig.fileType === 'audio' 
           ? ['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audio/m4a', 'audio/flac']
           : ['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
       });
@@ -581,8 +581,10 @@ async function checkAndAdvanceTrack() {
       }
     }
     
-    // 🔔 PRIORITY 6: CHECK FOR JINGLES BEFORE PLAYING NEXT TRACK
-    const jingle = await autoDJHelper.checkAndPlayJingle(autoDJState);
+    // 🔔 PRIORITY 6: CHECK FOR JINGLES (now schedule-aware)
+    // Resolve current schedule FIRST so jingles get transition context + per-slot config
+    const currentScheduleForJingle = await getCurrentScheduledPlaylist();
+    const jingle = await autoDJHelper.checkAndPlayJingle(autoDJState, currentScheduleForJingle);
     
     if (jingle) {
       // Play jingle instead of next track
@@ -602,9 +604,6 @@ async function checkAndAdvanceTrack() {
       // Update Now Playing with jingle
       await autoDJHelper.updateNowPlayingWithJingle(jingle);
       
-      // Mark jingle as played
-      await jingleRotation.markJinglePlayed(jingle.id);
-      
       console.log(`✅ Now playing jingle: "${jingle.title}"`);
       return;
     }
@@ -619,7 +618,8 @@ async function checkAndAdvanceTrack() {
     interactive.incrementRequestCounter();
     interactive.incrementShoutoutCounter();
     
-    const currentSchedule = await getCurrentScheduledPlaylist();
+    // Re-use already-fetched schedule (avoid duplicate KV lookup)
+    const currentSchedule = currentScheduleForJingle;
     
     if (currentSchedule) {
       console.log(`📅 Schedule: "${currentSchedule.title}"`);
@@ -694,7 +694,12 @@ async function getCurrentScheduledPlaylist() {
       if (schedule.dayOfWeek !== null && schedule.dayOfWeek !== currentDay) continue;
       if (currentTime >= schedule.startTime && currentTime < schedule.endTime) {
         const playlist = await kv.get(`playlist:${schedule.playlistId}`);
-        return { ...schedule, playlistName: playlist?.name || 'Unknown' };
+        return {
+          ...schedule,
+          playlistName: playlist?.name || 'Unknown',
+          // Include jingleConfig for schedule-aware jingle integration
+          jingleConfig: schedule.jingleConfig || null,
+        };
       }
     }
     return null;
@@ -742,7 +747,9 @@ app.post("/make-server-06086aa3/radio/start", requireAuth, async (c) => {
       startTime: new Date().toISOString(),
       currentTrackStartTime: new Date().toISOString(),
       listeners: 0,
-      autoAdvance: true
+      autoAdvance: true,
+      pendingJingle: null,
+      isPlayingJingle: false
     };
 
     // Update Now Playing
@@ -968,7 +975,133 @@ app.get("/make-server-06086aa3/radio/status", async (c) => {
   }
 });
 
-// Live Radio Stream endpoint (unified for all listeners)
+// ==================== DIRECT STREAM (Signed URL) ====================
+// Returns signed URL for the current track so the browser plays directly from Storage.
+// All listeners get the same track + seekPosition for synchronization.
+app.get("/make-server-06086aa3/radio/current-stream", async (c) => {
+  try {
+    if (!autoDJState.isPlaying || !autoDJState.currentTrack) {
+      return c.json({ playing: false, message: 'Auto DJ is not running' }, 200);
+    }
+
+    const track = autoDJState.currentTrack;
+    const bucket = track.storageBucket || 'make-06086aa3-tracks';
+    const filename = track.storageFilename;
+
+    if (!filename) {
+      return c.json({ playing: true, error: 'Current track has no audio file', track: {
+        id: track.id, title: track.title, artist: track.artist, album: track.album,
+        duration: track.duration || 180, coverUrl: track.coverUrl || null,
+        isJingle: autoDJState.isPlayingJingle || false,
+      }}, 200);
+    }
+
+    // Generate signed URL (valid for 2 hours)
+    const { data: signedUrlData, error: signedUrlError } = await supabase.storage
+      .from(bucket)
+      .createSignedUrl(filename, 7200);
+
+    if (signedUrlError || !signedUrlData?.signedUrl) {
+      console.error('Signed URL error:', signedUrlError);
+      return c.json({ playing: true, error: 'Failed to generate audio URL' }, 500);
+    }
+
+    // Calculate where the listener should seek to (sync position)
+    let seekPosition = 0;
+    let remainingSeconds = 0;
+    const trackDuration = track.duration || 180;
+
+    if (autoDJState.currentTrackStartTime) {
+      const now = new Date();
+      const startTime = new Date(autoDJState.currentTrackStartTime);
+      const elapsed = Math.floor((now.getTime() - startTime.getTime()) / 1000);
+      seekPosition = Math.min(elapsed, trackDuration);
+      remainingSeconds = Math.max(trackDuration - elapsed, 0);
+    }
+
+    // Check if there's a pending jingle (for crossfade hint)
+    const pendingJingle = autoDJState.pendingJingle;
+    let jingleUrl = null;
+    if (pendingJingle?.storageFilename) {
+      const jBucket = pendingJingle.storageBucket || 'make-06086aa3-jingles';
+      const { data: jData } = await supabase.storage
+        .from(jBucket)
+        .createSignedUrl(pendingJingle.storageFilename, 7200);
+      if (jData?.signedUrl) jingleUrl = jData.signedUrl;
+    }
+
+    // Cover art URL
+    let coverUrl = track.coverUrl || null;
+    if (track.coverFilename && track.coverBucket) {
+      const { data: coverData } = await supabase.storage
+        .from(track.coverBucket)
+        .createSignedUrl(track.coverFilename, 7200);
+      if (coverData?.signedUrl) coverUrl = coverData.signedUrl;
+    }
+
+    // ── Peek at next track for crossfade preloading ──
+    let nextTrack: any = null;
+    try {
+      const pl = autoDJState.playlistTracks;
+      if (pl.length > 1 && !autoDJState.isPlayingJingle) {
+        const nextIdx = (autoDJState.currentTrackIndex + 1) % pl.length;
+        const nt = pl[nextIdx];
+        if (nt?.storageFilename) {
+          const ntBucket = nt.storageBucket || 'make-06086aa3-tracks';
+          const { data: ntUrl } = await supabase.storage
+            .from(ntBucket)
+            .createSignedUrl(nt.storageFilename, 7200);
+          if (ntUrl?.signedUrl) {
+            let ntCover = nt.coverUrl || null;
+            if (nt.coverFilename && nt.coverBucket) {
+              const { data: ntCoverData } = await supabase.storage
+                .from(nt.coverBucket)
+                .createSignedUrl(nt.coverFilename, 7200);
+              if (ntCoverData?.signedUrl) ntCover = ntCoverData.signedUrl;
+            }
+            nextTrack = {
+              id: nt.id,
+              title: nt.title,
+              artist: nt.artist,
+              album: nt.album,
+              duration: nt.duration || 180,
+              coverUrl: ntCover,
+              audioUrl: ntUrl.signedUrl,
+            };
+          }
+        }
+      }
+    } catch (ntErr: any) {
+      console.log('Next track peek failed (non-critical):', ntErr?.message || ntErr);
+    }
+
+    return c.json({
+      playing: true,
+      track: {
+        id: track.id,
+        title: track.title,
+        artist: track.artist,
+        album: track.album,
+        duration: trackDuration,
+        coverUrl,
+        isJingle: autoDJState.isPlayingJingle || false,
+      },
+      audioUrl: signedUrlData.signedUrl,
+      seekPosition,
+      remainingSeconds,
+      startedAt: autoDJState.currentTrackStartTime,
+      jingleUrl,
+      nextTrack,
+      crossfadeDuration: 5,
+      listeners: autoDJState.listeners,
+    });
+  } catch (error: any) {
+    console.error('Current stream error:', error);
+    return c.json({ playing: false, error: `Stream error: ${error.message}` }, 500);
+  }
+});
+
+// Live Radio Stream endpoint (legacy file-serving — kept for backward compat)
 app.get("/make-server-06086aa3/radio/live", async (c) => {
   try {
     if (!autoDJState.isPlaying || !autoDJState.currentTrack) {
@@ -2752,7 +2885,8 @@ app.get("/make-server-06086aa3/schedule", async (c) => {
         return {
           ...schedule,
           playlistName: playlist?.name || 'Unknown',
-          playlistColor: playlist?.color || '#00d9ff'
+          playlistColor: playlist?.color || '#00d9ff',
+          jingleConfig: schedule.jingleConfig || null,
         };
       })
     );
@@ -2799,6 +2933,14 @@ app.post("/make-server-06086aa3/schedule", requireAuth, async (c) => {
       title,
       isActive: isActive !== undefined ? isActive : true,
       repeatWeekly: repeatWeekly !== undefined ? repeatWeekly : true,
+      // Jingle integration config (per-slot overrides)
+      jingleConfig: body.jingleConfig || {
+        introJingleId: null,
+        outroJingleId: null,
+        jingleFrequencyOverride: null,
+        disableJingles: false,
+        jingleCategoryFilter: null,
+      },
       createdAt: new Date().toISOString()
     };
     
@@ -2842,6 +2984,10 @@ app.put("/make-server-06086aa3/schedule/:id", requireAuth, async (c) => {
       title: body.title !== undefined ? body.title : schedule.title,
       isActive: body.isActive !== undefined ? body.isActive : schedule.isActive,
       repeatWeekly: body.repeatWeekly !== undefined ? body.repeatWeekly : schedule.repeatWeekly,
+      // Jingle integration config (merge with existing)
+      jingleConfig: body.jingleConfig !== undefined
+        ? { ...(schedule.jingleConfig || {}), ...body.jingleConfig }
+        : (schedule.jingleConfig || null),
       updatedAt: new Date().toISOString()
     };
     
@@ -2873,6 +3019,63 @@ app.delete("/make-server-06086aa3/schedule/:id", requireAuth, async (c) => {
   } catch (error: any) {
     console.error('Delete schedule error:', error);
     return c.json({ error: `Failed to delete schedule: ${error.message}` }, 500);
+  }
+});
+
+// ==================== SCHEDULE ↔ JINGLE INTEGRATION ====================
+
+// Get schedule-jingle integration map: which jingles are configured per schedule slot
+app.get("/make-server-06086aa3/schedule/jingle-map", async (c) => {
+  try {
+    const allSchedules = await kv.getByPrefix('schedule:') as any[];
+    const allJingles = await kv.getByPrefix('jingle:') as any[];
+    const allRules = await kv.getByPrefix('jingle-rule:') as any[];
+    
+    const jingleMap: Record<string, any> = {};
+    const jinglesById: Record<string, any> = {};
+    for (const j of allJingles) {
+      if (j?.id) jinglesById[j.id] = j;
+    }
+    
+    // Per-slot jingle info
+    for (const s of allSchedules) {
+      if (!s?.id) continue;
+      const config = s.jingleConfig || {};
+      const entry: any = {
+        scheduleId: s.id,
+        title: s.title,
+        playlistId: s.playlistId,
+        dayOfWeek: s.dayOfWeek,
+        startTime: s.startTime,
+        endTime: s.endTime,
+        jingleConfig: config,
+        introJingle: config.introJingleId ? (jinglesById[config.introJingleId] || null) : null,
+        outroJingle: config.outroJingleId ? (jinglesById[config.outroJingleId] || null) : null,
+        scheduleBasedRules: [],
+      };
+      
+      // Find schedule_based rules targeting this slot or its playlist
+      for (const rule of allRules) {
+        if (!rule?.active || rule.ruleType !== 'schedule_based') continue;
+        if (rule.scheduleId === s.id || rule.playlistId === s.playlistId || (!rule.scheduleId && !rule.playlistId)) {
+          entry.scheduleBasedRules.push({
+            ruleId: rule.id,
+            position: rule.schedulePosition,
+            jingle: jinglesById[rule.jingleId] || null,
+          });
+        }
+      }
+      
+      jingleMap[s.id] = entry;
+    }
+    
+    // Global state
+    const integrationState = autoDJHelper.getIntegrationState();
+    
+    return c.json({ jingleMap, integrationState, totalSchedules: allSchedules.length, totalJingles: allJingles.length });
+  } catch (error: any) {
+    console.error('Jingle map error:', error);
+    return c.json({ error: `Jingle map error: ${error.message}` }, 500);
   }
 });
 

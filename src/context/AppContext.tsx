@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { api } from '../lib/api';
-import { RealtimeChannel } from '@supabase/supabase-js';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 
 export type UserRole = 'listener' | 'super_admin';
 
@@ -37,7 +37,7 @@ interface StreamStatus {
   uptime: number;
 }
 
-interface AppContextType {
+export interface AppContextType {
   user: User | null;
   loading: boolean;
   nowPlaying: NowPlaying | null;
@@ -52,7 +52,24 @@ interface AppContextType {
   refreshNowPlaying: () => Promise<void>;
 }
 
-const AppContext = createContext<AppContextType | undefined>(undefined);
+// Default context value - used when provider is not available (e.g., HMR edge case)
+const defaultContextValue: AppContextType = {
+  user: null,
+  loading: false,
+  nowPlaying: null,
+  streamStatus: null,
+  isPlaying: false,
+  volume: 0.7,
+  setIsPlaying: () => {},
+  setVolume: () => {},
+  signIn: async () => ({ data: null, error: new Error('AppProvider not available') }),
+  signUp: async () => ({ data: null, error: new Error('AppProvider not available') }),
+  signOut: async () => {},
+  refreshNowPlaying: async () => {},
+};
+
+// Provide default value so useContext never returns undefined
+const AppContext = createContext<AppContextType>(defaultContextValue);
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -61,73 +78,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [streamStatus, setStreamStatus] = useState<StreamStatus | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [volume, setVolume] = useState(0.7);
-
-  // Realtime channel для глобального обновления Now Playing
-  useEffect(() => {
-    let channel: RealtimeChannel | null = null;
-
-    console.log('🔌 [AppContext] Setting up Realtime channel');
-
-    // Initial load
-    refreshNowPlaying();
-
-    // Subscribe to Realtime updates
-    channel = supabase.channel('radio-updates-global', {
-      config: {
-        broadcast: { self: false }
-      }
-    });
-
-    channel.on('broadcast', { event: 'track-changed' }, (payload) => {
-      console.log('🎵 [AppContext] Track changed via Realtime:', payload);
-      // Update nowPlaying immediately
-      refreshNowPlaying();
-    });
-
-    channel.subscribe((status) => {
-      console.log('📡 [AppContext] Realtime channel status:', status);
-      if (status === 'SUBSCRIBED') {
-        console.log('✅ [AppContext] Connected to radio-updates-global channel');
-      }
-    });
-
-    // Cleanup
-    return () => {
-      console.log('🔌 [AppContext] Cleaning up Realtime channel');
-      if (channel) {
-        supabase.removeChannel(channel);
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    // Check active session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        api.getProfile().then((data) => {
-          if (data.profile) {
-            setUser(data.profile);
-          }
-        });
-      }
-      setLoading(false);
-    });
-
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) {
-        api.getProfile().then((data) => {
-          if (data.profile) {
-            setUser(data.profile);
-          }
-        });
-      } else {
-        setUser(null);
-      }
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
 
   const refreshNowPlaying = async () => {
     try {
@@ -139,9 +89,102 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setStreamStatus(data.streamStatus);
       }
     } catch (error) {
-      console.error('Error fetching now playing:', error);
+      console.error('[AppContext] Error fetching now playing:', error);
     }
   };
+
+  // Realtime channel for global Now Playing updates
+  useEffect(() => {
+    let channel: RealtimeChannel | null = null;
+
+    try {
+      console.log('[AppContext] Setting up Realtime channel');
+
+      // Initial load
+      refreshNowPlaying();
+
+      // Subscribe to Realtime updates
+      channel = supabase.channel('radio-updates-global', {
+        config: {
+          broadcast: { self: false }
+        }
+      });
+
+      channel.on('broadcast', { event: 'track-changed' }, (payload) => {
+        console.log('[AppContext] Track changed via Realtime:', payload);
+        refreshNowPlaying();
+      });
+
+      channel.subscribe((status) => {
+        console.log('[AppContext] Realtime channel status:', status);
+      });
+    } catch (error) {
+      console.error('[AppContext] Error setting up Realtime channel:', error);
+    }
+
+    // Cleanup
+    return () => {
+      try {
+        if (channel) {
+          supabase.removeChannel(channel);
+        }
+      } catch (error) {
+        console.error('[AppContext] Error cleaning up Realtime channel:', error);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    let subscription: any = null;
+
+    try {
+      // Check active session
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (session?.user) {
+          api.getProfile().then((data) => {
+            if (data.profile) {
+              setUser(data.profile);
+            }
+          }).catch((err) => {
+            console.error('[AppContext] Error loading profile:', err);
+          });
+        }
+        setLoading(false);
+      }).catch((err) => {
+        console.error('[AppContext] Error getting session:', err);
+        setLoading(false);
+      });
+
+      // Listen for auth changes
+      const result = supabase.auth.onAuthStateChange((_event, session) => {
+        if (session?.user) {
+          api.getProfile().then((data) => {
+            if (data.profile) {
+              setUser(data.profile);
+            }
+          }).catch((err) => {
+            console.error('[AppContext] Error loading profile on auth change:', err);
+          });
+        } else {
+          setUser(null);
+        }
+      });
+      subscription = result.data.subscription;
+    } catch (error) {
+      console.error('[AppContext] Error in auth setup:', error);
+      setLoading(false);
+    }
+
+    return () => {
+      try {
+        if (subscription) {
+          subscription.unsubscribe();
+        }
+      } catch (err) {
+        console.error('[AppContext] Error unsubscribing:', err);
+      }
+    };
+  }, []);
 
   const signIn = async (email: string, password: string) => {
     console.log('[AppContext] signIn called with email:', email);
@@ -153,13 +196,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     console.log('[AppContext] signIn success, user:', data?.user?.email);
     
     // Load profile immediately after sign in
-    console.log('[AppContext] Loading user profile...');
     try {
       const profileData = await api.getProfile();
-      console.log('[AppContext] Profile data:', profileData);
       if (profileData.profile) {
         setUser(profileData.profile);
-        console.log('[AppContext] User state updated:', profileData.profile);
       }
     } catch (profileError) {
       console.error('[AppContext] Error loading profile:', profileError);
@@ -178,13 +218,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     console.log('[AppContext] signUp success');
     
     // Load profile immediately after sign up
-    console.log('[AppContext] Loading user profile...');
     try {
       const profileData = await api.getProfile();
-      console.log('[AppContext] Profile data:', profileData);
       if (profileData.profile) {
         setUser(profileData.profile);
-        console.log('[AppContext] User state updated:', profileData.profile);
       }
     } catch (profileError) {
       console.error('[AppContext] Error loading profile:', profileError);
@@ -194,7 +231,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut = async () => {
-    await api.signOut();
+    try {
+      await api.signOut();
+    } catch (error) {
+      console.error('[AppContext] Error signing out:', error);
+    }
     setUser(null);
   };
 
@@ -220,10 +261,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 }
 
-export function useApp() {
-  const context = useContext(AppContext);
-  if (context === undefined) {
-    throw new Error('useApp must be used within an AppProvider');
-  }
-  return context;
+export function useApp(): AppContextType {
+  return useContext(AppContext);
 }

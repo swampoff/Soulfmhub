@@ -3,7 +3,7 @@
  * Тестовые данные для news injection system
  */
 
-import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { createClient } from 'npm:@supabase/supabase-js@2';
 import * as kv from './kv_store.tsx';
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL')!;

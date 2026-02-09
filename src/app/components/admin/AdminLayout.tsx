@@ -7,6 +7,7 @@ import {
   Mic2,
   Settings,
   BarChart3,
+  ListMusic,
   Menu,
   X,
   ChevronRight,
@@ -27,6 +28,7 @@ export function AdminLayout({ children, maxWidth = 'default' }: AdminLayoutProps
   const tabs = [
     { id: 'home', label: 'Home', icon: Radio, path: '/admin' },
     { id: 'media', label: 'Media', icon: Music, path: '/admin/media' },
+    { id: 'playlists', label: 'Playlists', icon: ListMusic, path: '/admin/playlists' },
     { id: 'schedule', label: 'Schedule', icon: Calendar, path: '/admin/schedule' },
     { id: 'jingles', label: 'Jingles', icon: Mic2, path: '/admin/jingles' },
     { id: 'stream', label: 'Stream', icon: Settings, path: '/admin/stream-settings' },
