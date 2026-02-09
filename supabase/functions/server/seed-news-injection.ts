@@ -1,13 +1,9 @@
 /**
  * Soul FM - News Injection Seed Data
- * Тестовые данные для news injection system
+ * Uses KV store for all data storage.
  */
 
-import { createClient } from 'npm:@supabase/supabase-js@2';
 import * as kv from './kv_store.tsx';
-
-const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
 // ==================== SAMPLE NEWS ARTICLES ====================
 
@@ -60,7 +56,7 @@ const sampleVoices = [
   {
     id: 'voice_news_001',
     hostName: 'Professional News Anchor',
-    elevenLabsVoiceId: '21m00Tcm4TlvDq8ikWAM', // Rachel - ElevenLabs default voice
+    elevenLabsVoiceId: '21m00Tcm4TlvDq8ikWAM',
     voiceSettings: {
       stability: 0.5,
       similarityBoost: 0.75,
@@ -72,7 +68,7 @@ const sampleVoices = [
   {
     id: 'voice_casual_002',
     hostName: 'Casual Morning Host',
-    elevenLabsVoiceId: 'EXAVITQu4vr4xnSDxMaL', // Bella - Friendly voice
+    elevenLabsVoiceId: 'EXAVITQu4vr4xnSDxMaL',
     voiceSettings: {
       stability: 0.6,
       similarityBoost: 0.8,
@@ -84,7 +80,7 @@ const sampleVoices = [
   {
     id: 'voice_smooth_003',
     hostName: 'Smooth Evening Voice',
-    elevenLabsVoiceId: 'ErXwobaYiN019PkySvjV', // Antoni - Smooth voice
+    elevenLabsVoiceId: 'ErXwobaYiN019PkySvjV',
     voiceSettings: {
       stability: 0.7,
       similarityBoost: 0.85,
@@ -99,7 +95,7 @@ const sampleVoices = [
 
 export async function seedNewsInjectionData() {
   console.log('📰 Seeding News Injection test data...');
-  
+
   try {
     // Seed news articles
     console.log('📝 Creating sample news articles...');
@@ -107,38 +103,21 @@ export async function seedNewsInjectionData() {
       await kv.set(`news_${news.id}`, news);
       console.log(`✅ Created: ${news.title}`);
     }
-    
-    // Seed voices
+
+    // Seed voices (also via KV)
     console.log('🎙️ Creating sample voices...');
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-    
     for (const voice of sampleVoices) {
-      const { data: existing } = await supabase
-        .from('automation_voices_06086aa3')
-        .select('id')
-        .eq('host_name', voice.hostName)
-        .single();
-      
-      if (!existing) {
-        const { error } = await supabase
-          .from('automation_voices_06086aa3')
-          .insert({
-            host_name: voice.hostName,
-            elevenlabs_voice_id: voice.elevenLabsVoiceId,
-            voice_settings: voice.voiceSettings,
-            is_active: voice.isActive
-          });
-        
-        if (error) {
-          console.log(`⚠️  Voice exists or error: ${voice.hostName}`);
-        } else {
-          console.log(`✅ Created voice: ${voice.hostName}`);
-        }
-      } else {
-        console.log(`✅ Voice already exists: ${voice.hostName}`);
-      }
+      await kv.set(`automation_voice:${voice.id}`, {
+        id: voice.id,
+        host_name: voice.hostName,
+        elevenlabs_voice_id: voice.elevenLabsVoiceId,
+        voice_settings: voice.voiceSettings,
+        is_active: voice.isActive,
+        created_at: new Date().toISOString()
+      });
+      console.log(`✅ Created voice: ${voice.hostName}`);
     }
-    
+
     console.log('');
     console.log('🎉 Seed data created successfully!');
     console.log('');
@@ -149,7 +128,7 @@ export async function seedNewsInjectionData() {
     console.log('🚀 Ready to test News Injection!');
     console.log('   Visit: /admin/news-injection');
     console.log('');
-    
+
     return {
       success: true,
       news: sampleNews.length,
@@ -167,16 +146,16 @@ export const sampleInjectionRules = [
   {
     name: 'Hourly News Updates (Test)',
     frequency: 'hourly',
-    days_of_week: [1, 2, 3, 4, 5], // Mon-Fri
+    days_of_week: [1, 2, 3, 4, 5],
     max_news_per_slot: 1,
     priority_order: 'latest',
-    is_active: false // Disabled by default for testing
+    is_active: false
   },
   {
     name: 'Morning & Evening News (Test)',
     frequency: 'custom',
     custom_times: ['08:00', '12:00', '18:00', '22:00'],
-    days_of_week: [0, 1, 2, 3, 4, 5, 6], // All days
+    days_of_week: [0, 1, 2, 3, 4, 5, 6],
     max_news_per_slot: 2,
     priority_order: 'latest',
     is_active: false
@@ -185,30 +164,22 @@ export const sampleInjectionRules = [
 
 export async function createSampleRules() {
   console.log('⏰ Creating sample injection rules...');
-  
-  const supabase = createClient(supabaseUrl, supabaseServiceKey);
-  
+
   for (const rule of sampleInjectionRules) {
-    const { data: existing } = await supabase
-      .from('news_injection_rules_06086aa3')
-      .select('id')
-      .eq('name', rule.name)
-      .single();
-    
+    const ruleId = crypto.randomUUID();
+    const existing = (await kv.getByPrefix('news_rule:')).find((r: any) => r.name === rule.name);
+
     if (!existing) {
-      const { error } = await supabase
-        .from('news_injection_rules_06086aa3')
-        .insert(rule);
-      
-      if (error) {
-        console.log(`⚠️  Rule exists or error: ${rule.name}`);
-      } else {
-        console.log(`✅ Created rule: ${rule.name}`);
-      }
+      await kv.set(`news_rule:${ruleId}`, {
+        id: ruleId,
+        ...rule,
+        created_at: new Date().toISOString()
+      });
+      console.log(`✅ Created rule: ${rule.name}`);
     } else {
       console.log(`✅ Rule already exists: ${rule.name}`);
     }
   }
-  
+
   console.log('✅ Sample rules created!');
 }

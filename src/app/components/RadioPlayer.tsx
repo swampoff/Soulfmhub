@@ -577,8 +577,9 @@ export function RadioPlayer() {
   // ─── Render ─────────────────────────────────────────────────────
   return (
     <motion.div
-      initial={{ y: 100, opacity: 0 }}
+      initial={{ y: 80, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
+      transition={{ type: 'spring', stiffness: 120, damping: 22, mass: 1 }}
       className="fixed bottom-0 left-0 right-0 z-50"
     >
       <div className="relative bg-gradient-to-r from-[#0a1628]/95 via-[#0d1a2d]/95 to-[#0a1628]/95 backdrop-blur-xl border-t border-[#00d9ff]/30 shadow-2xl">
@@ -589,15 +590,18 @@ export function RadioPlayer() {
         {isPlaying && trackDuration > 0 && (
           <div className="absolute top-0 left-0 right-0 h-0.5">
             <div
-              className="h-full bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] transition-all duration-300 ease-linear"
-              style={{ width: `${trackProgress}%` }}
+              className="h-full bg-gradient-to-r from-[#00d9ff] to-[#00ffaa]"
+              style={{
+                width: `${trackProgress}%`,
+                transition: 'width 0.5s cubic-bezier(0.4, 0, 0.2, 1)',
+              }}
             />
             {/* Crossfade zone indicator */}
             {crossfadeActive && (
               <motion.div
                 className="absolute right-0 top-0 h-full w-1 bg-[#00ffaa]"
-                animate={{ opacity: [1, 0.3, 1] }}
-                transition={{ duration: 0.6, repeat: Infinity }}
+                animate={{ opacity: [1, 0.4, 1] }}
+                transition={{ duration: 1.2, repeat: Infinity, ease: 'easeInOut' }}
               />
             )}
           </div>
@@ -612,7 +616,7 @@ export function RadioPlayer() {
                 <motion.div
                   className="absolute inset-0 -m-2"
                   animate={{ rotate: isPlaying ? 360 : 0 }}
-                  transition={{ duration: 8, repeat: isPlaying ? Infinity : 0, ease: 'linear' }}
+                  transition={{ duration: 12, repeat: isPlaying ? Infinity : 0, ease: 'linear' }}
                 >
                   <svg className="w-20 h-20" viewBox="0 0 80 80">
                     <circle
@@ -635,13 +639,13 @@ export function RadioPlayer() {
                   animate={{
                     boxShadow: isPlaying
                       ? [
-                          '0 0 20px rgba(0,217,255,.4)',
-                          '0 0 30px rgba(0,255,170,.6)',
-                          '0 0 20px rgba(0,217,255,.4)',
+                          '0 0 15px rgba(0,217,255,.3)',
+                          '0 0 25px rgba(0,255,170,.5)',
+                          '0 0 15px rgba(0,217,255,.3)',
                         ]
-                      : '0 0 10px rgba(0,217,255,.2)',
+                      : '0 0 8px rgba(0,217,255,.15)',
                   }}
-                  transition={{ duration: 2, repeat: Infinity }}
+                  transition={{ duration: 3.5, repeat: Infinity, ease: 'easeInOut' }}
                 >
                   {displayCover ? (
                     <img src={displayCover} alt={displayTrack?.title || ''} className="w-full h-full object-cover" />
@@ -657,10 +661,10 @@ export function RadioPlayer() {
                   )}
 
                   {isBuffering && (
-                    <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                    <div className="absolute inset-0 bg-black/40 flex items-center justify-center backdrop-blur-[1px]">
                       <motion.div
                         animate={{ rotate: 360 }}
-                        transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                        transition={{ duration: 1.2, repeat: Infinity, ease: 'linear' }}
                         className="w-6 h-6 border-2 border-[#00d9ff] border-t-transparent rounded-full"
                       />
                     </div>
@@ -676,8 +680,8 @@ export function RadioPlayer() {
                       connectionStatus === 'error' ? '#ff4444' :
                       connectionStatus === 'offline' ? '#666' : '#ffaa00',
                   }}
-                  animate={{ scale: connectionStatus === 'connected' ? [1, 1.2, 1] : 1 }}
-                  transition={{ duration: 1.5, repeat: Infinity }}
+                  animate={{ scale: connectionStatus === 'connected' ? [1, 1.15, 1] : 1 }}
+                  transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
                 />
               </div>
 
@@ -724,15 +728,15 @@ export function RadioPlayer() {
                 <Heart className="w-4 h-4" fill={isLiked ? '#ff4444' : 'none'} style={{ color: isLiked ? '#ff4444' : 'currentColor' }} />
               </Button>
 
-              <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+              <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} transition={{ type: 'spring', stiffness: 300, damping: 20 }}>
                 <Button
                   size="icon" onClick={togglePlay}
                   className="w-12 h-12 rounded-full bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] hover:from-[#00b8dd] hover:to-[#00dd88] text-[#0a1628] shadow-lg shadow-[#00d9ff]/40 relative overflow-hidden"
                 >
                   <motion.div
                     className="absolute inset-0 bg-white/20"
-                    animate={{ scale: isPlaying ? [1, 1.5, 1.5] : 1, opacity: isPlaying ? [0.5, 0, 0] : 0 }}
-                    transition={{ duration: 1.5, repeat: isPlaying ? Infinity : 0 }}
+                    animate={{ scale: isPlaying ? [1, 1.8, 1.8] : 1, opacity: isPlaying ? [0.4, 0, 0] : 0 }}
+                    transition={{ duration: 2.2, repeat: isPlaying ? Infinity : 0, ease: 'easeOut' }}
                   />
                   {isBuffering ? (
                     <Loader2 className="w-5 h-5 relative z-10 animate-spin" />
@@ -771,7 +775,7 @@ export function RadioPlayer() {
                 initial={{ height: 0, opacity: 0 }}
                 animate={{ height: 'auto', opacity: 1 }}
                 exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.3 }}
+                transition={{ duration: 0.45, ease: [0.4, 0, 0.2, 1] }}
                 className="overflow-hidden"
               >
                 <div className="pt-4 border-t border-[#00d9ff]/20 mt-4">

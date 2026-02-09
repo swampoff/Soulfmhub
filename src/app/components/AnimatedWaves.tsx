@@ -23,7 +23,7 @@ export function AnimatedWaves({ position = 'bottom', opacity = 0.15 }: AnimatedW
           x: ['-100%', '0%'],
         }}
         transition={{
-          duration: 20,
+          duration: 28,
           repeat: Infinity,
           ease: 'linear',
         }}
@@ -58,7 +58,7 @@ export function AnimatedWaves({ position = 'bottom', opacity = 0.15 }: AnimatedW
           x: ['0%', '-100%'],
         }}
         transition={{
-          duration: 15,
+          duration: 22,
           repeat: Infinity,
           ease: 'linear',
         }}
@@ -93,7 +93,7 @@ export function AnimatedWaves({ position = 'bottom', opacity = 0.15 }: AnimatedW
           x: ['-50%', '50%', '-50%'],
         }}
         transition={{
-          duration: 25,
+          duration: 32,
           repeat: Infinity,
           ease: 'easeInOut',
         }}
@@ -127,14 +127,15 @@ export function AnimatedWaves({ position = 'bottom', opacity = 0.15 }: AnimatedW
             [position]: `${20 + (i % 3) * 15}px`,
           }}
           animate={{
-            opacity: [0, 1, 0],
-            scale: [0.5, 1.5, 0.5],
-            y: position === 'bottom' ? [0, -30, 0] : [0, 30, 0],
+            opacity: [0, 0.7, 0],
+            scale: [0.6, 1.2, 0.6],
+            y: position === 'bottom' ? [0, -20, 0] : [0, 20, 0],
           }}
           transition={{
-            duration: 3 + i * 0.5,
+            duration: 4 + i * 0.5,
             repeat: Infinity,
-            delay: i * 0.3,
+            delay: i * 0.4,
+            ease: "easeInOut",
           }}
         />
       ))}

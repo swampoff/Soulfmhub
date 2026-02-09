@@ -8,7 +8,6 @@ export async function getProfiles(c: Context) {
     
     // Filter active profiles only
     const activeProfiles = profiles
-      .map(item => item.value)
       .filter((p: any) => p.active !== false);
     
     // Sort: featured first, then by name
@@ -145,7 +144,6 @@ export async function getFeaturedProfiles(c: Context) {
     const profiles = await kv.getByPrefix('profile:');
     
     const featured = profiles
-      .map(item => item.value)
       .filter((p: any) => p.active !== false && p.featured === true)
       .sort((a: any, b: any) => a.name.localeCompare(b.name));
 
@@ -163,7 +161,6 @@ export async function getProfilesByRole(c: Context) {
     const profiles = await kv.getByPrefix('profile:');
     
     const filtered = profiles
-      .map(item => item.value)
       .filter((p: any) => p.active !== false && p.role === role)
       .sort((a: any, b: any) => {
         if (a.featured && !b.featured) return -1;

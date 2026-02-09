@@ -11,6 +11,7 @@ import {
   Menu,
   X,
   ChevronRight,
+  TestTube,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import soulFmLogo from 'figma:asset/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png';
@@ -33,6 +34,7 @@ export function AdminLayout({ children, maxWidth = 'default' }: AdminLayoutProps
     { id: 'jingles', label: 'Jingles', icon: Mic2, path: '/admin/jingles' },
     { id: 'stream', label: 'Stream', icon: Settings, path: '/admin/stream-settings' },
     { id: 'analytics', label: 'Analytics', icon: BarChart3, path: '/admin/analytics' },
+    { id: 'test', label: 'Test', icon: TestTube, path: '/admin/system-test' },
   ];
 
   const getMaxWidthClass = () => {

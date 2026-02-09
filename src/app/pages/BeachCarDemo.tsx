@@ -3,7 +3,7 @@ import { BeachCar } from '../components/BeachCar';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { ArrowLeft } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 
 export default function BeachCarDemo() {
   return (

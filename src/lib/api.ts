@@ -686,9 +686,9 @@ export const api = {
     return response.json();
   },
 
-  async deleteEpisode(id: string) {
+  async deleteEpisode(id: string, podcastId: string) {
     const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/episodes/${id}`, {
+    const response = await fetchWithRetry(`${API_BASE}/episodes/${id}?podcastId=${encodeURIComponent(podcastId)}`, {
       method: 'DELETE',
       headers,
     });
@@ -702,6 +702,16 @@ export const api = {
       method: 'POST',
       headers,
       body: JSON.stringify(slot),
+    });
+    return response.json();
+  },
+
+  async updateScheduleSlot(slotId: string, updates: any) {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/schedule/slots/${slotId}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(updates),
     });
     return response.json();
   },

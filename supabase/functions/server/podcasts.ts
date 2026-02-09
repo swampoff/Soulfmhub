@@ -8,7 +8,6 @@ export async function getPodcasts(c: Context) {
     const podcasts = await kv.getByPrefix('podcast:');
     
     let filtered = podcasts
-      .map(item => item.value)
       .filter((p: any) => p.active !== false);
     
     if (category) {
@@ -43,7 +42,6 @@ export async function getPodcastBySlug(c: Context) {
     // Get episodes for this podcast
     const episodes = await kv.getByPrefix(`podcast:${slug}:episode:`);
     const sortedEpisodes = episodes
-      .map(item => item.value)
       .filter((ep: any) => ep.active !== false)
       .sort((a: any, b: any) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
 

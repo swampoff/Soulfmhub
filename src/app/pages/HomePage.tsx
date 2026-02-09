@@ -43,14 +43,14 @@ export function HomePage() {
               top: `${Math.random() * 100}%`,
             }}
             animate={{
-              opacity: [0.2, 0.8, 0.2],
-              scale: [1, 1.5, 1],
+              opacity: [0.15, 0.55, 0.15],
+              scale: [1, 1.3, 1],
             }}
             transition={{
-              duration: 3 + Math.random() * 2,
+              duration: 4 + Math.random() * 3,
               repeat: Infinity,
               ease: "easeInOut",
-              delay: Math.random() * 2
+              delay: Math.random() * 3
             }}
           />
         ))}
@@ -65,11 +65,11 @@ export function HomePage() {
           className="absolute top-1/2 left-1/2 w-[600px] h-[600px] rounded-full border border-[#00d9ff]/10"
           style={{ x: '-50%', y: '-50%' }}
           animate={{
-            scale: [1, 1.2, 1],
-            opacity: [0.3, 0.1, 0.3],
+            scale: [1, 1.15, 1],
+            opacity: [0.25, 0.08, 0.25],
           }}
           transition={{
-            duration: 4,
+            duration: 6,
             repeat: Infinity,
             ease: "easeInOut"
           }}
@@ -78,28 +78,28 @@ export function HomePage() {
           className="absolute top-1/2 left-1/2 w-[800px] h-[800px] rounded-full border border-[#00ffaa]/10"
           style={{ x: '-50%', y: '-50%' }}
           animate={{
-            scale: [1, 1.3, 1],
-            opacity: [0.2, 0.05, 0.2],
+            scale: [1, 1.2, 1],
+            opacity: [0.18, 0.04, 0.18],
           }}
           transition={{
-            duration: 6,
+            duration: 8,
             repeat: Infinity,
             ease: "easeInOut",
-            delay: 1
+            delay: 1.5
           }}
         />
         <motion.div
           className="absolute top-1/2 left-1/2 w-[1000px] h-[1000px] rounded-full border border-[#00d9ff]/10"
           style={{ x: '-50%', y: '-50%' }}
           animate={{
-            scale: [1, 1.4, 1],
-            opacity: [0.15, 0.03, 0.15],
+            scale: [1, 1.25, 1],
+            opacity: [0.12, 0.02, 0.12],
           }}
           transition={{
-            duration: 8,
+            duration: 10,
             repeat: Infinity,
             ease: "easeInOut",
-            delay: 2
+            delay: 3
           }}
         />
       </div>
@@ -108,17 +108,18 @@ export function HomePage() {
       <motion.div
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.7, ease: [0.4, 0, 0.2, 1] }}
         className="container mx-auto px-4 pt-8 flex justify-center"
       >
         <Badge className="bg-[#00d9ff]/10 text-[#00d9ff] border border-[#00d9ff]/30 gap-3 px-6 py-2.5 text-sm backdrop-blur-sm">
           <motion.span 
             className="w-2 h-2 bg-[#00ff88] rounded-full"
             animate={{
-              scale: [1, 1.3, 1],
-              opacity: [1, 0.5, 1]
+              scale: [1, 1.25, 1],
+              opacity: [1, 0.55, 1]
             }}
             transition={{
-              duration: 1.5,
+              duration: 2,
               repeat: Infinity,
               ease: "easeInOut"
             }}
@@ -132,9 +133,9 @@ export function HomePage() {
       <div className="container mx-auto px-4 flex flex-col items-center justify-center min-h-[calc(100vh-12rem)] relative z-10">
         {/* Soul FM Logo with Advanced Animations */}
         <motion.div
-          initial={{ scale: 0.5, opacity: 0 }}
+          initial={{ scale: 0.7, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
-          transition={{ delay: 0.2, duration: 0.8, type: "spring" }}
+          transition={{ delay: 0.2, duration: 0.9, type: "spring", stiffness: 100, damping: 18 }}
           className="mb-12"
         >
           <div className="relative w-80 h-80 md:w-96 md:h-96 flex items-center justify-center">
@@ -142,7 +143,7 @@ export function HomePage() {
             <motion.div
               className="absolute inset-0"
               animate={{ rotate: 360 }}
-              transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
+              transition={{ duration: 30, repeat: Infinity, ease: "linear" }}
             >
               <svg className="w-full h-full" viewBox="0 0 400 400">
                 <circle
@@ -169,7 +170,7 @@ export function HomePage() {
             <motion.div
               className="absolute inset-8"
               animate={{ rotate: -360 }}
-              transition={{ duration: 15, repeat: Infinity, ease: "linear" }}
+              transition={{ duration: 24, repeat: Infinity, ease: "linear" }}
             >
               <svg className="w-full h-full" viewBox="0 0 400 400">
                 <circle
@@ -196,11 +197,11 @@ export function HomePage() {
             <motion.div
               className="absolute inset-0 bg-gradient-to-br from-[#00d9ff] via-[#00ffaa] to-[#00d9ff] rounded-full blur-3xl"
               animate={{
-                opacity: [0.2, 0.4, 0.2],
-                scale: [1, 1.1, 1],
+                opacity: [0.15, 0.3, 0.15],
+                scale: [1, 1.08, 1],
               }}
               transition={{
-                duration: 3,
+                duration: 4.5,
                 repeat: Infinity,
                 ease: "easeInOut"
               }}
@@ -208,14 +209,14 @@ export function HomePage() {
             <motion.div
               className="absolute inset-8 bg-gradient-to-br from-[#00ffaa] via-[#00d9ff] to-[#00ffaa] rounded-full blur-2xl"
               animate={{
-                opacity: [0.15, 0.3, 0.15],
-                scale: [1.1, 1, 1.1],
+                opacity: [0.1, 0.22, 0.1],
+                scale: [1.05, 0.98, 1.05],
               }}
               transition={{
-                duration: 2.5,
+                duration: 3.5,
                 repeat: Infinity,
                 ease: "easeInOut",
-                delay: 0.5
+                delay: 0.8
               }}
             />
 
@@ -229,7 +230,7 @@ export function HomePage() {
                 rotate: 360,
               }}
               transition={{
-                duration: 10,
+                duration: 16,
                 repeat: Infinity,
                 ease: "linear"
               }}
@@ -239,10 +240,10 @@ export function HomePage() {
             <motion.div
               className="relative z-20"
               animate={{
-                y: [0, -15, 0],
+                y: [0, -10, 0],
               }}
               transition={{
-                duration: 4,
+                duration: 5,
                 repeat: Infinity,
                 ease: "easeInOut"
               }}
@@ -250,10 +251,10 @@ export function HomePage() {
               {/* Logo Container with Scale Animation */}
               <motion.div
                 animate={{
-                  scale: [1, 1.05, 1],
+                  scale: [1, 1.03, 1],
                 }}
                 transition={{
-                  duration: 3,
+                  duration: 4,
                   repeat: Infinity,
                   ease: "easeInOut",
                   delay: 0.5
@@ -282,7 +283,7 @@ export function HomePage() {
                 style={{
                   top: '50%',
                   left: '50%',
-                  boxShadow: '0 0 10px #00d9ff, 0 0 20px #00d9ff',
+                  boxShadow: '0 0 8px #00d9ff, 0 0 16px #00d9ff',
                 }}
                 animate={{
                   x: [
@@ -293,13 +294,13 @@ export function HomePage() {
                     Math.sin((i * Math.PI * 2) / 6) * 180,
                     Math.sin(((i * Math.PI * 2) / 6) + (Math.PI * 2)) * 180
                   ],
-                  opacity: [0.3, 0.8, 0.3],
+                  opacity: [0.25, 0.65, 0.25],
                 }}
                 transition={{
-                  duration: 8,
+                  duration: 12,
                   repeat: Infinity,
                   ease: "linear",
-                  delay: i * 0.3
+                  delay: i * 0.5
                 }}
               />
             ))}
@@ -311,13 +312,13 @@ export function HomePage() {
                   key={i}
                   className="w-1 bg-gradient-to-t from-[#00d9ff] to-[#00ffaa] rounded-full"
                   animate={{
-                    height: [20, 40, 20],
+                    height: [16, 36, 16],
                   }}
                   transition={{
-                    duration: 0.8,
+                    duration: 1.2 + i * 0.15,
                     repeat: Infinity,
                     ease: "easeInOut",
-                    delay: i * 0.1
+                    delay: i * 0.12
                   }}
                 />
               ))}
@@ -329,7 +330,7 @@ export function HomePage() {
         <motion.h1
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.4 }}
+          transition={{ delay: 0.4, duration: 0.8, ease: [0.4, 0, 0.2, 1] }}
           className="text-4xl md:text-5xl lg:text-6xl font-bold mb-6 text-center relative"
           style={{ 
             fontFamily: 'Pacifico, cursive',
@@ -345,7 +346,7 @@ export function HomePage() {
         <motion.p
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.5 }}
+          transition={{ delay: 0.55, duration: 0.8, ease: [0.4, 0, 0.2, 1] }}
           className="text-base md:text-lg text-gray-400 text-center max-w-3xl mb-12 leading-relaxed"
           style={{ 
             fontFamily: 'DM Sans, sans-serif',
@@ -359,12 +360,13 @@ export function HomePage() {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.7 }}
+          transition={{ delay: 0.7, duration: 0.8, ease: [0.4, 0, 0.2, 1] }}
           className="flex flex-col sm:flex-row gap-4"
         >
           <motion.div
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
+            whileHover={{ scale: 1.04 }}
+            whileTap={{ scale: 0.97 }}
+            transition={{ type: 'spring', stiffness: 300, damping: 20 }}
           >
             <Button
               size="lg"
@@ -376,7 +378,7 @@ export function HomePage() {
                 className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent"
                 initial={{ x: '-100%' }}
                 whileHover={{ x: '100%' }}
-                transition={{ duration: 0.6 }}
+                transition={{ duration: 0.7, ease: [0.4, 0, 0.2, 1] }}
               />
               <Play className="w-6 h-6 group-hover:scale-125 transition-transform relative z-10" fill="currentColor" />
               <span className="relative z-10 text-xl">Listen Now</span>
@@ -384,8 +386,9 @@ export function HomePage() {
           </motion.div>
           <Link to="/schedule">
             <motion.div
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
+              whileHover={{ scale: 1.04 }}
+              whileTap={{ scale: 0.97 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 20 }}
             >
               <Button
                 size="lg"
@@ -397,7 +400,7 @@ export function HomePage() {
                   className="absolute inset-0 bg-gradient-to-r from-[#00d9ff]/30 to-[#00ffaa]/30"
                   initial={{ scale: 0, opacity: 0 }}
                   whileHover={{ scale: 1, opacity: 1 }}
-                  transition={{ duration: 0.3 }}
+                  transition={{ duration: 0.4, ease: [0.4, 0, 0.2, 1] }}
                 />
                 <span className="relative z-10 text-xl">View Schedule</span>
               </Button>
@@ -409,7 +412,7 @@ export function HomePage() {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.75 }}
+          transition={{ delay: 0.8, duration: 0.8, ease: [0.4, 0, 0.2, 1] }}
           className="mt-12 w-full max-w-lg"
         >
           <PublicNowPlayingWidget />
@@ -419,7 +422,7 @@ export function HomePage() {
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ delay: 0.8 }}
+          transition={{ delay: 0.9, duration: 1, ease: 'easeOut' }}
           className="mt-16 grid grid-cols-2 md:grid-cols-4 gap-8 max-w-4xl w-full"
         >
           {[
@@ -432,8 +435,8 @@ export function HomePage() {
               key={i}
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.9 + i * 0.1 }}
-              whileHover={{ scale: 1.05 }}
+              transition={{ delay: 1 + i * 0.12, duration: 0.7, ease: [0.4, 0, 0.2, 1] }}
+              whileHover={{ scale: 1.04, transition: { type: 'spring', stiffness: 300, damping: 20 } }}
               className="text-center group cursor-default"
             >
               <motion.div 
@@ -456,12 +459,12 @@ export function HomePage() {
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        transition={{ delay: 1, duration: 1 }}
+        transition={{ delay: 1.2, duration: 1.2, ease: 'easeOut' }}
         className="absolute bottom-24 left-1/2 transform -translate-x-1/2 z-20"
       >
         <motion.div
-          animate={{ y: [0, 10, 0] }}
-          transition={{ duration: 2, repeat: Infinity }}
+          animate={{ y: [0, 8, 0] }}
+          transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
           className="w-6 h-10 border-2 border-[#00d9ff]/30 rounded-full flex items-start justify-center p-2"
         >
           <div className="w-1.5 h-3 bg-[#00d9ff] rounded-full"></div>

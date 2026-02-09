@@ -1,5 +1,5 @@
-import React, { useState, Component, ErrorInfo, ReactNode } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
+import React, { useState, Component, ErrorInfo, ReactNode, useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router';
 import { AppProvider, useApp } from '../context/AppContext';
 import { Navigation } from './components/Navigation';
 import { RadioPlayer } from './components/RadioPlayer';
@@ -48,8 +48,17 @@ import soulFmLogo from 'figma:asset/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png
 import BeachCarDemo from './pages/BeachCarDemo';
 import { Footer } from './components/Footer';
 import { AnimatedPalm } from './components/AnimatedPalm';
-import { motion } from 'motion/react';
 import { Button } from './components/ui/button';
+import { AdminLoginPage } from './components/AdminLoginPage';
+
+// Scroll to top on route change
+function ScrollToTop() {
+  const { pathname } = useLocation();
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+  }, [pathname]);
+  return null;
+}
 
 // Error Boundary Component
 class ErrorBoundary extends Component<
@@ -110,36 +119,19 @@ class ErrorBoundary extends Component<
 
 // Simple Admin Access Component (no auth required)
 function AdminAccess({ children }: { children: React.ReactNode }) {
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(() => {
+    // Persist admin session across route navigations
+    return sessionStorage.getItem('soul-fm-admin') === 'true';
+  });
   
   if (!isAdmin) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-[#0a1628] via-[#0d1a2d] to-[#0a1628]">
-        <motion.div
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="text-center"
-        >
-          <img 
-            src={soulFmLogo} 
-            alt="Soul FM" 
-            className="h-24 w-auto mx-auto mb-8"
-            style={{
-              filter: 'drop-shadow(0 0 30px rgba(0, 217, 255, 0.6))'
-            }}
-          />
-          <h1 className="text-4xl font-righteous text-transparent bg-clip-text bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] mb-4">
-            Admin Panel
-          </h1>
-          <p className="text-cyan-100/60 mb-8">Click to enter admin dashboard</p>
-          <Button
-            onClick={() => setIsAdmin(true)}
-            className="bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] text-slate-900 text-lg px-8 py-6 hover:shadow-lg hover:shadow-cyan-500/30"
-          >
-            Enter Admin
-          </Button>
-        </motion.div>
-      </div>
+      <AdminLoginPage
+        onLogin={() => {
+          sessionStorage.setItem('soul-fm-admin', 'true');
+          setIsAdmin(true);
+        }}
+      />
     );
   }
 
@@ -218,6 +210,7 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
 function AppContent() {
   return (
     <BrowserRouter>
+      <ScrollToTop />
       <Routes>
         {/* Public Routes */}
         <Route path="/" element={<PublicLayout><HomePage /></PublicLayout>} />

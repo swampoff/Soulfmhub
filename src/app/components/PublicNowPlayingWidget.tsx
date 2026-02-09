@@ -146,20 +146,20 @@ export function PublicNowPlayingWidget() {
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5 }}
+      transition={{ duration: 0.6, ease: [0.4, 0, 0.2, 1] }}
     >
-      <Card className="bg-gradient-to-br from-[#00d9ff]/10 to-[#00ffaa]/10 border-[#00d9ff]/30 backdrop-blur-xl overflow-hidden relative group hover:shadow-2xl hover:shadow-[#00d9ff]/20 transition-all duration-300">
+      <Card className="bg-gradient-to-br from-[#00d9ff]/10 to-[#00ffaa]/10 border-[#00d9ff]/30 backdrop-blur-xl overflow-hidden relative group hover:shadow-2xl hover:shadow-[#00d9ff]/20 transition-all duration-500">
         {/* Live Indicator */}
         <div className="absolute top-4 right-4 z-10">
           <Badge className="bg-red-500/20 text-red-400 border border-red-500/30 gap-2 backdrop-blur-sm">
             <motion.span 
               className="w-2 h-2 bg-red-500 rounded-full"
               animate={{
-                scale: [1, 1.3, 1],
-                opacity: [1, 0.5, 1]
+                scale: [1, 1.2, 1],
+                opacity: [1, 0.55, 1]
               }}
               transition={{
-                duration: 1.5,
+                duration: 2,
                 repeat: Infinity,
                 ease: "easeInOut"
               }}
@@ -179,11 +179,11 @@ export function PublicNowPlayingWidget() {
               <motion.span 
                 className="w-1.5 h-1.5 bg-green-500 rounded-full"
                 animate={{
-                  scale: [1, 1.3, 1],
-                  opacity: [1, 0.5, 1]
+                  scale: [1, 1.2, 1],
+                  opacity: [1, 0.55, 1]
                 }}
                 transition={{
-                  duration: 2,
+                  duration: 2.5,
                   repeat: Infinity,
                   ease: "easeInOut"
                 }}
@@ -197,17 +197,17 @@ export function PublicNowPlayingWidget() {
           <AnimatePresence mode="wait">
             <motion.div
               key={nowPlaying.track.id}
-              initial={{ opacity: 0, x: -20 }}
+              initial={{ opacity: 0, x: -15 }}
               animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 20 }}
-              transition={{ duration: 0.4 }}
+              exit={{ opacity: 0, x: 15 }}
+              transition={{ duration: 0.5, ease: [0.4, 0, 0.2, 1] }}
               className="flex items-center gap-4"
             >
               {/* Album Art */}
               <motion.div
                 className="relative w-20 h-20 rounded-xl overflow-hidden shadow-2xl flex-shrink-0"
-                whileHover={{ scale: 1.05 }}
-                transition={{ duration: 0.2 }}
+                whileHover={{ scale: 1.04 }}
+                transition={{ type: 'spring', stiffness: 300, damping: 20 }}
               >
                 {nowPlaying.track.cover ? (
                   <>
@@ -229,10 +229,10 @@ export function PublicNowPlayingWidget() {
                 <motion.div
                   className="absolute inset-0 border-2 border-[#00d9ff] rounded-xl"
                   animate={{
-                    opacity: [0.3, 0.8, 0.3],
+                    opacity: [0.25, 0.6, 0.25],
                   }}
                   transition={{
-                    duration: 2,
+                    duration: 3,
                     repeat: Infinity,
                     ease: "easeInOut"
                   }}
@@ -278,10 +278,10 @@ export function PublicNowPlayingWidget() {
                   height: ['20%', '100%', '20%'],
                 }}
                 transition={{
-                  duration: 0.8 + (i * 0.1),
+                  duration: 1.2 + (i * 0.12),
                   repeat: Infinity,
                   ease: "easeInOut",
-                  delay: i * 0.05
+                  delay: i * 0.08
                 }}
               />
             ))}
@@ -290,18 +290,18 @@ export function PublicNowPlayingWidget() {
 
         {/* Animated Background Gradient */}
         <motion.div
-          className="absolute inset-0 bg-gradient-to-br from-[#00d9ff]/5 to-[#00ffaa]/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500"
+          className="absolute inset-0 bg-gradient-to-br from-[#00d9ff]/5 to-[#00ffaa]/5 opacity-0 group-hover:opacity-100 transition-opacity duration-700"
           animate={{
             background: [
-              'radial-gradient(circle at 0% 0%, rgba(0, 217, 255, 0.05) 0%, transparent 50%)',
-              'radial-gradient(circle at 100% 100%, rgba(0, 255, 170, 0.05) 0%, transparent 50%)',
-              'radial-gradient(circle at 0% 0%, rgba(0, 217, 255, 0.05) 0%, transparent 50%)',
+              'radial-gradient(circle at 0% 0%, rgba(0, 217, 255, 0.04) 0%, transparent 50%)',
+              'radial-gradient(circle at 100% 100%, rgba(0, 255, 170, 0.04) 0%, transparent 50%)',
+              'radial-gradient(circle at 0% 0%, rgba(0, 217, 255, 0.04) 0%, transparent 50%)',
             ]
           }}
           transition={{
-            duration: 5,
+            duration: 8,
             repeat: Infinity,
-            ease: "linear"
+            ease: "easeInOut"
           }}
         />
       </Card>

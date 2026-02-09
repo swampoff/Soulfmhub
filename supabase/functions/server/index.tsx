@@ -1241,15 +1241,14 @@ app.get("/make-server-06086aa3/stream/history", async (c) => {
     const limit = parseInt(c.req.query('limit') || '20');
     const history = await kv.getByPrefix('history:');
     
-    // Sort by timestamp descending
+    // Sort by playedAt descending (getByPrefix returns plain values, no .key)
     const sortedHistory = history
       .sort((a, b) => {
-        const timeA = parseInt(a.key.split(':')[1]);
-        const timeB = parseInt(b.key.split(':')[1]);
+        const timeA = new Date(a.playedAt || a.updatedAt || 0).getTime();
+        const timeB = new Date(b.playedAt || b.updatedAt || 0).getTime();
         return timeB - timeA;
       })
-      .slice(0, limit)
-      .map(item => item.value);
+      .slice(0, limit);
 
     return c.json({ history: sortedHistory });
   } catch (error) {
@@ -1290,7 +1289,7 @@ app.get("/make-server-06086aa3/tracks", async (c) => {
     const search = c.req.query('search');
     const tracks = await kv.getByPrefix('track:');
     
-    let filteredTracks = tracks.map(item => item.value);
+    let filteredTracks = tracks;
     
     if (genre) {
       filteredTracks = filteredTracks.filter(track => 
@@ -1626,79 +1625,8 @@ app.post("/make-server-06086aa3/tracks/:id/extract-metadata", requireAuth, async
   }
 });
 
-// ==================== PLAYLISTS ====================
-
-// Get all playlists
-app.get("/make-server-06086aa3/playlists", async (c) => {
-  try {
-    const playlists = await kv.getByPrefix('playlist:');
-    return c.json({ playlists: playlists.map(item => item.value) });
-  } catch (error) {
-    console.error('Get playlists error:', error);
-    return c.json({ error: `Get playlists error: ${error.message}` }, 500);
-  }
-});
-
-// Get single playlist
-app.get("/make-server-06086aa3/playlists/:id", async (c) => {
-  try {
-    const id = c.req.param('id');
-    const playlist = await kv.get(`playlist:${id}`);
-    
-    if (!playlist) {
-      return c.json({ error: 'Playlist not found' }, 404);
-    }
-
-    return c.json({ playlist });
-  } catch (error) {
-    console.error('Get playlist error:', error);
-    return c.json({ error: `Get playlist error: ${error.message}` }, 500);
-  }
-});
-
-// Create playlist
-app.post("/make-server-06086aa3/playlists", requireAuth, async (c) => {
-  try {
-    const body = await c.req.json();
-    const playlistId = crypto.randomUUID();
-    
-    const playlist = {
-      id: playlistId,
-      ...body,
-      tracks: body.tracks || [],
-      createdAt: new Date().toISOString(),
-      createdBy: c.get('userId')
-    };
-
-    await kv.set(`playlist:${playlistId}`, playlist);
-
-    return c.json({ playlist }, 201);
-  } catch (error) {
-    console.error('Create playlist error:', error);
-    return c.json({ error: `Create playlist error: ${error.message}` }, 500);
-  }
-});
-
-// Update playlist
-app.put("/make-server-06086aa3/playlists/:id", requireAuth, async (c) => {
-  try {
-    const id = c.req.param('id');
-    const body = await c.req.json();
-    
-    const playlist = await kv.get(`playlist:${id}`);
-    if (!playlist) {
-      return c.json({ error: 'Playlist not found' }, 404);
-    }
-
-    const updatedPlaylist = { ...playlist, ...body, updatedAt: new Date().toISOString() };
-    await kv.set(`playlist:${id}`, updatedPlaylist);
-
-    return c.json({ playlist: updatedPlaylist });
-  } catch (error) {
-    console.error('Update playlist error:', error);
-    return c.json({ error: `Update playlist error: ${error.message}` }, 500);
-  }
-});
+// ==================== PLAYLISTS (old section removed — see PLAYLISTS API section below) ====================
+// Playlist CRUD routes are defined in the "PLAYLISTS API" section (line ~2764+)
 
 // ==================== SHOWS ====================
 
@@ -1706,7 +1634,7 @@ app.put("/make-server-06086aa3/playlists/:id", requireAuth, async (c) => {
 app.get("/make-server-06086aa3/shows", async (c) => {
   try {
     const shows = await kv.getByPrefix('show:');
-    return c.json({ shows: shows.map(item => item.value) });
+    return c.json({ shows });
   } catch (error) {
     console.error('Get shows error:', error);
     return c.json({ error: `Get shows error: ${error.message}` }, 500);
@@ -1774,90 +1702,20 @@ app.put("/make-server-06086aa3/shows/:id", requireAuth, async (c) => {
   }
 });
 
-// ==================== SCHEDULE ====================
-
-// Get schedule
-app.get("/make-server-06086aa3/schedule", async (c) => {
-  try {
-    const date = c.req.query('date'); // format: YYYY-MM-DD
-    const schedules = await kv.getByPrefix('schedule:');
-    
-    let filteredSchedules = schedules.map(item => item.value);
-    
-    if (date) {
-      filteredSchedules = filteredSchedules.filter(item => 
-        item.date === date
-      );
-    }
-
-    // Sort by date and time
-    filteredSchedules.sort((a, b) => {
-      const dateTimeA = new Date(`${a.date}T${a.startTime}`);
-      const dateTimeB = new Date(`${b.date}T${b.startTime}`);
-      return dateTimeA.getTime() - dateTimeB.getTime();
-    });
-
-    return c.json({ schedule: filteredSchedules });
-  } catch (error) {
-    console.error('Get schedule error:', error);
-    return c.json({ error: `Get schedule error: ${error.message}` }, 500);
-  }
-});
-
-// Create schedule entry
-app.post("/make-server-06086aa3/schedule", requireAuth, async (c) => {
-  try {
-    const body = await c.req.json();
-    const scheduleId = crypto.randomUUID();
-    
-    const scheduleEntry = {
-      id: scheduleId,
-      ...body,
-      createdAt: new Date().toISOString(),
-      createdBy: c.get('userId')
-    };
-
-    await kv.set(`schedule:${scheduleId}`, scheduleEntry);
-
-    return c.json({ schedule: scheduleEntry }, 201);
-  } catch (error) {
-    console.error('Create schedule error:', error);
-    return c.json({ error: `Create schedule error: ${error.message}` }, 500);
-  }
-});
-
-// Update schedule entry
-app.put("/make-server-06086aa3/schedule/:id", requireAuth, async (c) => {
+// Delete show
+app.delete("/make-server-06086aa3/shows/:id", requireAuth, async (c) => {
   try {
     const id = c.req.param('id');
-    const body = await c.req.json();
-    
-    const scheduleEntry = await kv.get(`schedule:${id}`);
-    if (!scheduleEntry) {
-      return c.json({ error: 'Schedule entry not found' }, 404);
-    }
-
-    const updatedSchedule = { ...scheduleEntry, ...body, updatedAt: new Date().toISOString() };
-    await kv.set(`schedule:${id}`, updatedSchedule);
-
-    return c.json({ schedule: updatedSchedule });
+    await kv.del(`show:${id}`);
+    return c.json({ message: 'Show deleted successfully' });
   } catch (error) {
-    console.error('Update schedule error:', error);
-    return c.json({ error: `Update schedule error: ${error.message}` }, 500);
+    console.error('Delete show error:', error);
+    return c.json({ error: `Delete show error: ${error.message}` }, 500);
   }
 });
 
-// Delete schedule entry
-app.delete("/make-server-06086aa3/schedule/:id", requireAuth, async (c) => {
-  try {
-    const id = c.req.param('id');
-    await kv.del(`schedule:${id}`);
-    return c.json({ message: 'Schedule entry deleted successfully' });
-  } catch (error) {
-    console.error('Delete schedule error:', error);
-    return c.json({ error: `Delete schedule error: ${error.message}` }, 500);
-  }
-});
+// ==================== SCHEDULE (old section removed — see SCHEDULE API section below) ====================
+// Schedule CRUD routes are defined in the "SCHEDULE API" section (line ~2874+)
 
 // ==================== DONATIONS ====================
 
@@ -1865,7 +1723,7 @@ app.delete("/make-server-06086aa3/schedule/:id", requireAuth, async (c) => {
 app.get("/make-server-06086aa3/donations", requireAuth, async (c) => {
   try {
     const donations = await kv.getByPrefix('donation:');
-    return c.json({ donations: donations.map(item => item.value) });
+    return c.json({ donations });
   } catch (error) {
     console.error('Get donations error:', error);
     return c.json({ error: `Get donations error: ${error.message}` }, 500);
@@ -1918,7 +1776,7 @@ app.get("/make-server-06086aa3/news", async (c) => {
     const category = c.req.query('category');
     const news = await kv.getByPrefix('news:');
     
-    let filteredNews = news.map(item => item.value);
+    let filteredNews = news;
     
     if (category) {
       filteredNews = filteredNews.filter(item => item.category === category);
@@ -2056,7 +1914,7 @@ app.get("/make-server-06086aa3/analytics/shows", async (c) => {
 app.get("/make-server-06086aa3/profiles", async (c) => {
   try {
     const profiles = await kv.getByPrefix('profile:');
-    return c.json({ profiles: profiles.map(item => item.value) });
+    return c.json({ profiles });
   } catch (error: any) {
     console.error('Get profiles error:', error);
     return c.json({ error: `Get profiles error: ${error.message}` }, 500);
@@ -2150,7 +2008,7 @@ app.delete("/make-server-06086aa3/profiles/:id", requireAuth, async (c) => {
 app.get("/make-server-06086aa3/podcasts", async (c) => {
   try {
     const podcasts = await kv.getByPrefix('podcast:');
-    return c.json({ podcasts: podcasts.map(item => item.value) });
+    return c.json({ podcasts });
   } catch (error: any) {
     console.error('Get podcasts error:', error);
     return c.json({ error: `Get podcasts error: ${error.message}` }, 500);
@@ -2238,13 +2096,115 @@ app.delete("/make-server-06086aa3/podcasts/:id", requireAuth, async (c) => {
   }
 });
 
+// ==================== PODCAST EPISODES ====================
+
+// Get episodes for a podcast
+app.get("/make-server-06086aa3/podcasts/:podcastId/episodes", async (c) => {
+  try {
+    const podcastId = c.req.param('podcastId');
+    const episodes = await kv.getByPrefix(`episode:${podcastId}:`);
+    
+    // Sort by episode number or date descending
+    episodes.sort((a, b) => {
+      const dateA = new Date(a.publishedAt || a.createdAt || 0).getTime();
+      const dateB = new Date(b.publishedAt || b.createdAt || 0).getTime();
+      return dateB - dateA;
+    });
+    
+    return c.json({ episodes });
+  } catch (error: any) {
+    console.error('Get episodes error:', error);
+    return c.json({ error: `Get episodes error: ${error.message}` }, 500);
+  }
+});
+
+// Create episode for a podcast
+app.post("/make-server-06086aa3/podcasts/:podcastId/episodes", requireAuth, async (c) => {
+  try {
+    const podcastId = c.req.param('podcastId');
+    const body = await c.req.json();
+    
+    // Verify podcast exists
+    const podcast = await kv.get(`podcast:${podcastId}`);
+    if (!podcast) {
+      return c.json({ error: 'Podcast not found' }, 404);
+    }
+    
+    const episodeId = `ep_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    const episode = {
+      id: episodeId,
+      podcastId,
+      ...body,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    
+    await kv.set(`episode:${podcastId}:${episodeId}`, episode);
+    
+    return c.json({ message: 'Episode created successfully', episode }, 201);
+  } catch (error: any) {
+    console.error('Create episode error:', error);
+    return c.json({ error: `Create episode error: ${error.message}` }, 500);
+  }
+});
+
+// Update episode
+app.put("/make-server-06086aa3/episodes/:id", requireAuth, async (c) => {
+  try {
+    const id = c.req.param('id');
+    const body = await c.req.json();
+    const { podcastId } = body;
+    
+    if (!podcastId) {
+      return c.json({ error: 'podcastId is required in the body' }, 400);
+    }
+    
+    const episode = await kv.get(`episode:${podcastId}:${id}`);
+    if (!episode) {
+      return c.json({ error: 'Episode not found' }, 404);
+    }
+    
+    const updatedEpisode = {
+      ...episode,
+      ...body,
+      updatedAt: new Date().toISOString()
+    };
+    
+    await kv.set(`episode:${podcastId}:${id}`, updatedEpisode);
+    
+    return c.json({ message: 'Episode updated', episode: updatedEpisode });
+  } catch (error: any) {
+    console.error('Update episode error:', error);
+    return c.json({ error: `Update episode error: ${error.message}` }, 500);
+  }
+});
+
+// Delete episode
+app.delete("/make-server-06086aa3/episodes/:id", requireAuth, async (c) => {
+  try {
+    const id = c.req.param('id');
+    const podcastId = c.req.query('podcastId');
+    
+    if (!podcastId) {
+      return c.json({ error: 'podcastId query parameter is required' }, 400);
+    }
+    
+    await kv.del(`episode:${podcastId}:${id}`);
+    
+    return c.json({ message: 'Episode deleted successfully' });
+  } catch (error: any) {
+    console.error('Delete episode error:', error);
+    return c.json({ error: `Delete episode error: ${error.message}` }, 500);
+  }
+});
+
 // ==================== USERS MANAGEMENT ====================
 
 // Get all users
 app.get("/make-server-06086aa3/users", requireAuth, async (c) => {
   try {
-    const userKeys = await kv.getByPrefix('user:');
-    const users = userKeys.map(item => item.value);
+    const users = await kv.getByPrefix('user:');
     return c.json({ users });
   } catch (error: any) {
     console.error('Get users error:', error);
@@ -2695,15 +2655,13 @@ app.post("/make-server-06086aa3/admin/assign-super-admin", async (c) => {
       return c.json({ error: 'Invalid secret key' }, 403);
     }
     
-    // Find user by email in KV store
+    // Find user by email in KV store (getByPrefix returns plain values)
     const allUsers = await kv.getByPrefix('user:');
-    const userEntry = allUsers.find((entry: any) => entry.value.email === email);
+    const user = allUsers.find((entry: any) => entry?.email === email);
     
-    if (!userEntry) {
+    if (!user) {
       return c.json({ error: `User with email ${email} not found. Please sign up first.` }, 404);
     }
-    
-    const user = userEntry.value;
     
     // Update user role to super_admin
     user.role = 'super_admin';
@@ -2736,15 +2694,13 @@ app.get("/make-server-06086aa3/admin/user-by-email", async (c) => {
       return c.json({ error: 'Email parameter is required' }, 400);
     }
     
-    // Find user by email in KV store
+    // Find user by email in KV store (getByPrefix returns plain values)
     const allUsers = await kv.getByPrefix('user:');
-    const userEntry = allUsers.find((entry: any) => entry.value.email === email);
+    const user = allUsers.find((entry: any) => entry?.email === email);
     
-    if (!userEntry) {
+    if (!user) {
       return c.json({ error: 'User not found' }, 404);
     }
-    
-    const user = userEntry.value;
     
     return c.json({ 
       user: {
@@ -2868,6 +2824,66 @@ app.delete("/make-server-06086aa3/playlists/:id", requireAuth, async (c) => {
   } catch (error: any) {
     console.error('Delete playlist error:', error);
     return c.json({ error: `Failed to delete playlist: ${error.message}` }, 500);
+  }
+});
+
+// Add track to playlist
+app.post("/make-server-06086aa3/playlists/:id/tracks", requireAuth, async (c) => {
+  try {
+    const id = c.req.param('id');
+    const { trackId, position } = await c.req.json();
+    
+    if (!trackId) {
+      return c.json({ error: 'trackId is required' }, 400);
+    }
+    
+    const playlist = await kv.get(`playlist:${id}`);
+    if (!playlist) {
+      return c.json({ error: 'Playlist not found' }, 404);
+    }
+    
+    const trackIds = playlist.trackIds || [];
+    
+    if (trackIds.includes(trackId)) {
+      return c.json({ error: 'Track already in playlist' }, 400);
+    }
+    
+    if (position === 'start') {
+      trackIds.unshift(trackId);
+    } else {
+      trackIds.push(trackId);
+    }
+    
+    playlist.trackIds = trackIds;
+    playlist.updatedAt = new Date().toISOString();
+    await kv.set(`playlist:${id}`, playlist);
+    
+    return c.json({ message: 'Track added to playlist', playlist });
+  } catch (error: any) {
+    console.error('Add track to playlist error:', error);
+    return c.json({ error: `Failed to add track: ${error.message}` }, 500);
+  }
+});
+
+// Remove track from playlist
+app.delete("/make-server-06086aa3/playlists/:id/tracks/:trackId", requireAuth, async (c) => {
+  try {
+    const id = c.req.param('id');
+    const trackId = c.req.param('trackId');
+    
+    const playlist = await kv.get(`playlist:${id}`);
+    if (!playlist) {
+      return c.json({ error: 'Playlist not found' }, 404);
+    }
+    
+    playlist.trackIds = (playlist.trackIds || []).filter((tid: string) => tid !== trackId);
+    playlist.updatedAt = new Date().toISOString();
+    await kv.set(`playlist:${id}`, playlist);
+    
+    return c.json({ message: 'Track removed from playlist', playlist });
+  } catch (error: any) {
+    console.error('Remove track from playlist error:', error);
+    return c.json({ error: `Failed to remove track: ${error.message}` }, 500);
   }
 });
 
@@ -3022,6 +3038,92 @@ app.delete("/make-server-06086aa3/schedule/:id", requireAuth, async (c) => {
   }
 });
 
+// ==================== SCHEDULE SLOTS (alias for schedule CRUD) ====================
+
+// Create schedule slot (alias used by frontend)
+app.post("/make-server-06086aa3/schedule/slots", requireAuth, async (c) => {
+  try {
+    const body = await c.req.json();
+    const { playlistId, dayOfWeek, startTime, endTime, title, isActive } = body;
+    
+    if (!playlistId || !startTime || !endTime || !title) {
+      return c.json({ error: 'Missing required fields: playlistId, startTime, endTime, title' }, 400);
+    }
+    
+    const playlist = await kv.get(`playlist:${playlistId}`);
+    if (!playlist) {
+      return c.json({ error: 'Playlist not found' }, 404);
+    }
+    
+    const slotId = `schedule_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    const slot = {
+      id: slotId,
+      playlistId,
+      dayOfWeek: dayOfWeek !== undefined && dayOfWeek !== null ? parseInt(dayOfWeek) : null,
+      startTime,
+      endTime,
+      title,
+      isActive: isActive !== undefined ? isActive : true,
+      repeatWeekly: body.repeatWeekly !== undefined ? body.repeatWeekly : true,
+      jingleConfig: body.jingleConfig || null,
+      createdAt: new Date().toISOString()
+    };
+    
+    await kv.set(`schedule:${slotId}`, slot);
+    
+    return c.json({ message: 'Schedule slot created', slot });
+  } catch (error: any) {
+    console.error('Create schedule slot error:', error);
+    return c.json({ error: `Failed to create slot: ${error.message}` }, 500);
+  }
+});
+
+// Update schedule slot (alias used by frontend)
+app.put("/make-server-06086aa3/schedule/slots/:slotId", requireAuth, async (c) => {
+  try {
+    const slotId = c.req.param('slotId');
+    const body = await c.req.json();
+    
+    const slot = await kv.get(`schedule:${slotId}`);
+    if (!slot) {
+      return c.json({ error: 'Schedule slot not found' }, 404);
+    }
+    
+    const updatedSlot = {
+      ...slot,
+      ...body,
+      updatedAt: new Date().toISOString()
+    };
+    
+    await kv.set(`schedule:${slotId}`, updatedSlot);
+    
+    return c.json({ message: 'Schedule slot updated', slot: updatedSlot });
+  } catch (error: any) {
+    console.error('Update schedule slot error:', error);
+    return c.json({ error: `Failed to update slot: ${error.message}` }, 500);
+  }
+});
+
+// Delete schedule slot (alias)
+app.delete("/make-server-06086aa3/schedule/slots/:slotId", requireAuth, async (c) => {
+  try {
+    const slotId = c.req.param('slotId');
+    
+    const slot = await kv.get(`schedule:${slotId}`);
+    if (!slot) {
+      return c.json({ error: 'Schedule slot not found' }, 404);
+    }
+    
+    await kv.del(`schedule:${slotId}`);
+    
+    return c.json({ message: 'Schedule slot deleted successfully' });
+  } catch (error: any) {
+    console.error('Delete schedule slot error:', error);
+    return c.json({ error: `Failed to delete slot: ${error.message}` }, 500);
+  }
+});
+
 // ==================== SCHEDULE ↔ JINGLE INTEGRATION ====================
 
 // Get schedule-jingle integration map: which jingles are configured per schedule slot
@@ -3088,7 +3190,7 @@ app.get("/make-server-06086aa3/analytics/active-listeners", requireAuth, async (
     const listeners = await kv.getByPrefix('listener:active:');
     
     // Transform to array with geolocation data
-    const activeListeners = listeners.map((entry: any) => entry.value).filter((l: any) => {
+    const activeListeners = listeners.filter((l: any) => {
       // Filter out listeners that have been inactive for more than 5 minutes
       const inactiveTime = Date.now() - new Date(l.lastSeen).getTime();
       return inactiveTime < 5 * 60 * 1000; // 5 minutes
@@ -3194,7 +3296,7 @@ app.get("/make-server-06086aa3/analytics/usage", requireAuth, async (c) => {
     // Get active listeners and calculate bandwidth
     const listeners = await kv.getByPrefix('listener:active:');
     const activeListeners = listeners.filter((entry: any) => {
-      const inactiveTime = Date.now() - new Date(entry.value.lastSeen).getTime();
+      const inactiveTime = Date.now() - new Date(entry.lastSeen).getTime();
       return inactiveTime < 5 * 60 * 1000; // 5 minutes
     });
     
@@ -3251,16 +3353,14 @@ async function ensureSuperAdmin() {
     const adminEmail = 'niqbello@gmail.com';
     console.log(`🔍 Checking if ${adminEmail} needs super_admin role...`);
     
-    // Find user by email in KV store
+    // Find user by email in KV store (getByPrefix returns plain values)
     const allUsers = await kv.getByPrefix('user:');
-    const userEntry = allUsers.find((entry: any) => entry?.value?.email === adminEmail);
+    const user = allUsers.find((entry: any) => entry?.email === adminEmail);
     
-    if (!userEntry || !userEntry.value) {
+    if (!user) {
       console.log(`⚠️  User ${adminEmail} not found yet. Will be assigned admin role upon first signup.`);
       return;
     }
-    
-    const user = userEntry.value;
     
     // Check if already super_admin
     if (user.role === 'super_admin') {

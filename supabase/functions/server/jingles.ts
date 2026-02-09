@@ -14,7 +14,7 @@ export function setupJinglesRoutes(app: Hono, supabase: any, requireAuth: any) {
       const active = c.req.query('active');
       const jingles = await kv.getByPrefix('jingle:');
       
-      let filteredJingles = jingles.map(item => item.value);
+      let filteredJingles = jingles;
       
       if (category) {
         filteredJingles = filteredJingles.filter(jingle => 
@@ -150,12 +150,12 @@ export function setupJinglesRoutes(app: Hono, supabase: any, requireAuth: any) {
       // Delete jingle record
       await kv.del(`jingle:${id}`);
 
-      // Delete associated rules
+      // Delete associated rules (getByPrefix returns plain values, not {key, value})
       const rules = await kv.getByPrefix('jingle-rule:');
       for (const rule of rules) {
-        if (rule.value.jingleId === id) {
-          await kv.del(rule.key);
-          console.log(`🗑️  Deleted rule: ${rule.key}`);
+        if (rule.jingleId === id && rule.id) {
+          await kv.del(`jingle-rule:${rule.id}`);
+          console.log(`🗑️  Deleted rule: jingle-rule:${rule.id}`);
         }
       }
 
@@ -292,7 +292,7 @@ export function setupJinglesRoutes(app: Hono, supabase: any, requireAuth: any) {
       const active = c.req.query('active');
       const rules = await kv.getByPrefix('jingle-rule:');
       
-      let filteredRules = rules.map(item => item.value);
+      let filteredRules = rules;
       
       if (jingleId) {
         filteredRules = filteredRules.filter(rule => rule.jingleId === jingleId);

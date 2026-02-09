@@ -41,7 +41,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { api, getAccessToken } from '../../../lib/api';
 import { AdminLayout } from '../../components/admin/AdminLayout';
 import { toast } from 'sonner';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../components/ui/dialog';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';

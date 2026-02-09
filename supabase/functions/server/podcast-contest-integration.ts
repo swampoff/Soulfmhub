@@ -1,100 +1,77 @@
 /**
  * Soul FM - Podcast Auto-Scheduling & Contest Announcements Integration
- * Handles automated podcast playback and contest announcements
+ * Uses KV store instead of direct table queries.
  */
 
-import { createClient } from 'npm:@supabase/supabase-js@2';
-
-const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+import * as kv from './kv_store.tsx';
 
 // ==================== PODCAST AUTO-SCHEDULING ====================
 
 export async function checkForScheduledPodcast(): Promise<any | null> {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-    
     const now = new Date();
-    
-    // Use RPC function to get next scheduled podcast
-    const { data, error } = await supabase.rpc('get_next_scheduled_podcast', {
-      check_time: now.toISOString()
-    });
-    
-    if (error) {
-      console.error('Error checking podcast schedule:', error);
-      return null;
+    const allSchedules = await kv.getByPrefix('podcast_schedule:');
+    const activeSchedules = allSchedules.filter((s: any) => s.is_active);
+
+    if (activeSchedules.length === 0) return null;
+
+    // Find a schedule that should play now
+    for (const schedule of activeSchedules) {
+      const dayOfWeek = now.getDay();
+      const currentTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+
+      if (schedule.day_of_week !== undefined && schedule.day_of_week !== dayOfWeek) continue;
+      if (schedule.time_of_day && currentTime < schedule.time_of_day) continue;
+
+      // Check if already played recently
+      const allHistory = await kv.getByPrefix('podcast_play_history:');
+      const recentPlay = allHistory.find((h: any) =>
+        h.schedule_id === schedule.id &&
+        new Date(h.played_at).getTime() > now.getTime() - (schedule.min_days_between_plays || 7) * 24 * 60 * 60 * 1000
+      );
+
+      if (recentPlay) continue;
+
+      // Get podcast data from KV store
+      const podcastData = schedule.episode_id
+        ? await kv.get(`episode:${schedule.episode_id}`)
+        : await kv.get(`podcast:${schedule.podcast_id}`);
+
+      console.log(`🎙️ Found scheduled podcast: "${schedule.title}"`);
+
+      return {
+        scheduleId: schedule.id,
+        podcastId: schedule.podcast_id,
+        episodeId: schedule.episode_id,
+        title: schedule.title,
+        duration: schedule.duration,
+        scheduledTime: schedule.time_of_day,
+        scheduleType: schedule.schedule_type,
+        audioUrl: podcastData?.audioUrl,
+        coverUrl: podcastData?.coverUrl,
+        description: podcastData?.description
+      };
     }
-    
-    if (!data || data.length === 0) {
-      return null;
-    }
-    
-    const podcast = data[0];
-    
-    console.log(`🎙️ Found scheduled podcast: "${podcast.title}" at ${podcast.scheduled_time}`);
-    
-    // Get full podcast data from KV store
-    const podcastData = await getPodcastData(podcast.podcast_id, podcast.episode_id);
-    
-    return {
-      scheduleId: podcast.id,
-      podcastId: podcast.podcast_id,
-      episodeId: podcast.episode_id,
-      title: podcast.title,
-      duration: podcast.duration,
-      scheduledTime: podcast.scheduled_time,
-      scheduleType: podcast.schedule_type,
-      audioUrl: podcastData?.audioUrl,
-      coverUrl: podcastData?.coverUrl,
-      description: podcastData?.description
-    };
+
+    return null;
   } catch (error: any) {
     console.error('Error in checkForScheduledPodcast:', error);
     return null;
   }
 }
 
-async function getPodcastData(podcastId: string, episodeId?: string): Promise<any | null> {
-  try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-    
-    // Try to get from KV store
-    const { data: kvData } = await supabase
-      .from('kv_store_06086aa3')
-      .select('value')
-      .eq('key', episodeId ? `episode:${episodeId}` : `podcast:${podcastId}`)
-      .single();
-    
-    if (kvData?.value) {
-      return kvData.value;
-    }
-    
-    return null;
-  } catch (error: any) {
-    console.error('Error getting podcast data:', error);
-    return null;
-  }
-}
-
 export async function markPodcastAsPlaying(scheduleId: string): Promise<void> {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-    
-    // Create play history record
-    const { error } = await supabase
-      .from('podcast_play_history_06086aa3')
-      .insert({
-        schedule_id: scheduleId,
-        played_at: new Date().toISOString(),
-        actual_play_time: new Date().toISOString()
-      });
-    
-    if (error) {
-      console.error('Error creating podcast play history:', error);
-    } else {
-      console.log(`✅ Started podcast playback for schedule ${scheduleId}`);
-    }
+    const historyId = crypto.randomUUID();
+    await kv.set(`podcast_play_history:${historyId}`, {
+      id: historyId,
+      schedule_id: scheduleId,
+      played_at: new Date().toISOString(),
+      actual_play_time: new Date().toISOString(),
+      completed: false
+    });
+
+    console.log(`✅ Started podcast playback for schedule ${scheduleId}`);
   } catch (error: any) {
     console.error('Error in markPodcastAsPlaying:', error);
   }
@@ -102,29 +79,16 @@ export async function markPodcastAsPlaying(scheduleId: string): Promise<void> {
 
 export async function markPodcastAsCompleted(scheduleId: string, podcastId: string, episodeId?: string): Promise<void> {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-    
-    // Update play history
-    const { error: historyError } = await supabase
-      .from('podcast_play_history_06086aa3')
-      .update({ completed: true })
-      .eq('schedule_id', scheduleId)
-      .eq('completed', false);
-    
-    if (historyError) {
-      console.error('Error updating podcast play history:', historyError);
-    }
-    
-    // Increment play count
-    const { error: countError } = await supabase.rpc(
-      'increment_podcast_play_count',
-      { schedule_id_param: scheduleId }
+    const allHistory = await kv.getByPrefix('podcast_play_history:');
+    const historyItem = allHistory.find((h: any) =>
+      h.schedule_id === scheduleId && !h.completed
     );
-    
-    if (countError) {
-      console.error('Error incrementing podcast play count:', countError);
+
+    if (historyItem) {
+      historyItem.completed = true;
+      await kv.set(`podcast_play_history:${historyItem.id}`, historyItem);
     }
-    
+
     console.log(`✅ Marked podcast ${scheduleId} as completed`);
   } catch (error: any) {
     console.error('Error in markPodcastAsCompleted:', error);
@@ -135,62 +99,53 @@ export async function markPodcastAsCompleted(scheduleId: string, podcastId: stri
 
 export async function checkForContestAnnouncement(): Promise<any | null> {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-    
     const now = new Date();
     const fiveMinutesFromNow = new Date(now.getTime() + 5 * 60 * 1000);
-    
+
     // Check for scheduled contest announcements in queue
-    const { data: queueData, error: queueError } = await supabase
-      .from('contest_announcements_queue_06086aa3')
-      .select(`
-        *,
-        contest:contests_06086aa3!inner(*)
-      `)
-      .eq('status', 'pending')
-      .gte('scheduled_time', now.toISOString())
-      .lte('scheduled_time', fiveMinutesFromNow.toISOString())
-      .order('scheduled_time', { ascending: true })
-      .limit(1);
-    
-    if (queueError) {
-      console.error('Error checking contest queue:', queueError);
-      return null;
+    const allQueue = await kv.getByPrefix('contest_queue:');
+    const pendingAnnouncements = allQueue
+      .filter((q: any) => {
+        if (q.status !== 'pending') return false;
+        const scheduled = new Date(q.scheduled_time);
+        return scheduled >= now && scheduled <= fiveMinutesFromNow;
+      })
+      .sort((a: any, b: any) => new Date(a.scheduled_time).getTime() - new Date(b.scheduled_time).getTime());
+
+    if (pendingAnnouncements.length > 0) {
+      const item = pendingAnnouncements[0];
+      const contest = await kv.get(`contest:${item.contest_id}`);
+
+      if (contest) {
+        console.log(`🎁 Found scheduled contest announcement: "${contest.title}"`);
+
+        return {
+          queueId: item.id,
+          contestId: contest.id,
+          title: contest.title,
+          announcementType: item.announcement_type,
+          audioUrl: contest.announcement_audio_url,
+          script: contest.announcement_script,
+          duration: contest.announcement_duration || 30,
+          scheduledTime: item.scheduled_time
+        };
+      }
     }
-    
-    if (queueData && queueData.length > 0) {
-      const item = queueData[0];
-      console.log(`🎁 Found scheduled contest announcement: "${item.contest.title}"`);
-      
-      return {
-        queueId: item.id,
-        contestId: item.contest.id,
-        title: item.contest.title,
-        announcementType: item.announcement_type,
-        audioUrl: item.contest.announcement_audio_url,
-        script: item.contest.announcement_script,
-        duration: item.contest.announcement_duration || 30,
-        scheduledTime: item.scheduled_time
-      };
-    }
-    
+
     // No queue item, check if we should auto-announce active contests
-    const { data: contests, error: contestsError } = await supabase
-      .from('contests_06086aa3')
-      .select('*')
-      .eq('status', 'active')
-      .eq('is_featured', true)
-      .gte('end_date', now.toISOString());
-    
-    if (contestsError || !contests || contests.length === 0) {
-      return null;
-    }
-    
-    // Pick a random featured contest
-    const contest = contests[Math.floor(Math.random() * contests.length)];
-    
+    const allContests = await kv.getByPrefix('contest:');
+    const activeContests = allContests.filter((c: any) =>
+      c.status === 'active' &&
+      c.is_featured &&
+      new Date(c.end_date) >= now
+    );
+
+    if (activeContests.length === 0) return null;
+
+    const contest = activeContests[Math.floor(Math.random() * activeContests.length)];
+
     console.log(`🎁 Selected active contest for announcement: "${contest.title}"`);
-    
+
     return {
       queueId: null,
       contestId: contest.id,
@@ -209,23 +164,15 @@ export async function checkForContestAnnouncement(): Promise<any | null> {
 
 export async function markContestAnnouncementPlaying(queueId: string | null, contestId: string): Promise<void> {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-    
     if (queueId) {
-      // Update queue item
-      const { error } = await supabase
-        .from('contest_announcements_queue_06086aa3')
-        .update({
-          status: 'playing',
-          played_at: new Date().toISOString()
-        })
-        .eq('id', queueId);
-      
-      if (error) {
-        console.error('Error marking contest announcement as playing:', error);
+      const item = await kv.get(`contest_queue:${queueId}`);
+      if (item) {
+        item.status = 'playing';
+        item.played_at = new Date().toISOString();
+        await kv.set(`contest_queue:${queueId}`, item);
       }
     }
-    
+
     console.log(`✅ Playing contest announcement for contest ${contestId}`);
   } catch (error: any) {
     console.error('Error in markContestAnnouncementPlaying:', error);
@@ -234,30 +181,21 @@ export async function markContestAnnouncementPlaying(queueId: string | null, con
 
 export async function markContestAnnouncementCompleted(queueId: string | null, contestId: string): Promise<void> {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-    
     if (queueId) {
-      // Update queue item
-      const { error: queueError } = await supabase
-        .from('contest_announcements_queue_06086aa3')
-        .update({ status: 'completed' })
-        .eq('id', queueId);
-      
-      if (queueError) {
-        console.error('Error marking contest announcement as completed:', queueError);
+      const item = await kv.get(`contest_queue:${queueId}`);
+      if (item) {
+        item.status = 'completed';
+        await kv.set(`contest_queue:${queueId}`, item);
       }
     }
-    
-    // Increment announcement count
-    const { error: countError } = await supabase.rpc(
-      'increment_contest_announcement_count',
-      { contest_id_param: contestId }
-    );
-    
-    if (countError) {
-      console.error('Error incrementing contest announcement count:', countError);
+
+    // Increment announcement count on contest
+    const contest = await kv.get(`contest:${contestId}`);
+    if (contest) {
+      contest.announcement_count = (contest.announcement_count || 0) + 1;
+      await kv.set(`contest:${contestId}`, contest);
     }
-    
+
     console.log(`✅ Marked contest announcement completed for contest ${contestId}`);
   } catch (error: any) {
     console.error('Error in markContestAnnouncementCompleted:', error);
@@ -268,38 +206,30 @@ export async function markContestAnnouncementCompleted(queueId: string | null, c
 
 export async function scheduleContestAnnouncements(contestId: string): Promise<void> {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-    
-    // Get contest details
-    const { data: contest, error } = await supabase
-      .from('contests_06086aa3')
-      .select('*')
-      .eq('id', contestId)
-      .single();
-    
-    if (error || !contest) {
-      console.error('Error getting contest:', error);
+    const contest = await kv.get(`contest:${contestId}`);
+    if (!contest) {
+      console.error('Contest not found:', contestId);
       return;
     }
-    
+
     const startDate = new Date(contest.start_date);
     const endDate = new Date(contest.end_date);
     const now = new Date();
-    
-    // Clear existing queue items for this contest
-    await supabase
-      .from('contest_announcements_queue_06086aa3')
-      .delete()
-      .eq('contest_id', contestId)
-      .eq('status', 'pending');
-    
+
+    // Clear existing pending queue items for this contest
+    const allQueue = await kv.getByPrefix('contest_queue:');
+    const toDelete = allQueue.filter((q: any) => q.contest_id === contestId && q.status === 'pending');
+    if (toDelete.length > 0) {
+      await kv.mdel(toDelete.map((q: any) => `contest_queue:${q.id}`));
+    }
+
     // Generate schedule based on frequency
     const schedules: any[] = [];
     let currentTime = now > startDate ? now : startDate;
-    
+
     while (currentTime < endDate) {
       let nextTime: Date;
-      
+
       switch (contest.announcement_frequency) {
         case 'every_15min':
           nextTime = new Date(currentTime.getTime() + 15 * 60 * 1000);
@@ -319,42 +249,50 @@ export async function scheduleContestAnnouncements(contestId: string): Promise<v
         default:
           nextTime = new Date(currentTime.getTime() + 60 * 60 * 1000);
       }
-      
+
       if (nextTime >= endDate) break;
-      
+
+      const queueId = crypto.randomUUID();
       schedules.push({
-        contest_id: contestId,
-        scheduled_time: nextTime.toISOString(),
-        announcement_type: 'promo'
+        key: `contest_queue:${queueId}`,
+        value: {
+          id: queueId,
+          contest_id: contestId,
+          scheduled_time: nextTime.toISOString(),
+          announcement_type: 'promo',
+          status: 'pending',
+          created_at: new Date().toISOString()
+        }
       });
-      
+
       currentTime = nextTime;
-      
-      // Limit to next 100 announcements
       if (schedules.length >= 100) break;
     }
-    
-    // Add "last chance" announcement 1 hour before end
+
+    // Add "last chance" announcement
     const lastChanceTime = new Date(endDate.getTime() - 60 * 60 * 1000);
     if (lastChanceTime > now) {
+      const queueId = crypto.randomUUID();
       schedules.push({
-        contest_id: contestId,
-        scheduled_time: lastChanceTime.toISOString(),
-        announcement_type: 'last_chance'
+        key: `contest_queue:${queueId}`,
+        value: {
+          id: queueId,
+          contest_id: contestId,
+          scheduled_time: lastChanceTime.toISOString(),
+          announcement_type: 'last_chance',
+          status: 'pending',
+          created_at: new Date().toISOString()
+        }
       });
     }
-    
+
     // Insert all schedules
     if (schedules.length > 0) {
-      const { error: insertError } = await supabase
-        .from('contest_announcements_queue_06086aa3')
-        .insert(schedules);
-      
-      if (insertError) {
-        console.error('Error scheduling contest announcements:', insertError);
-      } else {
-        console.log(`✅ Scheduled ${schedules.length} announcements for contest "${contest.title}"`);
-      }
+      const keys = schedules.map(s => s.key);
+      const values = schedules.map(s => s.value);
+      await kv.mset(keys, values);
+
+      console.log(`✅ Scheduled ${schedules.length} announcements for contest "${contest.title}"`);
     }
   } catch (error: any) {
     console.error('Error in scheduleContestAnnouncements:', error);
@@ -377,12 +315,6 @@ export function getContestCounter(): number {
   return contestAnnouncementCounter;
 }
 
-/**
- * Should we announce a contest now?
- * Rules:
- * - Scheduled: Always play if in queue
- * - Auto: Every 8-12 tracks (less frequent than news/announcements)
- */
 export function shouldAnnounceContest(): boolean {
   return contestAnnouncementCounter >= 8;
 }

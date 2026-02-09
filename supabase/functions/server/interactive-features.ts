@@ -1,12 +1,10 @@
 /**
  * Soul FM - Interactive Features Integration
  * Live DJ, Song Requests, Shoutouts, Call-Ins
+ * Uses KV store instead of direct table queries.
  */
 
-import { createClient } from 'npm:@supabase/supabase-js@2';
-
-const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+import * as kv from './kv_store.tsx';
 
 // ==================== GLOBAL STATE ====================
 
@@ -22,36 +20,30 @@ export async function startDJSession(
   sessionType: string = 'live_show'
 ): Promise<any> {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-    
-    // Use RPC to start session
-    const { data, error } = await supabase.rpc('start_dj_session', {
-      p_dj_user_id: djUserId,
-      p_dj_name: djName,
-      p_title: title,
-      p_session_type: sessionType
-    });
-    
-    if (error) {
-      console.error('Error starting DJ session:', error);
-      throw error;
-    }
-    
-    // Get full session details
-    const { data: session, error: sessionError } = await supabase
-      .from('dj_sessions_06086aa3')
-      .select('*')
-      .eq('id', data)
-      .single();
-    
-    if (sessionError) throw sessionError;
-    
+    const sessionId = crypto.randomUUID();
+    const session = {
+      id: sessionId,
+      dj_user_id: djUserId,
+      dj_name: djName,
+      title,
+      session_type: sessionType,
+      started_at: new Date().toISOString(),
+      ended_at: null,
+      status: 'active',
+      tracks_played: 0,
+      requests_played: 0,
+      callers_taken: 0,
+      updated_at: new Date().toISOString()
+    };
+
+    await kv.set(`dj_session:${sessionId}`, session);
+
     currentDJSession = session;
     isLiveDJActive = true;
-    
+
     console.log(`🎧 DJ Session started: "${title}" by ${djName}`);
     console.log(`🔴 LIVE DJ MODE ACTIVE - Auto-DJ paused`);
-    
+
     return session;
   } catch (error: any) {
     console.error('Error in startDJSession:', error);
@@ -61,21 +53,17 @@ export async function startDJSession(
 
 export async function endDJSession(sessionId: string): Promise<void> {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-    
-    // Use RPC to end session
-    const { error } = await supabase.rpc('end_dj_session', {
-      p_session_id: sessionId
-    });
-    
-    if (error) {
-      console.error('Error ending DJ session:', error);
-      throw error;
+    const session = await kv.get(`dj_session:${sessionId}`);
+    if (session) {
+      session.ended_at = new Date().toISOString();
+      session.status = 'ended';
+      session.updated_at = new Date().toISOString();
+      await kv.set(`dj_session:${sessionId}`, session);
     }
-    
+
     currentDJSession = null;
     isLiveDJActive = false;
-    
+
     console.log(`✅ DJ Session ended: ${sessionId}`);
     console.log(`▶️  Auto-DJ resuming...`);
   } catch (error: any) {
@@ -102,43 +90,27 @@ export async function trackPlayedInSession(
   requesterName?: string
 ): Promise<void> {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-    
-    // Add track to session history
-    const { error } = await supabase
-      .from('dj_session_tracks_06086aa3')
-      .insert({
-        session_id: sessionId,
-        track_id: trackId,
-        title,
-        artist,
-        duration,
-        was_request: wasRequest,
-        requester_name: requesterName
-      });
-    
-    if (error) {
-      console.error('Error logging session track:', error);
-      return;
-    }
-    
-    // Increment session track count - read then update
-    const { data: session } = await supabase
-      .from('dj_sessions_06086aa3')
-      .select('tracks_played')
-      .eq('id', sessionId)
-      .single();
-    
+    const trackRecordId = crypto.randomUUID();
+    await kv.set(`dj_session_track:${trackRecordId}`, {
+      id: trackRecordId,
+      session_id: sessionId,
+      track_id: trackId,
+      title,
+      artist,
+      duration,
+      was_request: wasRequest,
+      requester_name: requesterName,
+      played_at: new Date().toISOString()
+    });
+
+    // Increment session track count
+    const session = await kv.get(`dj_session:${sessionId}`);
     if (session) {
-      await supabase
-        .from('dj_sessions_06086aa3')
-        .update({ 
-          tracks_played: (session.tracks_played || 0) + 1,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', sessionId);
+      session.tracks_played = (session.tracks_played || 0) + 1;
+      session.updated_at = new Date().toISOString();
+      await kv.set(`dj_session:${sessionId}`, session);
     }
-    
+
     console.log(`✅ Logged track in DJ session: "${title}" by ${artist}`);
   } catch (error: any) {
     console.error('Error in trackPlayedInSession:', error);
@@ -149,33 +121,26 @@ export async function trackPlayedInSession(
 
 export async function getNextApprovedRequest(): Promise<any | null> {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-    
-    // Use RPC to get next request
-    const { data, error } = await supabase.rpc('get_next_song_request');
-    
-    if (error) {
-      console.error('Error getting next request:', error);
-      return null;
-    }
-    
-    if (!data || data.length === 0) {
-      return null;
-    }
-    
-    const request = data[0];
-    
-    console.log(`🎵 Found song request: "${request.title}" by ${request.artist}`);
-    console.log(`   Requested by: ${request.requester_name} (${request.votes} votes)`);
-    
+    const allRequests = await kv.getByPrefix('song_request:');
+    const approved = allRequests
+      .filter((r: any) => r.status === 'approved')
+      .sort((a: any, b: any) => (b.votes || 0) - (a.votes || 0));
+
+    if (approved.length === 0) return null;
+
+    const request = approved[0];
+
+    console.log(`🎵 Found song request: "${request.custom_song_title || request.title}" by ${request.custom_artist || request.artist}`);
+    console.log(`   Requested by: ${request.requester_name} (${request.votes || 0} votes)`);
+
     return {
       requestId: request.id,
       trackId: request.track_id,
-      title: request.title,
-      artist: request.artist,
+      title: request.custom_song_title || request.title,
+      artist: request.custom_artist || request.artist,
       requesterName: request.requester_name,
       message: request.message,
-      votes: request.votes
+      votes: request.votes || 0
     };
   } catch (error: any) {
     console.error('Error in getNextApprovedRequest:', error);
@@ -185,38 +150,23 @@ export async function getNextApprovedRequest(): Promise<any | null> {
 
 export async function markRequestAsPlayed(requestId: string, sessionId?: string): Promise<void> {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-    
-    const { error } = await supabase
-      .from('song_requests_06086aa3')
-      .update({
-        status: 'played',
-        played_at: new Date().toISOString(),
-        dj_session_id: sessionId || null
-      })
-      .eq('id', requestId);
-    
-    if (error) {
-      console.error('Error marking request as played:', error);
-      return;
+    const request = await kv.get(`song_request:${requestId}`);
+    if (request) {
+      request.status = 'played';
+      request.played_at = new Date().toISOString();
+      request.dj_session_id = sessionId || null;
+      await kv.set(`song_request:${requestId}`, request);
     }
-    
-    // Increment session request count if in session - read then update
+
+    // Increment session request count if in session
     if (sessionId) {
-      const { data: session } = await supabase
-        .from('dj_sessions_06086aa3')
-        .select('requests_played')
-        .eq('id', sessionId)
-        .single();
-      
+      const session = await kv.get(`dj_session:${sessionId}`);
       if (session) {
-        await supabase
-          .from('dj_sessions_06086aa3')
-          .update({ requests_played: (session.requests_played || 0) + 1 })
-          .eq('id', sessionId);
+        session.requests_played = (session.requests_played || 0) + 1;
+        await kv.set(`dj_session:${sessionId}`, session);
       }
     }
-    
+
     console.log(`✅ Marked request ${requestId} as played`);
   } catch (error: any) {
     console.error('Error in markRequestAsPlayed:', error);
@@ -235,7 +185,6 @@ export function resetRequestCounter(): void {
 }
 
 export function shouldPlayRequest(): boolean {
-  // Play requests every 5-8 tracks
   return tracksSinceLastRequest >= 5;
 }
 
@@ -243,31 +192,20 @@ export function shouldPlayRequest(): boolean {
 
 export async function getNextShoutout(): Promise<any | null> {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-    
-    const now = new Date();
-    
-    // Use RPC to get next shoutout
-    const { data, error } = await supabase.rpc('get_next_shoutout', {
-      check_time: now.toISOString()
-    });
-    
-    if (error) {
-      console.error('Error getting next shoutout:', error);
-      return null;
-    }
-    
-    if (!data || data.length === 0) {
-      return null;
-    }
-    
-    const shoutout = data[0];
-    
+    const allShoutouts = await kv.getByPrefix('shoutout:');
+    const approved = allShoutouts
+      .filter((s: any) => s.status === 'approved' || s.status === 'scheduled')
+      .sort((a: any, b: any) => (b.priority || 0) - (a.priority || 0));
+
+    if (approved.length === 0) return null;
+
+    const shoutout = approved[0];
+
     console.log(`💬 Found shoutout for ${shoutout.recipient_name}`);
     if (shoutout.occasion) {
       console.log(`   Occasion: ${shoutout.occasion}`);
     }
-    
+
     return {
       shoutoutId: shoutout.id,
       recipientName: shoutout.recipient_name,
@@ -284,22 +222,14 @@ export async function getNextShoutout(): Promise<any | null> {
 
 export async function markShoutoutAsPlayed(shoutoutId: string, sessionId?: string): Promise<void> {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-    
-    const { error } = await supabase
-      .from('shoutouts_06086aa3')
-      .update({
-        status: 'played',
-        played_at: new Date().toISOString(),
-        dj_session_id: sessionId || null
-      })
-      .eq('id', shoutoutId);
-    
-    if (error) {
-      console.error('Error marking shoutout as played:', error);
-      return;
+    const shoutout = await kv.get(`shoutout:${shoutoutId}`);
+    if (shoutout) {
+      shoutout.status = 'played';
+      shoutout.played_at = new Date().toISOString();
+      shoutout.dj_session_id = sessionId || null;
+      await kv.set(`shoutout:${shoutoutId}`, shoutout);
     }
-    
+
     console.log(`✅ Marked shoutout ${shoutoutId} as played`);
   } catch (error: any) {
     console.error('Error in markShoutoutAsPlayed:', error);
@@ -318,7 +248,6 @@ export function resetShoutoutCounter(): void {
 }
 
 export function shouldPlayShoutout(): boolean {
-  // Play shoutouts every 10-15 tracks
   return tracksSinceLastShoutout >= 10;
 }
 
@@ -326,20 +255,10 @@ export function shouldPlayShoutout(): boolean {
 
 export async function getCallQueue(): Promise<any[]> {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-    
-    const { data, error } = await supabase
-      .from('call_queue_06086aa3')
-      .select('*')
-      .in('status', ['waiting', 'screened', 'approved'])
-      .order('queue_position', { ascending: true });
-    
-    if (error) {
-      console.error('Error getting call queue:', error);
-      return [];
-    }
-    
-    return data || [];
+    const allCalls = await kv.getByPrefix('call_queue:');
+    return allCalls
+      .filter((c: any) => ['waiting', 'screened', 'approved'].includes(c.status))
+      .sort((a: any, b: any) => (a.queue_position || 0) - (b.queue_position || 0));
   } catch (error: any) {
     console.error('Error in getCallQueue:', error);
     return [];
@@ -348,36 +267,21 @@ export async function getCallQueue(): Promise<any[]> {
 
 export async function connectCall(callId: string, sessionId: string): Promise<void> {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-    
-    const { error } = await supabase
-      .from('call_queue_06086aa3')
-      .update({
-        status: 'on_air',
-        connected_at: new Date().toISOString(),
-        dj_session_id: sessionId
-      })
-      .eq('id', callId);
-    
-    if (error) {
-      console.error('Error connecting call:', error);
-      return;
+    const call = await kv.get(`call_queue:${callId}`);
+    if (call) {
+      call.status = 'on_air';
+      call.connected_at = new Date().toISOString();
+      call.dj_session_id = sessionId;
+      await kv.set(`call_queue:${callId}`, call);
     }
-    
-    // Increment session caller count - read then update
-    const { data: session } = await supabase
-      .from('dj_sessions_06086aa3')
-      .select('callers_taken')
-      .eq('id', sessionId)
-      .single();
-    
+
+    // Increment session caller count
+    const session = await kv.get(`dj_session:${sessionId}`);
     if (session) {
-      await supabase
-        .from('dj_sessions_06086aa3')
-        .update({ callers_taken: (session.callers_taken || 0) + 1 })
-        .eq('id', sessionId);
+      session.callers_taken = (session.callers_taken || 0) + 1;
+      await kv.set(`dj_session:${sessionId}`, session);
     }
-    
+
     console.log(`📞 Call connected: ${callId}`);
   } catch (error: any) {
     console.error('Error in connectCall:', error);
@@ -386,35 +290,18 @@ export async function connectCall(callId: string, sessionId: string): Promise<vo
 
 export async function disconnectCall(callId: string): Promise<void> {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-    
-    // Get call start time
-    const { data: call } = await supabase
-      .from('call_queue_06086aa3')
-      .select('connected_at')
-      .eq('id', callId)
-      .single();
-    
+    const call = await kv.get(`call_queue:${callId}`);
     if (!call || !call.connected_at) return;
-    
+
     const duration = Math.floor(
       (new Date().getTime() - new Date(call.connected_at).getTime()) / 1000
     );
-    
-    const { error } = await supabase
-      .from('call_queue_06086aa3')
-      .update({
-        status: 'completed',
-        disconnected_at: new Date().toISOString(),
-        call_duration: duration
-      })
-      .eq('id', callId);
-    
-    if (error) {
-      console.error('Error disconnecting call:', error);
-      return;
-    }
-    
+
+    call.status = 'completed';
+    call.disconnected_at = new Date().toISOString();
+    call.call_duration = duration;
+    await kv.set(`call_queue:${callId}`, call);
+
     console.log(`✅ Call ended: ${callId} (${duration}s)`);
   } catch (error: any) {
     console.error('Error in disconnectCall:', error);
@@ -425,57 +312,41 @@ export async function disconnectCall(callId: string): Promise<void> {
 
 export async function canSubmitRequest(ip: string): Promise<boolean> {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-    
-    // Check last request from this IP
-    const { data, error } = await supabase
-      .from('song_requests_06086aa3')
-      .select('created_at')
-      .eq('requester_ip', ip)
-      .order('created_at', { ascending: false })
-      .limit(1);
-    
-    if (error || !data || data.length === 0) {
-      return true;
-    }
-    
-    const lastRequest = new Date(data[0].created_at);
+    const allRequests = await kv.getByPrefix('song_request:');
+    const fromIp = allRequests
+      .filter((r: any) => r.requester_ip === ip)
+      .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+    if (fromIp.length === 0) return true;
+
+    const lastRequest = new Date(fromIp[0].created_at);
     const now = new Date();
     const minutesSinceLastRequest = (now.getTime() - lastRequest.getTime()) / 1000 / 60;
-    
-    // Allow 1 request per hour
+
     return minutesSinceLastRequest >= 60;
   } catch (error: any) {
     console.error('Error checking request rate limit:', error);
-    return true; // Allow on error
+    return true;
   }
 }
 
 export async function canSubmitShoutout(ip: string): Promise<boolean> {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-    
-    // Check last shoutout from this IP
-    const { data, error } = await supabase
-      .from('shoutouts_06086aa3')
-      .select('created_at')
-      .eq('sender_ip', ip)
-      .order('created_at', { ascending: false })
-      .limit(1);
-    
-    if (error || !data || data.length === 0) {
-      return true;
-    }
-    
-    const lastShoutout = new Date(data[0].created_at);
+    const allShoutouts = await kv.getByPrefix('shoutout:');
+    const fromIp = allShoutouts
+      .filter((s: any) => s.sender_ip === ip)
+      .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+    if (fromIp.length === 0) return true;
+
+    const lastShoutout = new Date(fromIp[0].created_at);
     const now = new Date();
     const minutesSinceLastShoutout = (now.getTime() - lastShoutout.getTime()) / 1000 / 60;
-    
-    // Allow 1 shoutout per 2 hours
+
     return minutesSinceLastShoutout >= 120;
   } catch (error: any) {
     console.error('Error checking shoutout rate limit:', error);
-    return true; // Allow on error
+    return true;
   }
 }
 
@@ -491,14 +362,8 @@ export function getShoutoutCounter(): number {
 
 export async function getActiveRequestCount(): Promise<number> {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-    
-    const { count, error } = await supabase
-      .from('song_requests_06086aa3')
-      .select('*', { count: 'exact', head: true })
-      .in('status', ['pending', 'approved']);
-    
-    return count || 0;
+    const allRequests = await kv.getByPrefix('song_request:');
+    return allRequests.filter((r: any) => ['pending', 'approved'].includes(r.status)).length;
   } catch (error: any) {
     console.error('Error getting active request count:', error);
     return 0;
@@ -507,14 +372,8 @@ export async function getActiveRequestCount(): Promise<number> {
 
 export async function getPendingShoutoutCount(): Promise<number> {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-    
-    const { count, error } = await supabase
-      .from('shoutouts_06086aa3')
-      .select('*', { count: 'exact', head: true })
-      .in('status', ['pending', 'approved', 'scheduled']);
-    
-    return count || 0;
+    const allShoutouts = await kv.getByPrefix('shoutout:');
+    return allShoutouts.filter((s: any) => ['pending', 'approved', 'scheduled'].includes(s.status)).length;
   } catch (error: any) {
     console.error('Error getting pending shoutout count:', error);
     return 0;

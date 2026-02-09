@@ -172,7 +172,7 @@ export function Navigation() {
 
         {/* Mobile Menu */}
         {mobileMenuOpen && (
-          <div className="lg:hidden py-4 border-t border-[#00d9ff]/20">
+          <div className="lg:hidden py-4 border-t border-[#00d9ff]/20 animate-in fade-in slide-in-from-top-2 duration-300">
             <div className="flex flex-col gap-2">
               {navItems.map((item) => (
                 <Link

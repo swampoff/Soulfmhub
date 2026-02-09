@@ -38,11 +38,11 @@ export function AnimatedPalm({ side, delay = 0 }: AnimatedPalmProps) {
         {/* Palm Trunk */}
         <motion.g
           animate={{ 
-            rotate: [0, isLeft ? 2 : -2, 0],
-            x: [0, isLeft ? 3 : -3, 0]
+            rotate: [0, isLeft ? 1.5 : -1.5, 0],
+            x: [0, isLeft ? 2 : -2, 0]
           }}
           transition={{ 
-            duration: 4, 
+            duration: 6, 
             repeat: Infinity, 
             ease: "easeInOut",
             delay: delay
@@ -59,8 +59,8 @@ export function AnimatedPalm({ side, delay = 0 }: AnimatedPalmProps) {
           
           {/* Palm Leaves - Center Top */}
           <motion.g
-            animate={{ rotate: [0, isLeft ? -5 : 5, 0] }}
-            transition={{ duration: 3, repeat: Infinity, ease: "easeInOut", delay: delay }}
+            animate={{ rotate: [0, isLeft ? -4 : 4, 0] }}
+            transition={{ duration: 4.5, repeat: Infinity, ease: "easeInOut", delay: delay }}
             style={{ transformOrigin: '150px 100px' }}
           >
             <path
@@ -90,8 +90,8 @@ export function AnimatedPalm({ side, delay = 0 }: AnimatedPalmProps) {
 
           {/* Palm Leaves - Right Side */}
           <motion.g
-            animate={{ rotate: [0, isLeft ? 8 : -8, 0] }}
-            transition={{ duration: 3.5, repeat: Infinity, ease: "easeInOut", delay: delay + 0.3 }}
+            animate={{ rotate: [0, isLeft ? 6 : -6, 0] }}
+            transition={{ duration: 5, repeat: Infinity, ease: "easeInOut", delay: delay + 0.5 }}
             style={{ transformOrigin: '150px 100px' }}
           >
             <path
@@ -122,10 +122,10 @@ export function AnimatedPalm({ side, delay = 0 }: AnimatedPalmProps) {
           {/* Palm Leaves - Top Center */}
           <motion.g
             animate={{ 
-              rotate: [0, isLeft ? -3 : 3, 0],
-              y: [0, -5, 0]
+              rotate: [0, isLeft ? -2 : 2, 0],
+              y: [0, -3, 0]
             }}
-            transition={{ duration: 2.5, repeat: Infinity, ease: "easeInOut", delay: delay + 0.5 }}
+            transition={{ duration: 4, repeat: Infinity, ease: "easeInOut", delay: delay + 0.8 }}
             style={{ transformOrigin: '150px 100px' }}
           >
             <path
@@ -155,8 +155,8 @@ export function AnimatedPalm({ side, delay = 0 }: AnimatedPalmProps) {
 
           {/* Additional Leaves - Lower Left */}
           <motion.g
-            animate={{ rotate: [0, isLeft ? -6 : 6, 0] }}
-            transition={{ duration: 3.2, repeat: Infinity, ease: "easeInOut", delay: delay + 0.7 }}
+            animate={{ rotate: [0, isLeft ? -4 : 4, 0] }}
+            transition={{ duration: 5.5, repeat: Infinity, ease: "easeInOut", delay: delay + 1 }}
             style={{ transformOrigin: '150px 100px' }}
           >
             <path
@@ -179,8 +179,8 @@ export function AnimatedPalm({ side, delay = 0 }: AnimatedPalmProps) {
 
           {/* Additional Leaves - Lower Right */}
           <motion.g
-            animate={{ rotate: [0, isLeft ? 6 : -6, 0] }}
-            transition={{ duration: 3.8, repeat: Infinity, ease: "easeInOut", delay: delay + 0.9 }}
+            animate={{ rotate: [0, isLeft ? 4 : -4, 0] }}
+            transition={{ duration: 6, repeat: Infinity, ease: "easeInOut", delay: delay + 1.2 }}
             style={{ transformOrigin: '150px 100px' }}
           >
             <path
@@ -212,15 +212,15 @@ export function AnimatedPalm({ side, delay = 0 }: AnimatedPalmProps) {
             fill={i % 2 === 0 ? '#00d9ff' : '#00ffaa'}
             opacity="0.4"
             animate={{
-              y: [0, -20, 0],
-              opacity: [0.2, 0.6, 0.2],
-              scale: [1, 1.5, 1]
+              y: [0, -15, 0],
+              opacity: [0.15, 0.45, 0.15],
+              scale: [1, 1.3, 1]
             }}
             transition={{
-              duration: 3 + i * 0.3,
+              duration: 4.5 + i * 0.4,
               repeat: Infinity,
               ease: "easeInOut",
-              delay: i * 0.4
+              delay: i * 0.6
             }}
           />
         ))}

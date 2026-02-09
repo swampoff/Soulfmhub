@@ -38,13 +38,14 @@ export function AnimatedBeach() {
               bottom: `${Math.random() * 30}%`,
             }}
             animate={{
-              opacity: [0.2, 0.4, 0.2],
-              scale: [1, 1.2, 1],
+              opacity: [0.15, 0.3, 0.15],
+              scale: [1, 1.1, 1],
             }}
             transition={{
-              duration: 3 + Math.random() * 2,
+              duration: 4 + Math.random() * 3,
               repeat: Infinity,
-              delay: Math.random() * 2,
+              ease: "easeInOut",
+              delay: Math.random() * 3,
             }}
           />
         ))}
@@ -62,7 +63,7 @@ export function AnimatedBeach() {
           x: ['-100%', '0%'],
         }}
         transition={{
-          duration: 20,
+          duration: 25,
           repeat: Infinity,
           ease: 'linear',
         }}
@@ -84,7 +85,7 @@ export function AnimatedBeach() {
               ],
             }}
             transition={{
-              duration: 8,
+              duration: 10,
               repeat: Infinity,
               ease: "easeInOut",
             }}
@@ -102,7 +103,7 @@ export function AnimatedBeach() {
           x: ['0%', '-100%'],
         }}
         transition={{
-          duration: 15,
+          duration: 20,
           repeat: Infinity,
           ease: 'linear',
         }}
@@ -124,7 +125,7 @@ export function AnimatedBeach() {
               ],
             }}
             transition={{
-              duration: 6,
+              duration: 8,
               repeat: Infinity,
               ease: "easeInOut",
               delay: 0.5,
@@ -143,7 +144,7 @@ export function AnimatedBeach() {
           x: ['-100%', '0%'],
         }}
         transition={{
-          duration: 12,
+          duration: 16,
           repeat: Infinity,
           ease: 'linear',
         }}
@@ -165,7 +166,7 @@ export function AnimatedBeach() {
               ],
             }}
             transition={{
-              duration: 5,
+              duration: 7,
               repeat: Infinity,
               ease: "easeInOut",
             }}
@@ -185,7 +186,7 @@ export function AnimatedBeach() {
               ],
             }}
             transition={{
-              duration: 5,
+              duration: 7,
               repeat: Infinity,
               ease: "easeInOut",
             }}
@@ -203,7 +204,7 @@ export function AnimatedBeach() {
           x: ['0%', '-100%'],
         }}
         transition={{
-          duration: 10,
+          duration: 14,
           repeat: Infinity,
           ease: 'linear',
         }}
@@ -225,7 +226,7 @@ export function AnimatedBeach() {
               ],
             }}
             transition={{
-              duration: 4,
+              duration: 6,
               repeat: Infinity,
               ease: "easeInOut",
               delay: 0.3,
@@ -245,10 +246,10 @@ export function AnimatedBeach() {
                 "M0,60 Q300,80 600,60 T1200,60 T1800,60",
                 "M0,60 Q300,40 600,60 T1200,60 T1800,60",
               ],
-              opacity: [0.5, 0.8, 0.5],
+              opacity: [0.4, 0.65, 0.4],
             }}
             transition={{
-              duration: 4,
+              duration: 6,
               repeat: Infinity,
               ease: "easeInOut",
               delay: 0.3,
@@ -265,39 +266,39 @@ export function AnimatedBeach() {
           style={{
             left: `${Math.random() * 100}%`,
             bottom: `${32 + Math.random() * 80}px`,
-            boxShadow: '0 0 6px rgba(255, 255, 255, 0.8), 0 0 12px rgba(0, 255, 255, 0.6)',
+            boxShadow: '0 0 6px rgba(255, 255, 255, 0.6), 0 0 12px rgba(0, 255, 255, 0.4)',
           }}
           animate={{
-            opacity: [0, 1, 0],
-            scale: [0.5, 1.5, 0.5],
+            opacity: [0, 0.7, 0],
+            scale: [0.6, 1.3, 0.6],
           }}
           transition={{
-            duration: 2 + Math.random() * 2,
+            duration: 3 + Math.random() * 2.5,
             repeat: Infinity,
-            delay: Math.random() * 3,
+            delay: Math.random() * 4,
             ease: "easeInOut",
           }}
         />
       ))}
 
       {/* Bubbles rising from water */}
-      {[...Array(8)].map((_, i) => (
+      {[...Array(6)].map((_, i) => (
         <motion.div
           key={`bubble-${i}`}
-          className="absolute w-3 h-3 rounded-full border-2 border-[#00ffaa]/40"
+          className="absolute w-3 h-3 rounded-full border-2 border-[#00ffaa]/30"
           style={{
             left: `${Math.random() * 100}%`,
             bottom: 0,
           }}
           animate={{
-            y: [-50, -150 - Math.random() * 100],
-            opacity: [0.4, 0, 0],
-            scale: [0.8, 1.2, 0],
+            y: [-50, -120 - Math.random() * 60],
+            opacity: [0.3, 0, 0],
+            scale: [0.8, 1.1, 0.5],
           }}
           transition={{
-            duration: 4 + Math.random() * 3,
+            duration: 5 + Math.random() * 3,
             repeat: Infinity,
-            delay: Math.random() * 5,
+            delay: Math.random() * 6,
             ease: "easeOut",
           }}
         />
