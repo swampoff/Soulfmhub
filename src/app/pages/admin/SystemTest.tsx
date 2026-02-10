@@ -580,7 +580,13 @@ function buildTests(): TestDef[] {
       run: async () => {
         const r = await apiCall('/radio/status');
         if (!r.ok) return fail(`HTTP ${r.status}`);
-        return ok(`Radio ${r.data?.isPlaying ? 'PLAYING' : 'stopped'}, mode: ${r.data?.mode || 'unknown'}`, r.data, r.status);
+        const playing = r.data?.autoDJ?.isPlaying;
+        const trackCount = r.data?.autoDJ?.totalTracks ?? 0;
+        const schedule = r.data?.autoDJ?.currentSchedule?.title;
+        return ok(
+          `Radio ${playing ? 'PLAYING' : 'stopped'}, tracks: ${trackCount}${schedule ? `, schedule: ${schedule}` : ''}`,
+          r.data, r.status
+        );
       }
     },
     {
@@ -588,9 +594,15 @@ function buildTests(): TestDef[] {
       run: async () => {
         const r = await apiCall('/radio/current-stream');
         if (!r.ok) return fail(`HTTP ${r.status}`);
-        const hasUrl = !!r.data?.url || !!r.data?.signedUrl;
-        return hasUrl ? ok(`Stream URL available, track: ${r.data?.title || 'unknown'}`, r.data, r.status)
-                      : warn('No stream URL (radio may be stopped)', r.data);
+        // Server returns { playing, audioUrl, track: { title, ... }, seekPosition, ... }
+        if (!r.data?.playing) {
+          return warn('Auto DJ is not running (start via /radio/start)', r.data);
+        }
+        const hasUrl = !!r.data?.audioUrl;
+        const trackTitle = r.data?.track?.title || 'unknown';
+        return hasUrl
+          ? ok(`Stream URL available, track: ${trackTitle}, seek: ${r.data?.seekPosition ?? 0}s`, r.data, r.status)
+          : warn(`Playing but no audio file for: ${trackTitle}`, r.data);
       }
     },
 
