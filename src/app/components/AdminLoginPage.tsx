@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
 import { Shield, ArrowLeft, Lock, Eye, EyeOff, Radio, Headphones, Waves } from 'lucide-react';
-import soulFmLogo from 'figma:asset/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png';
+import soulFmLogo from '/assets/soul-fm-logo.svg';
 
 interface AdminLoginPageProps {
   onLogin: () => void;

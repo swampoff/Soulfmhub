@@ -4,6 +4,22 @@
 
 ![Soul FM Hub](https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?w=1200&h=400&fit=crop)
 
+## 🚀 Quick Deploy
+
+### Deploy to Vercel + Supabase
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/swampoff/Soulfmhub)
+
+**Step-by-step guides:**
+- 📘 [Vercel Deployment Guide](./VERCEL_DEPLOYMENT.md) - Complete Vercel setup
+- 🗄️ [Supabase Setup Guide](./SUPABASE_SETUP.md) - Backend configuration
+- 📋 [Quick Start Guide](./QUICK_START.md) - Get started in 5 minutes
+
+### Requirements
+- [Vercel Account](https://vercel.com/signup) (Free tier available)
+- [Supabase Project](https://supabase.com/dashboard) (Free tier available)
+- Node.js 18+ for local development
+
 ## 🌟 Особенности
 
 ### Для слушателей
@@ -27,48 +43,74 @@
 
 ## 🚀 Технологический стек
 
-- **Frontend:** React 18 + TypeScript + Tailwind CSS v4
-- **Backend:** Supabase + Deno + Hono
-- **База данных:** Supabase (PostgreSQL + KV Store)
+- **Frontend:** React 18 + TypeScript + Tailwind CSS v4 + Vite
+- **Deployment:** Vercel (Frontend) + Supabase (Backend)
+- **Backend:** Supabase Edge Functions (Deno + Hono)
+- **База данных:** Supabase PostgreSQL + KV Store
 - **Аутентификация:** Supabase Auth
+- **Storage:** Supabase Storage (для треков и изображений)
 - **Аудио:** Howler.js + Icecast/SHOUTcast
 - **Анимации:** Motion (Framer Motion)
 - **UI Components:** Radix UI
 - **Графики:** Recharts
-- **Роутинг:** React Router v6
+- **Роутинг:** React Router v7
 
 ## 📋 Быстрый старт
 
-### 1. Запустите приложение
-Приложение автоматически развернется после публикации.
-
-### 2. Создайте учетную запись
-```
-1. Нажмите "Sign In" → "Sign Up"
-2. Заполните форму регистрации
-3. Войдите в систему
+### 1. Клонируйте репозиторий
+```bash
+git clone https://github.com/swampoff/Soulfmhub.git
+cd Soulfmhub
 ```
 
-### 3. Инициализируйте данные
-```
-1. Перейдите в /admin
-2. Нажмите "Initialize Data"
-3. Дождитесь загрузки демо-данных
+### 2. Установите зависимости
+```bash
+npm install
 ```
 
-### 4. Настройте Icecast
-```typescript
-// /src/app/components/RadioPlayer.tsx
-const STREAM_URL = 'https://your-icecast-server.com/stream';
+### 3. Настройте переменные окружения
+```bash
+# Скопируйте пример
+cp .env.example .env
+
+# Отредактируйте .env и добавьте ваши Supabase credentials
+# VITE_SUPABASE_URL=https://your-project.supabase.co
+# VITE_SUPABASE_ANON_KEY=your-anon-key
 ```
+
+### 4. Настройте Supabase
+Следуйте [Supabase Setup Guide](./SUPABASE_SETUP.md):
+- Создайте проект в Supabase
+- Запустите миграции БД
+- Деплойте Edge Functions
+
+### 5. Запустите локально
+```bash
+npm run dev
+```
+Откройте http://localhost:5173
+
+### 6. Деплой на Vercel
+```bash
+npm run deploy
+```
+Или следуйте [Vercel Deployment Guide](./VERCEL_DEPLOYMENT.md)
 
 ## 📚 Документация
 
-- [**PROJECT_INFO.md**](./PROJECT_INFO.md) - Полная документация проекта
-- [**QUICK_START.md**](./QUICK_START.md) - Руководство по быстрому старту
-- [**ICECAST_INTEGRATION.md**](./ICECAST_INTEGRATION.md) - Интеграция с Icecast
-- [**SQL_DEPLOYMENT_GUIDE.md**](./SQL_DEPLOYMENT_GUIDE.md) - SQL миграции и настройка БД
-- [**DEPLOY_CHECKLIST.md**](./DEPLOY_CHECKLIST.md) - Чеклист для деплоя
+### Deployment & Setup
+- 🚀 [**VERCEL_DEPLOYMENT.md**](./VERCEL_DEPLOYMENT.md) - Полное руководство по Vercel
+- 🗄️ [**SUPABASE_SETUP.md**](./SUPABASE_SETUP.md) - Настройка Supabase backend
+- ⚡ [**QUICK_START.md**](./QUICK_START.md) - Быстрый старт за 5 минут
+
+### Features & Integration  
+- 📡 [**ICECAST_INTEGRATION.md**](./ICECAST_INTEGRATION.md) - Интеграция с Icecast
+- 📊 [**PROJECT_INFO.md**](./PROJECT_INFO.md) - Полная документация проекта
+- 🎙️ [**JINGLES_SYSTEM_README.md**](./JINGLES_SYSTEM_README.md) - Система джинглов
+
+### Database & Deployment
+- 🗄️ [**SQL_DEPLOYMENT_GUIDE.md**](./SQL_DEPLOYMENT_GUIDE.md) - SQL миграции
+- ✅ [**DEPLOY_CHECKLIST.md**](./DEPLOY_CHECKLIST.md) - Чеклист деплоя
 
 ## 🗄️ База данных
 
@@ -257,6 +299,8 @@ await api.updateStreamStatus({
 - 📧 Email: support@soulfm.radio
 - 💬 Discord: (настроить)
 - 📖 Документация: [PROJECT_INFO.md](./PROJECT_INFO.md)
+- 🚀 Deployment: [VERCEL_DEPLOYMENT.md](./VERCEL_DEPLOYMENT.md)
+- 🗄️ Backend: [SUPABASE_SETUP.md](./SUPABASE_SETUP.md)
 
 ## 📝 Лицензия
 
@@ -270,6 +314,10 @@ await api.updateStreamStatus({
 
 Создано с ❤️ для любителей качественной музыки
 
-[Начать работу](./QUICK_START.md) • [Документация](./PROJECT_INFO.md) • [Icecast](./ICECAST_INTEGRATION.md)
+**Deployment Options:**
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/swampoff/Soulfmhub)
+
+[Quick Start](./QUICK_START.md) • [Vercel Guide](./VERCEL_DEPLOYMENT.md) • [Supabase Setup](./SUPABASE_SETUP.md) • [Documentation](./PROJECT_INFO.md)
 
 </div>
