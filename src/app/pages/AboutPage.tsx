@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useNavigate } from 'react-router';
-import soulFmLogo from 'figma:asset/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png';
+import soulFmLogo from '/assets/soul-fm-logo.svg';
 import { AnimatedPalm } from '../components/AnimatedPalm';
 
 export function AboutPage() {
