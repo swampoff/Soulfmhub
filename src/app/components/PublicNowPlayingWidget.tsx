@@ -38,7 +38,7 @@ export function PublicNowPlayingWidget() {
       try {
         setLoading(true);
         const response = await api.getRadioStatus();
-        if (response.nowPlaying) {
+        if (response.nowPlaying && response.nowPlaying.track) {
           setNowPlaying(response.nowPlaying);
         }
       } catch (err) {
@@ -131,7 +131,7 @@ export function PublicNowPlayingWidget() {
     );
   }
 
-  if (!nowPlaying) {
+  if (!nowPlaying || !nowPlaying.track) {
     return (
       <Card className="bg-gradient-to-br from-[#00d9ff]/10 to-[#00ffaa]/10 border-[#00d9ff]/30 backdrop-blur-xl p-6">
         <div className="flex items-center gap-3 text-[#00d9ff]">

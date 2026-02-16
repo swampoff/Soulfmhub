@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../../components/ui/dialog';
 import { toast } from 'sonner';
 import { Users, Search, Shield, Edit, Trash2, UserPlus, Filter } from 'lucide-react';
+import { AdminLayout } from '../../components/admin/AdminLayout';
 
 export function UsersManagement() {
   const { user } = useApp();
@@ -88,6 +89,7 @@ export function UsersManagement() {
   };
 
   return (
+    <AdminLayout>
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-4">
@@ -276,5 +278,6 @@ export function UsersManagement() {
         </div>
       </Card>
     </div>
+    </AdminLayout>
   );
 }

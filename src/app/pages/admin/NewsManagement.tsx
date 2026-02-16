@@ -51,30 +51,18 @@ export function NewsManagement() {
   const loadArticles = async () => {
     setLoading(true);
     try {
-      // Mock data for now
-      const mockArticles: NewsArticle[] = [
-        {
-          id: '1',
-          title: 'New Soul Classics Added to Rotation',
-          excerpt: 'We\'ve just added 50 classic soul tracks from the 70s to our rotation!',
-          content: 'Full article content here...',
-          author: 'DJ Marcus',
-          publishedAt: new Date().toISOString(),
-          status: 'published',
-          views: 1234
-        },
-        {
-          id: '2',
-          title: 'Upcoming Live Show: Funk Friday',
-          excerpt: 'Join us this Friday for a special funk music marathon featuring rare grooves.',
-          content: 'Full article content here...',
-          author: 'DJ Sarah',
-          publishedAt: new Date().toISOString(),
-          status: 'published',
-          views: 856
-        }
-      ];
-      setArticles(mockArticles);
+      const data = await api.getNews();
+      const newsItems = (data.news || []).map((item: any) => ({
+        id: item.id,
+        title: item.title || 'Untitled',
+        content: item.content || '',
+        excerpt: item.excerpt || '',
+        author: item.author || 'Soul FM Team',
+        publishedAt: item.publishedAt || item.createdAt || new Date().toISOString(),
+        status: item.status || 'draft',
+        views: item.views || 0,
+      }));
+      setArticles(newsItems);
     } catch (error) {
       console.error('Error loading articles:', error);
       toast.error('Failed to load articles');
@@ -85,20 +73,32 @@ export function NewsManagement() {
 
   const handleSave = async () => {
     try {
+      const payload = {
+        title: formData.title,
+        excerpt: formData.excerpt,
+        content: formData.content,
+        author: formData.author,
+        status: 'published' as const,
+        publishedAt: new Date().toISOString(),
+        views: 0,
+      };
+
       if (editingArticle) {
-        // Update article
+        const result = await api.updateNewsItem(editingArticle.id, payload);
+        if (result.error) throw new Error(result.error);
         toast.success('Article updated successfully');
       } else {
-        // Create new article
+        const result = await api.createNewsItem(payload);
+        if (result.error) throw new Error(result.error);
         toast.success('Article created successfully');
       }
       setShowEditor(false);
       setEditingArticle(null);
       setFormData({ title: '', excerpt: '', content: '', author: 'Soul FM Team' });
       loadArticles();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error saving article:', error);
-      toast.error('Failed to save article');
+      toast.error(error.message || 'Failed to save article');
     }
   };
 
@@ -117,11 +117,13 @@ export function NewsManagement() {
     if (!confirm('Are you sure you want to delete this article?')) return;
     
     try {
+      const result = await api.deleteNewsItem(id);
+      if (result.error) throw new Error(result.error);
       toast.success('Article deleted successfully');
       loadArticles();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error deleting article:', error);
-      toast.error('Failed to delete article');
+      toast.error(error.message || 'Failed to delete article');
     }
   };
 

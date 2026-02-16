@@ -6,6 +6,7 @@ import { Input } from '../../components/ui/input';
 import { Badge } from '../../components/ui/badge';
 import { api } from '../../../lib/api';
 import { toast } from 'sonner';
+import { AdminLayout } from '../../components/admin/AdminLayout';
 import {
   Music,
   Play,
@@ -208,13 +209,16 @@ export function LiveStreamPlaylist() {
 
   if (loading) {
     return (
+      <AdminLayout>
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="text-white">Loading playlist...</div>
       </div>
+      </AdminLayout>
     );
   }
 
   return (
+    <AdminLayout>
     <div className="space-y-6">
       {/* Header */}
       <motion.div
@@ -437,5 +441,6 @@ export function LiveStreamPlaylist() {
         </div>
       </div>
     </div>
+    </AdminLayout>
   );
 }

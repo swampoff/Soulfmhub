@@ -1831,6 +1831,54 @@ app.post("/make-server-06086aa3/news", requireAuth, async (c) => {
   }
 });
 
+// Update news
+app.put("/make-server-06086aa3/news/:id", requireAuth, async (c) => {
+  try {
+    const id = c.req.param('id');
+    const body = await c.req.json();
+
+    const existing = await kv.get(`news:${id}`);
+    if (!existing) {
+      return c.json({ error: 'News item not found' }, 404);
+    }
+
+    const updatedNews = {
+      ...existing,
+      ...body,
+      id: existing.id,
+      createdAt: existing.createdAt,
+      createdBy: existing.createdBy,
+      updatedAt: new Date().toISOString(),
+    };
+
+    await kv.set(`news:${id}`, updatedNews);
+    console.log(`✅ News updated: ${id}`);
+    return c.json({ news: updatedNews });
+  } catch (error: any) {
+    console.error('Update news error:', error);
+    return c.json({ error: `Update news error: ${error.message}` }, 500);
+  }
+});
+
+// Delete news
+app.delete("/make-server-06086aa3/news/:id", requireAuth, async (c) => {
+  try {
+    const id = c.req.param('id');
+
+    const existing = await kv.get(`news:${id}`);
+    if (!existing) {
+      return c.json({ error: 'News item not found' }, 404);
+    }
+
+    await kv.del(`news:${id}`);
+    console.log(`✅ News deleted: ${id}`);
+    return c.json({ message: 'News item deleted successfully' });
+  } catch (error: any) {
+    console.error('Delete news error:', error);
+    return c.json({ error: `Delete news error: ${error.message}` }, 500);
+  }
+});
+
 // ==================== ANALYTICS ====================
 
 // Get analytics data

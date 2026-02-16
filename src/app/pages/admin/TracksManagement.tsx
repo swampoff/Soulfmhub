@@ -8,6 +8,7 @@ import { Label } from '../../components/ui/label';
 import { api } from '../../../lib/api';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router';
+import { AdminLayout } from '../../components/admin/AdminLayout';
 
 interface Track {
   id: string;
@@ -116,297 +117,301 @@ export function TracksManagement() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-white">Loading tracks...</div>
-      </div>
+      <AdminLayout>
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <div className="text-white">Loading tracks...</div>
+        </div>
+      </AdminLayout>
     );
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="flex items-center justify-between"
-      >
-        <div>
-          <h1 className="text-3xl font-righteous text-white mb-2">Track Management</h1>
-          <p className="text-white/70">Manage your music library • {tracks.length} tracks total</p>
-          {selectedTrackIds.size > 0 && (
-            <p className="text-[#00ffaa] text-sm mt-1">
-              {selectedTrackIds.size} track{selectedTrackIds.size > 1 ? 's' : ''} selected
-            </p>
-          )}
-        </div>
-        <div className="flex gap-2">
-          {selectedTrackIds.size > 0 && (
+    <AdminLayout>
+      <div className="space-y-6">
+        {/* Header */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex items-center justify-between"
+        >
+          <div>
+            <h1 className="text-3xl font-righteous text-white mb-2">Track Management</h1>
+            <p className="text-white/70">Manage your music library • {tracks.length} tracks total</p>
+            {selectedTrackIds.size > 0 && (
+              <p className="text-[#00ffaa] text-sm mt-1">
+                {selectedTrackIds.size} track{selectedTrackIds.size > 1 ? 's' : ''} selected
+              </p>
+            )}
+          </div>
+          <div className="flex gap-2">
+            {selectedTrackIds.size > 0 && (
+              <Button
+                onClick={handleBulkEditTags}
+                className="bg-[#00ffaa] text-[#0a1628] hover:bg-[#00dd88]"
+              >
+                <Tag className="w-4 h-4 mr-2" />
+                Edit Tags ({selectedTrackIds.size})
+              </Button>
+            )}
             <Button
-              onClick={handleBulkEditTags}
-              className="bg-[#00ffaa] text-[#0a1628] hover:bg-[#00dd88]"
+              onClick={() => setIsUploadModalOpen(true)}
+              className="bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] hover:from-[#00b8dd] hover:to-[#00dd88] text-[#0a1628]"
             >
-              <Tag className="w-4 h-4 mr-2" />
-              Edit Tags ({selectedTrackIds.size})
+              <Plus className="w-4 h-4 mr-2" />
+              Upload Track
             </Button>
-          )}
-          <Button
-            onClick={() => setIsUploadModalOpen(true)}
-            className="bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] hover:from-[#00b8dd] hover:to-[#00dd88] text-[#0a1628]"
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            Upload Track
-          </Button>
-        </div>
-      </motion.div>
-
-      {/* Search and Filter Bar */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.1 }}
-      >
-        <Card className="bg-white/10 backdrop-blur-sm border-white/20 p-4">
-          <div className="flex flex-col md:flex-row gap-4">
-            {/* Search */}
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/50" />
-              <Input
-                type="text"
-                placeholder="Search tracks, artists, albums..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10 bg-white/5 border-white/20 text-white placeholder:text-white/50"
-              />
-            </div>
-
-            {/* Genre Filter */}
-            <div className="flex gap-2 overflow-x-auto">
-              {genres.map((genre) => (
-                <Button
-                  key={genre}
-                  onClick={() => setSelectedGenre(genre)}
-                  variant={selectedGenre === genre ? 'default' : 'outline'}
-                  size="sm"
-                  className={selectedGenre === genre 
-                    ? 'bg-[#00d9ff] text-[#0a1628] hover:bg-[#00b8dd]' 
-                    : 'bg-white/5 text-white border-white/20 hover:bg-white/10'
-                  }
-                >
-                  {genre.charAt(0).toUpperCase() + genre.slice(1)}
-                </Button>
-              ))}
-            </div>
           </div>
+        </motion.div>
 
-          {/* Stats */}
-          <div className="flex gap-6 mt-4 pt-4 border-t border-white/10 text-sm">
-            <div className="text-white/70">
-              Showing: <span className="text-white font-semibold">{filteredTracks.length}</span> tracks
-            </div>
-            <div className="text-white/70">
-              Total duration: <span className="text-white font-semibold">
-                {Math.floor(tracks.reduce((acc, t) => acc + t.duration, 0) / 3600)}h {Math.floor((tracks.reduce((acc, t) => acc + t.duration, 0) % 3600) / 60)}m
-              </span>
-            </div>
-          </div>
-        </Card>
-      </motion.div>
+        {/* Search and Filter Bar */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+        >
+          <Card className="bg-white/10 backdrop-blur-sm border-white/20 p-4">
+            <div className="flex flex-col md:flex-row gap-4">
+              {/* Search */}
+              <div className="flex-1 relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/50" />
+                <Input
+                  type="text"
+                  placeholder="Search tracks, artists, albums..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-10 bg-white/5 border-white/20 text-white placeholder:text-white/50"
+                />
+              </div>
 
-      {/* Tracks Table */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.2 }}
-      >
-        <Card className="bg-white/10 backdrop-blur-sm border-white/20 overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-white/5 border-b border-white/10">
-                <tr>
-                  <th className="text-left text-white/70 text-sm font-semibold p-4 w-12">
-                    <button
-                      onClick={toggleSelectAll}
-                      className="text-[#00d9ff] hover:text-[#00ffaa] transition-colors"
-                    >
-                      {selectedTrackIds.size === filteredTracks.length && filteredTracks.length > 0 ? (
-                        <CheckSquare className="w-5 h-5" />
-                      ) : (
-                        <Square className="w-5 h-5" />
-                      )}
-                    </button>
-                  </th>
-                  <th className="text-left text-white/70 text-sm font-semibold p-4 w-12">#</th>
-                  <th className="text-left text-white/70 text-sm font-semibold p-4">Title</th>
-                  <th className="text-left text-white/70 text-sm font-semibold p-4">Artist</th>
-                  <th className="text-left text-white/70 text-sm font-semibold p-4">Album</th>
-                  <th className="text-left text-white/70 text-sm font-semibold p-4">Genre</th>
-                  <th className="text-left text-white/70 text-sm font-semibold p-4">Tags</th>
-                  <th className="text-left text-white/70 text-sm font-semibold p-4">Duration</th>
-                  <th className="text-left text-white/70 text-sm font-semibold p-4 w-32">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredTracks.length === 0 ? (
+              {/* Genre Filter */}
+              <div className="flex gap-2 overflow-x-auto">
+                {genres.map((genre) => (
+                  <Button
+                    key={genre}
+                    onClick={() => setSelectedGenre(genre)}
+                    variant={selectedGenre === genre ? 'default' : 'outline'}
+                    size="sm"
+                    className={selectedGenre === genre 
+                      ? 'bg-[#00d9ff] text-[#0a1628] hover:bg-[#00b8dd]' 
+                      : 'bg-white/5 text-white border-white/20 hover:bg-white/10'
+                    }
+                  >
+                    {genre.charAt(0).toUpperCase() + genre.slice(1)}
+                  </Button>
+                ))}
+              </div>
+            </div>
+
+            {/* Stats */}
+            <div className="flex gap-6 mt-4 pt-4 border-t border-white/10 text-sm">
+              <div className="text-white/70">
+                Showing: <span className="text-white font-semibold">{filteredTracks.length}</span> tracks
+              </div>
+              <div className="text-white/70">
+                Total duration: <span className="text-white font-semibold">
+                  {Math.floor(tracks.reduce((acc, t) => acc + t.duration, 0) / 3600)}h {Math.floor((tracks.reduce((acc, t) => acc + t.duration, 0) % 3600) / 60)}m
+                </span>
+              </div>
+            </div>
+          </Card>
+        </motion.div>
+
+        {/* Tracks Table */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+        >
+          <Card className="bg-white/10 backdrop-blur-sm border-white/20 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-white/5 border-b border-white/10">
                   <tr>
-                    <td colSpan={9} className="text-center py-12 text-white/50">
-                      <Music className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                      <p>No tracks found</p>
-                      <p className="text-sm mt-2">Try adjusting your search or filters</p>
-                    </td>
-                  </tr>
-                ) : (
-                  filteredTracks.map((track, index) => (
-                    <motion.tr
-                      key={track.id}
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      transition={{ delay: index * 0.02 }}
-                      className="border-b border-white/5 hover:bg-white/5 transition-colors group"
-                    >
-                      <td className="p-4">
-                        <button
-                          onClick={() => toggleTrackSelection(track.id)}
-                          className="text-[#00d9ff] hover:text-[#00ffaa] transition-colors"
-                        >
-                          {selectedTrackIds.has(track.id) ? (
-                            <CheckSquare className="w-5 h-5" />
-                          ) : (
-                            <Square className="w-5 h-5" />
-                          )}
-                        </button>
-                      </td>
-                      <td className="p-4">
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="w-8 h-8 text-[#00d9ff] hover:bg-[#00d9ff]/10"
-                          onClick={() => setPlayingTrackId(playingTrackId === track.id ? null : track.id)}
-                        >
-                          {playingTrackId === track.id ? (
-                            <Pause className="w-4 h-4" />
-                          ) : (
-                            <Play className="w-4 h-4" />
-                          )}
-                        </Button>
-                      </td>
-                      <td className="p-4">
-                        <div className="flex items-center gap-3">
-                          {track.coverUrl ? (
-                            <img
-                              src={track.coverUrl}
-                              alt={track.title}
-                              className="w-10 h-10 rounded object-cover"
-                            />
-                          ) : (
-                            <div className="w-10 h-10 rounded bg-gradient-to-br from-[#00d9ff]/20 to-[#00ffaa]/20 flex items-center justify-center">
-                              <Music className="w-5 h-5 text-[#00d9ff]" />
-                            </div>
-                          )}
-                          <div className="min-w-0">
-                            <div className="text-white font-semibold truncate">{track.title}</div>
-                            {track.year && (
-                              <div className="text-white/50 text-xs">{track.year}</div>
-                            )}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="p-4 text-white/80">{track.artist}</td>
-                      <td className="p-4 text-white/70">{track.album || '-'}</td>
-                      <td className="p-4">
-                        <span className="px-2 py-1 rounded text-xs font-semibold bg-[#00d9ff]/20 text-[#00d9ff]">
-                          {track.genre}
-                        </span>
-                      </td>
-                      <td className="p-4">
-                        {track.tags && track.tags.length > 0 ? (
-                          <div className="flex flex-wrap gap-1">
-                            {track.tags.slice(0, 2).map((tag) => (
-                              <span key={tag} className="px-2 py-0.5 rounded text-xs bg-[#00ffaa]/20 text-[#00ffaa]">
-                                {tag}
-                              </span>
-                            ))}
-                            {track.tags.length > 2 && (
-                              <span className="px-2 py-0.5 rounded text-xs bg-white/10 text-white/50">
-                                +{track.tags.length - 2}
-                              </span>
-                            )}
-                          </div>
+                    <th className="text-left text-white/70 text-sm font-semibold p-4 w-12">
+                      <button
+                        onClick={toggleSelectAll}
+                        className="text-[#00d9ff] hover:text-[#00ffaa] transition-colors"
+                      >
+                        {selectedTrackIds.size === filteredTracks.length && filteredTracks.length > 0 ? (
+                          <CheckSquare className="w-5 h-5" />
                         ) : (
-                          <span className="text-white/30 text-xs">-</span>
+                          <Square className="w-5 h-5" />
                         )}
+                      </button>
+                    </th>
+                    <th className="text-left text-white/70 text-sm font-semibold p-4 w-12">#</th>
+                    <th className="text-left text-white/70 text-sm font-semibold p-4">Title</th>
+                    <th className="text-left text-white/70 text-sm font-semibold p-4">Artist</th>
+                    <th className="text-left text-white/70 text-sm font-semibold p-4">Album</th>
+                    <th className="text-left text-white/70 text-sm font-semibold p-4">Genre</th>
+                    <th className="text-left text-white/70 text-sm font-semibold p-4">Tags</th>
+                    <th className="text-left text-white/70 text-sm font-semibold p-4">Duration</th>
+                    <th className="text-left text-white/70 text-sm font-semibold p-4 w-32">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredTracks.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} className="text-center py-12 text-white/50">
+                        <Music className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                        <p>No tracks found</p>
+                        <p className="text-sm mt-2">Try adjusting your search or filters</p>
                       </td>
-                      <td className="p-4 text-white/70 font-mono text-sm">
-                        {formatDuration(track.duration)}
-                      </td>
-                      <td className="p-4">
-                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    </tr>
+                  ) : (
+                    filteredTracks.map((track, index) => (
+                      <motion.tr
+                        key={track.id}
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        transition={{ delay: index * 0.02 }}
+                        className="border-b border-white/5 hover:bg-white/5 transition-colors group"
+                      >
+                        <td className="p-4">
+                          <button
+                            onClick={() => toggleTrackSelection(track.id)}
+                            className="text-[#00d9ff] hover:text-[#00ffaa] transition-colors"
+                          >
+                            {selectedTrackIds.has(track.id) ? (
+                              <CheckSquare className="w-5 h-5" />
+                            ) : (
+                              <Square className="w-5 h-5" />
+                            )}
+                          </button>
+                        </td>
+                        <td className="p-4">
                           <Button
                             size="icon"
                             variant="ghost"
-                            className="w-8 h-8 text-blue-400 hover:bg-blue-400/10"
-                            onClick={() => handleEditTrack(track)}
+                            className="w-8 h-8 text-[#00d9ff] hover:bg-[#00d9ff]/10"
+                            onClick={() => setPlayingTrackId(playingTrackId === track.id ? null : track.id)}
                           >
-                            <Edit2 className="w-3.5 h-3.5" />
+                            {playingTrackId === track.id ? (
+                              <Pause className="w-4 h-4" />
+                            ) : (
+                              <Play className="w-4 h-4" />
+                            )}
                           </Button>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="w-8 h-8 text-red-400 hover:bg-red-400/10"
-                            onClick={() => handleDeleteTrack(track.id)}
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </Button>
-                        </div>
-                      </td>
-                    </motion.tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-      </motion.div>
+                        </td>
+                        <td className="p-4">
+                          <div className="flex items-center gap-3">
+                            {track.coverUrl ? (
+                              <img
+                                src={track.coverUrl}
+                                alt={track.title}
+                                className="w-10 h-10 rounded object-cover"
+                              />
+                            ) : (
+                              <div className="w-10 h-10 rounded bg-gradient-to-br from-[#00d9ff]/20 to-[#00ffaa]/20 flex items-center justify-center">
+                                <Music className="w-5 h-5 text-[#00d9ff]" />
+                              </div>
+                            )}
+                            <div className="min-w-0">
+                              <div className="text-white font-semibold truncate">{track.title}</div>
+                              {track.year && (
+                                <div className="text-white/50 text-xs">{track.year}</div>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="p-4 text-white/80">{track.artist}</td>
+                        <td className="p-4 text-white/70">{track.album || '-'}</td>
+                        <td className="p-4">
+                          <span className="px-2 py-1 rounded text-xs font-semibold bg-[#00d9ff]/20 text-[#00d9ff]">
+                            {track.genre}
+                          </span>
+                        </td>
+                        <td className="p-4">
+                          {track.tags && track.tags.length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {track.tags.slice(0, 2).map((tag) => (
+                                <span key={tag} className="px-2 py-0.5 rounded text-xs bg-[#00ffaa]/20 text-[#00ffaa]">
+                                  {tag}
+                                </span>
+                              ))}
+                              {track.tags.length > 2 && (
+                                <span className="px-2 py-0.5 rounded text-xs bg-white/10 text-white/50">
+                                  +{track.tags.length - 2}
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-white/30 text-xs">-</span>
+                          )}
+                        </td>
+                        <td className="p-4 text-white/70 font-mono text-sm">
+                          {formatDuration(track.duration)}
+                        </td>
+                        <td className="p-4">
+                          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="w-8 h-8 text-blue-400 hover:bg-blue-400/10"
+                              onClick={() => handleEditTrack(track)}
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="w-8 h-8 text-red-400 hover:bg-red-400/10"
+                              onClick={() => handleDeleteTrack(track.id)}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </Button>
+                          </div>
+                        </td>
+                      </motion.tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </motion.div>
 
-      {/* Upload Modal */}
-      <UploadTrackModal
-        isOpen={isUploadModalOpen}
-        onClose={() => setIsUploadModalOpen(false)}
-        onSuccess={() => {
-          loadTracks();
-          setIsUploadModalOpen(false);
-        }}
-      />
-
-      {/* Edit Modal */}
-      {selectedTrack && (
-        <EditTrackModal
-          isOpen={isEditModalOpen}
-          track={selectedTrack}
-          onClose={() => {
-            setIsEditModalOpen(false);
-            setSelectedTrack(null);
-          }}
+        {/* Upload Modal */}
+        <UploadTrackModal
+          isOpen={isUploadModalOpen}
+          onClose={() => setIsUploadModalOpen(false)}
           onSuccess={() => {
             loadTracks();
-            setIsEditModalOpen(false);
-            setSelectedTrack(null);
+            setIsUploadModalOpen(false);
           }}
         />
-      )}
 
-      {/* Bulk Edit Tags Modal */}
-      <BulkEditTagsModal
-        isOpen={isBulkEditModalOpen}
-        selectedTrackIds={selectedTrackIds}
-        tracks={tracks}
-        onClose={() => setIsBulkEditModalOpen(false)}
-        onSuccess={() => {
-          loadTracks();
-          setIsBulkEditModalOpen(false);
-          setSelectedTrackIds(new Set());
-        }}
-      />
-    </div>
+        {/* Edit Modal */}
+        {selectedTrack && (
+          <EditTrackModal
+            isOpen={isEditModalOpen}
+            track={selectedTrack}
+            onClose={() => {
+              setIsEditModalOpen(false);
+              setSelectedTrack(null);
+            }}
+            onSuccess={() => {
+              loadTracks();
+              setIsEditModalOpen(false);
+              setSelectedTrack(null);
+            }}
+          />
+        )}
+
+        {/* Bulk Edit Tags Modal */}
+        <BulkEditTagsModal
+          isOpen={isBulkEditModalOpen}
+          selectedTrackIds={selectedTrackIds}
+          tracks={tracks}
+          onClose={() => setIsBulkEditModalOpen(false)}
+          onSuccess={() => {
+            loadTracks();
+            setIsBulkEditModalOpen(false);
+            setSelectedTrackIds(new Set());
+          }}
+        />
+      </div>
+    </AdminLayout>
   );
 }
 

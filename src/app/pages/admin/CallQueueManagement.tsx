@@ -5,6 +5,7 @@ import { Card } from '../../components/ui/card';
 import { projectId } from '/utils/supabase/info';
 import { getAuthHeaders } from '../../../lib/api';
 import { toast } from 'sonner';
+import { AdminLayout } from '../../components/admin/AdminLayout';
 import { 
   PhoneCall, 
   PhoneIncoming,
@@ -201,7 +202,7 @@ export function CallQueueManagement() {
   const completedCalls = calls.filter(c => ['completed', 'rejected'].includes(c.status));
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#0a1628] via-[#0d1a2d] to-[#0a1628] text-white p-8">
+    <AdminLayout>
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <motion.div
@@ -449,6 +450,6 @@ export function CallQueueManagement() {
           )}
         </div>
       </div>
-    </div>
+    </AdminLayout>
   );
 }

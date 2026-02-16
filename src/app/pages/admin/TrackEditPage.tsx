@@ -9,6 +9,7 @@ import { Label } from '../../components/ui/label';
 import { Textarea } from '../../components/ui/textarea';
 import { api } from '../../../lib/api';
 import { toast } from 'sonner';
+import { AdminLayout } from '../../components/admin/AdminLayout';
 
 interface Track {
   id: string;
@@ -235,7 +236,7 @@ export function TrackEditPage() {
   }
 
   return (
-    <div className="min-h-screen p-6">
+    <AdminLayout>
       <div className="max-w-4xl mx-auto">
         {/* Header */}
         <motion.div
@@ -571,6 +572,6 @@ export function TrackEditPage() {
           </div>
         </form>
       </div>
-    </div>
+    </AdminLayout>
   );
 }

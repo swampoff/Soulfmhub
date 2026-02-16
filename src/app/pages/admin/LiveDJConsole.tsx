@@ -5,18 +5,7 @@ import { Card } from '../../components/ui/card';
 import { projectId } from '/utils/supabase/info';
 import { getAuthHeaders } from '../../../lib/api';
 import { toast } from 'sonner';
-import { 
-  Radio, 
-  Square, 
-  Play, 
-  Pause, 
-  SkipForward,
-  Users,
-  Music,
-  PhoneCall,
-  Clock,
-  Activity
-} from 'lucide-react';
+import { AdminLayout } from '../../components/admin/AdminLayout';
 
 interface DJSession {
   id: string;
@@ -156,7 +145,8 @@ export function LiveDJConsole() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#0a1628] via-[#0d1a2d] to-[#0a1628] text-white p-8">
+    <AdminLayout>
+    <div className="text-white p-4 sm:p-8">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <motion.div
@@ -390,5 +380,6 @@ export function LiveDJConsole() {
         )}
       </AnimatePresence>
     </div>
+    </AdminLayout>
   );
 }

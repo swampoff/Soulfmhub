@@ -19,8 +19,6 @@ import { AnalyticsPage } from './pages/admin/AnalyticsPage';
 import { ShowsPodcastsPage } from './pages/ShowsPodcastsPage';
 import { PodcastDetailPage } from './pages/PodcastDetailPage';
 import { AboutPage } from './pages/AboutPage';
-import { DashboardPage } from './pages/DashboardPage';
-import { AdminDashboard } from './pages/admin/AdminDashboard';
 import { TracksManagement } from './pages/admin/TracksManagement';
 import { TrackEditPage } from './pages/admin/TrackEditPage';
 import { PlaylistsManagement } from './pages/admin/PlaylistsManagement';
@@ -41,6 +39,10 @@ import { LiveDJConsole } from './pages/admin/LiveDJConsole';
 import { SongRequestsManagement } from './pages/admin/SongRequestsManagement';
 import { ShoutoutsManagement } from './pages/admin/ShoutoutsManagement';
 import { CallQueueManagement } from './pages/admin/CallQueueManagement';
+import { UsersManagement } from './pages/dashboards/UsersManagement';
+import { TrackUpload } from './pages/dashboards/TrackUpload';
+import { LiveStreamPlaylist } from './pages/dashboards/LiveStreamPlaylist';
+import { ListenerDashboard } from './pages/dashboards/ListenerDashboard';
 import { RequestSongPage } from './pages/RequestSongPage';
 import { SendShoutoutPage } from './pages/SendShoutoutPage';
 import { Toaster } from './components/ui/sonner';
@@ -50,6 +52,7 @@ import { Footer } from './components/Footer';
 import { AnimatedPalm } from './components/AnimatedPalm';
 import { Button } from './components/ui/button';
 import { AdminLoginPage } from './components/AdminLoginPage';
+import { AdminLayout as AdminLayoutComponent } from './components/admin/AdminLayout';
 
 // Scroll to top on route change
 function ScrollToTop() {
@@ -120,7 +123,6 @@ class ErrorBoundary extends Component<
 // Simple Admin Access Component (no auth required)
 function AdminAccess({ children }: { children: React.ReactNode }) {
   const [isAdmin, setIsAdmin] = useState(() => {
-    // Persist admin session across route navigations
     return sessionStorage.getItem('soul-fm-admin') === 'true';
   });
   
@@ -193,26 +195,12 @@ function PublicLayout({ children }: { children: React.ReactNode }) {
   );
 }
 
-// Admin Layout Component
-function AdminLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-[#0a1628] via-[#0d1a2d] to-[#0a1628]">
-      <Navigation />
-      <RealtimeIndicator />
-      <div className="container mx-auto px-4 py-8">
-        {children}
-      </div>
-      <RadioPlayer />
-    </div>
-  );
-}
-
 function AppContent() {
   return (
     <BrowserRouter>
       <ScrollToTop />
       <Routes>
-        {/* Public Routes */}
+        {/* ═══════════════════ Public Routes ═══════════════════ */}
         <Route path="/" element={<PublicLayout><HomePage /></PublicLayout>} />
         <Route path="/schedule" element={<PublicLayout><SchedulePage /></PublicLayout>} />
         <Route path="/shows" element={<PublicLayout><ShowsPage /></PublicLayout>} />
@@ -239,226 +227,81 @@ function AppContent() {
         {/* Public Player Route - NO LAYOUT */}
         <Route path="/play/:uniqueId" element={<PublicPlayer />} />
         
-        {/* Public Admin Setup Route (for initial setup before any user exists) */}
+        {/* Public Admin Setup Route */}
         <Route path="/setup" element={<AdminSetupPage />} />
         
         {/* Dashboard Route */}
         <Route 
           path="/dashboard" 
           element={
-            <ProtectedRoute>
-              <DashboardPage />
-            </ProtectedRoute>
+            <PublicLayout>
+              <ListenerDashboard />
+            </PublicLayout>
           } 
         />
 
-        {/* Admin Routes - NO AUTH REQUIRED, just simple button */}
-        <Route
-          path="/admin"
-          element={
-            <AdminAccess>
-              <AdminHomePage />
-            </AdminAccess>
-          }
-        />
-        
-        <Route
-          path="/admin/home"
-          element={
-            <AdminAccess>
-              <AdminHomePage />
-            </AdminAccess>
-          }
-        />
-        
-        <Route
-          path="/admin/tracks"
-          element={
-            <AdminAccess>
-              <AdminLayout>
-                <TracksManagement />
-              </AdminLayout>
-            </AdminAccess>
-          }
-        />
-        <Route
-          path="/admin/media"
-          element={
-            <AdminAccess>
-              <MediaLibraryManagement />
-            </AdminAccess>
-          }
-        />
-        <Route
-          path="/admin/tracks/:id/edit"
-          element={
-            <AdminAccess>
-              <AdminLayout>
-                <TrackEditPage />
-              </AdminLayout>
-            </AdminAccess>
-          }
-        />
-        <Route
-          path="/admin/playlists"
-          element={
-            <AdminAccess>
-              <PlaylistsManagement />
-            </AdminAccess>
-          }
-        />
-        <Route
-          path="/admin/automation"
-          element={
-            <AdminAccess>
-              <ContentAutomationDashboard />
-            </AdminAccess>
-          }
-        />
-        <Route
-          path="/admin/schedule"
-          element={
-            <AdminAccess>
-              <ScheduleManagement />
-            </AdminAccess>
-          }
-        />
-        <Route
-          path="/admin/shows"
-          element={
-            <AdminAccess>
-              <ShowsPodcastsManagement />
-            </AdminAccess>
-          }
-        />
-        <Route
-          path="/admin/jingles"
-          element={
-            <AdminAccess>
-              <ContentAutomationDashboard />
-            </AdminAccess>
-          }
-        />
-        <Route
-          path="/admin/stream-settings"
-          element={
-            <AdminAccess>
-              <StreamSettings />
-            </AdminAccess>
-          }
-        />
-        <Route
-          path="/admin/analytics"
-          element={
-            <AdminAccess>
-              <AdminAnalyticsPage />
-            </AdminAccess>
-          }
-        />
-        <Route
-          path="/admin/news"
-          element={
-            <AdminAccess>
-              <AdminLayout>
-                <NewsManagement />
-              </AdminLayout>
-            </AdminAccess>
-          }
-        />
-        <Route
-          path="/admin/upload-test"
-          element={
-            <AdminAccess>
-              <UploadTestPage />
-            </AdminAccess>
-          }
-        />
-        <Route
-          path="/admin/news-injection"
-          element={
-            <AdminAccess>
-              <NewsInjection />
-            </AdminAccess>
-          }
-        />
-        <Route
-          path="/admin/system-test"
-          element={
-            <AdminAccess>
-              <SystemTest />
-            </AdminAccess>
-          }
-        />
-        <Route
-          path="/admin/live-dj-console"
-          element={
-            <AdminAccess>
-              <LiveDJConsole />
-            </AdminAccess>
-          }
-        />
-        <Route
-          path="/admin/song-requests"
-          element={
-            <AdminAccess>
-              <SongRequestsManagement />
-            </AdminAccess>
-          }
-        />
-        <Route
-          path="/admin/shoutouts"
-          element={
-            <AdminAccess>
-              <ShoutoutsManagement />
-            </AdminAccess>
-          }
-        />
-        <Route
-          path="/admin/call-queue"
-          element={
-            <AdminAccess>
-              <CallQueueManagement />
-            </AdminAccess>
-          }
-        />
-        <Route
-          path="/admin/request-song"
-          element={
-            <AdminAccess>
-              <RequestSongPage />
-            </AdminAccess>
-          }
-        />
-        <Route
-          path="/admin/send-shoutout"
-          element={
-            <AdminAccess>
-              <SendShoutoutPage />
-            </AdminAccess>
-          }
-        />
+        {/* ═══════════════════ Admin Routes ═══════════════════ */}
+        {/* All admin pages now self-wrap with AdminLayout from components/admin */}
+
+        <Route path="/admin" element={<AdminAccess><AdminHomePage /></AdminAccess>} />
+        <Route path="/admin/home" element={<AdminAccess><AdminHomePage /></AdminAccess>} />
+
+        {/* Content Management */}
+        <Route path="/admin/tracks" element={<AdminAccess><TracksManagement /></AdminAccess>} />
+        <Route path="/admin/tracks/:id/edit" element={<AdminAccess><TrackEditPage /></AdminAccess>} />
+        <Route path="/admin/media" element={<AdminAccess><MediaLibraryManagement /></AdminAccess>} />
+        <Route path="/admin/playlists" element={<AdminAccess><PlaylistsManagement /></AdminAccess>} />
+        <Route path="/admin/schedule" element={<AdminAccess><ScheduleManagement /></AdminAccess>} />
+        <Route path="/admin/shows" element={<AdminAccess><ShowsPodcastsManagement /></AdminAccess>} />
+        <Route path="/admin/news" element={<AdminAccess><NewsManagement /></AdminAccess>} />
+
+        {/* Radio & DJ */}
+        <Route path="/admin/automation" element={<AdminAccess><ContentAutomationDashboard /></AdminAccess>} />
+        <Route path="/admin/jingles" element={<AdminAccess><ContentAutomationDashboard /></AdminAccess>} />
+        <Route path="/admin/stream-settings" element={<AdminAccess><StreamSettings /></AdminAccess>} />
+        <Route path="/admin/news-injection" element={<AdminAccess><NewsInjection /></AdminAccess>} />
+        <Route path="/admin/live-dj-console" element={<AdminAccess><LiveDJConsole /></AdminAccess>} />
+        <Route path="/admin/track-upload" element={<AdminAccess><TrackUpload /></AdminAccess>} />
+        <Route path="/admin/live-playlist" element={<AdminAccess><LiveStreamPlaylist /></AdminAccess>} />
+
+        {/* Interactive */}
+        <Route path="/admin/song-requests" element={<AdminAccess><SongRequestsManagement /></AdminAccess>} />
+        <Route path="/admin/shoutouts" element={<AdminAccess><ShoutoutsManagement /></AdminAccess>} />
+        <Route path="/admin/call-queue" element={<AdminAccess><CallQueueManagement /></AdminAccess>} />
         <Route
           path="/admin/donations"
           element={
             <AdminAccess>
-              <AdminLayout>
+              <AdminLayoutComponent>
                 <div className="text-white">
-                  <h1 className="text-3xl font-bold mb-4">Donation Management</h1>
+                  <h1 className="text-3xl font-bold mb-4 bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] bg-clip-text text-transparent">
+                    Donation Management
+                  </h1>
                   <p className="text-white/70">Track supporter contributions.</p>
                 </div>
-              </AdminLayout>
+              </AdminLayoutComponent>
             </AdminAccess>
           }
         />
 
-        {/* Admin Setup Route */}
+        {/* System */}
+        <Route path="/admin/analytics" element={<AdminAccess><AdminAnalyticsPage /></AdminAccess>} />
+        <Route path="/admin/system-test" element={<AdminAccess><SystemTest /></AdminAccess>} />
+        <Route path="/admin/upload-test" element={<AdminAccess><UploadTestPage /></AdminAccess>} />
+        <Route path="/admin/users" element={<AdminAccess><UsersManagement /></AdminAccess>} />
+
+        {/* Admin Interactive (admin-side view) */}
+        <Route path="/admin/request-song" element={<AdminAccess><RequestSongPage /></AdminAccess>} />
+        <Route path="/admin/send-shoutout" element={<AdminAccess><SendShoutoutPage /></AdminAccess>} />
+
+        {/* Admin Setup */}
         <Route
           path="/admin/setup"
           element={
             <AdminAccess>
-              <AdminLayout>
+              <AdminLayoutComponent>
                 <AdminSetupPage />
-              </AdminLayout>
+              </AdminLayoutComponent>
             </AdminAccess>
           }
         />

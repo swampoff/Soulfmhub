@@ -7,7 +7,6 @@ import { Card } from '../../components/ui/card';
 import { Badge } from '../../components/ui/badge';
 import { toast } from 'sonner';
 import { Heart, History, Music, LogOut, User, Clock } from 'lucide-react';
-import { AnimatedPalm } from '../../components/AnimatedPalm';
 import { useNavigate } from 'react-router';
 
 export function ListenerDashboard() {
@@ -36,16 +35,7 @@ export function ListenerDashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#0a1628] via-[#0d1a2d] to-[#0a1628] relative overflow-hidden">
-      <AnimatedPalm side="left" delay={0.2} />
-      <AnimatedPalm side="right" delay={0.4} />
-
-      <div className="absolute inset-0 opacity-10 pointer-events-none">
-        <div className="absolute top-20 left-10 w-96 h-96 bg-[#00d9ff] rounded-full mix-blend-multiply filter blur-3xl animate-blob" />
-        <div className="absolute top-40 right-10 w-96 h-96 bg-[#00ffaa] rounded-full mix-blend-multiply filter blur-3xl animate-blob animation-delay-2000" />
-      </div>
-
-      <div className="relative z-10 container mx-auto px-4 py-8">
+    <div className="container mx-auto px-4 py-8">
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -59,16 +49,18 @@ export function ListenerDashboard() {
                   My Dashboard
                 </h1>
               </div>
-              <p className="text-white/70">Welcome back, <span className="text-[#00d9ff] font-semibold">{user?.name}</span></p>
+              <p className="text-white/70">Welcome back, <span className="text-[#00d9ff] font-semibold">{user?.name || 'Listener'}</span></p>
             </div>
-            <Button
-              onClick={handleSignOut}
-              variant="outline"
-              className="border-[#FF8C42]/30 text-[#FF8C42] hover:bg-[#FF8C42]/10"
-            >
-              <LogOut className="w-4 h-4 mr-2" />
-              Sign Out
-            </Button>
+            {user && (
+              <Button
+                onClick={handleSignOut}
+                variant="outline"
+                className="border-[#FF8C42]/30 text-[#FF8C42] hover:bg-[#FF8C42]/10"
+              >
+                <LogOut className="w-4 h-4 mr-2" />
+                Sign Out
+              </Button>
+            )}
           </div>
         </motion.div>
 
@@ -151,7 +143,6 @@ export function ListenerDashboard() {
             </Card>
           </motion.div>
         </div>
-      </div>
     </div>
   );
 }

@@ -332,6 +332,52 @@ export const api = {
     return response.json();
   },
 
+  async getJingle(id: string) {
+    const response = await fetchWithRetry(`${API_BASE}/jingles/${id}`);
+    return response.json();
+  },
+
+  async createJingle(jingle: any) {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/jingles`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(jingle),
+    });
+    return response.json();
+  },
+
+  async updateJingle(id: string, jingle: any) {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/jingles/${id}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(jingle),
+    });
+    return response.json();
+  },
+
+  async deleteJingle(id: string) {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/jingles/${id}`, {
+      method: 'DELETE',
+      headers,
+    });
+    return response.json();
+  },
+
+  async uploadJingleFile(jingleId: string, formData: FormData) {
+    const token = await getAccessToken();
+    const response = await fetchWithRetry(`${API_BASE}/jingles/${jingleId}/upload`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+      body: formData,
+    });
+    return response.json();
+  },
+
   async getScheduleJingleMap() {
     const response = await fetchWithRetry(`${API_BASE}/schedule/jingle-map`);
     return response.json();
@@ -893,6 +939,48 @@ export const api = {
     const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/call-queue/${callId}/disconnect`, {
       method: 'POST',
+      headers,
+    });
+    return response.json();
+  },
+
+  // ==================== NEWS CRUD ====================
+
+  async getNews(category?: string) {
+    const params = category ? `?category=${encodeURIComponent(category)}` : '';
+    const response = await fetchWithRetry(`${API_BASE}/news${params}`);
+    return response.json();
+  },
+
+  async getNewsItem(id: string) {
+    const response = await fetchWithRetry(`${API_BASE}/news/${id}`);
+    return response.json();
+  },
+
+  async createNewsItem(news: any) {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/news`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(news),
+    });
+    return response.json();
+  },
+
+  async updateNewsItem(id: string, news: any) {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/news/${id}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(news),
+    });
+    return response.json();
+  },
+
+  async deleteNewsItem(id: string) {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/news/${id}`, {
+      method: 'DELETE',
       headers,
     });
     return response.json();
