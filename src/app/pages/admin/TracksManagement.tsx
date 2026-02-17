@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Music, Plus, Search, Upload, Edit2, Trash2, Play, Pause, X, Filter, Download, Tag, CheckSquare, Square } from 'lucide-react';
+import { Music, Plus, Search, Upload, Edit2, Trash2, Play, Pause, X, Filter, Download, Tag, CheckSquare, Square, ListMusic } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Card } from '../../components/ui/card';
 import { Input } from '../../components/ui/input';
@@ -38,6 +38,8 @@ export function TracksManagement() {
   const [playingTrackId, setPlayingTrackId] = useState<string | null>(null);
   const [selectedTrackIds, setSelectedTrackIds] = useState<Set<string>>(new Set());
   const [isBulkEditModalOpen, setIsBulkEditModalOpen] = useState(false);
+  const [isAddToPlaylistModalOpen, setIsAddToPlaylistModalOpen] = useState(false);
+  const [tracksToAddToPlaylist, setTracksToAddToPlaylist] = useState<string[]>([]);
 
   const genres = ['all', 'soul', 'funk', 'jazz', 'disco', 'reggae', 'blues', 'r&b', 'afrobeat'];
 
@@ -101,6 +103,23 @@ export function TracksManagement() {
     setIsBulkEditModalOpen(true);
   };
 
+  const handleAddToPlaylist = (trackIds: string[]) => {
+    if (trackIds.length === 0) {
+      toast.error('Please select at least one track');
+      return;
+    }
+    setTracksToAddToPlaylist(trackIds);
+    setIsAddToPlaylistModalOpen(true);
+  };
+
+  const handleBulkAddToPlaylist = () => {
+    if (selectedTrackIds.size === 0) {
+      toast.error('Please select at least one track');
+      return;
+    }
+    handleAddToPlaylist(Array.from(selectedTrackIds));
+  };
+
   const filteredTracks = tracks.filter(track => {
     const matchesSearch = track.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
                          track.artist.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -145,13 +164,22 @@ export function TracksManagement() {
           </div>
           <div className="flex gap-2">
             {selectedTrackIds.size > 0 && (
-              <Button
-                onClick={handleBulkEditTags}
-                className="bg-[#00ffaa] text-[#0a1628] hover:bg-[#00dd88]"
-              >
-                <Tag className="w-4 h-4 mr-2" />
-                Edit Tags ({selectedTrackIds.size})
-              </Button>
+              <>
+                <Button
+                  onClick={handleBulkAddToPlaylist}
+                  className="bg-[#00d9ff] text-[#0a1628] hover:bg-[#00b8dd]"
+                >
+                  <ListMusic className="w-4 h-4 mr-2" />
+                  Add to Playlist ({selectedTrackIds.size})
+                </Button>
+                <Button
+                  onClick={handleBulkEditTags}
+                  className="bg-[#00ffaa] text-[#0a1628] hover:bg-[#00dd88]"
+                >
+                  <Tag className="w-4 h-4 mr-2" />
+                  Edit Tags ({selectedTrackIds.size})
+                </Button>
+              </>
             )}
             <Button
               onClick={() => setIsUploadModalOpen(true)}
@@ -347,6 +375,15 @@ export function TracksManagement() {
                             <Button
                               size="icon"
                               variant="ghost"
+                              className="w-8 h-8 text-[#00d9ff] hover:bg-[#00d9ff]/10"
+                              onClick={() => handleAddToPlaylist([track.id])}
+                              title="Add to playlist"
+                            >
+                              <ListMusic className="w-3.5 h-3.5" />
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="ghost"
                               className="w-8 h-8 text-blue-400 hover:bg-blue-400/10"
                               onClick={() => handleEditTrack(track)}
                             >
@@ -407,6 +444,21 @@ export function TracksManagement() {
           onSuccess={() => {
             loadTracks();
             setIsBulkEditModalOpen(false);
+            setSelectedTrackIds(new Set());
+          }}
+        />
+
+        {/* Add to Playlist Modal */}
+        <AddToPlaylistModal
+          isOpen={isAddToPlaylistModalOpen}
+          trackIds={tracksToAddToPlaylist}
+          onClose={() => {
+            setIsAddToPlaylistModalOpen(false);
+            setTracksToAddToPlaylist([]);
+          }}
+          onSuccess={() => {
+            setIsAddToPlaylistModalOpen(false);
+            setTracksToAddToPlaylist([]);
             setSelectedTrackIds(new Set());
           }}
         />
@@ -1043,6 +1095,153 @@ function BulkEditTagsModal({ isOpen, selectedTrackIds, tracks, onClose, onSucces
                     className="flex-1 bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] hover:from-[#00b8dd] hover:to-[#00dd88] text-[#0a1628]"
                   >
                     {saving ? 'Saving...' : 'Apply Changes'}
+                  </Button>
+                </div>
+              </form>
+            </div>
+          </motion.div>
+        </>
+      )}
+    </AnimatePresence>
+  );
+}
+// Add to Playlist Modal Component
+interface Playlist {
+  id: string;
+  name: string;
+  description?: string;
+}
+
+function AddToPlaylistModal({ isOpen, trackIds, onClose, onSuccess }: { isOpen: boolean; trackIds: string[]; onClose: () => void; onSuccess: () => void }) {
+  const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const [selectedPlaylistId, setSelectedPlaylistId] = useState<string>('');
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      loadPlaylists();
+    }
+  }, [isOpen]);
+
+  const loadPlaylists = async () => {
+    setLoading(true);
+    try {
+      const response = await api.getPlaylists();
+      setPlaylists(response.playlists || []);
+    } catch (error) {
+      console.error('Error loading playlists:', error);
+      toast.error('Failed to load playlists');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!selectedPlaylistId) {
+      toast.error('Please select a playlist');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      // Add each track to the selected playlist
+      for (const trackId of trackIds) {
+        await api.addTrackToPlaylist(selectedPlaylistId, trackId, 'end');
+      }
+      
+      toast.success(`Added ${trackIds.length} track${trackIds.length > 1 ? 's' : ''} to playlist`);
+      onSuccess();
+    } catch (error) {
+      console.error('Error adding tracks to playlist:', error);
+      toast.error('Failed to add tracks to playlist');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50"
+            onClick={onClose}
+          />
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.9, y: 20 }}
+            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md z-50"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="bg-gradient-to-br from-[#0a1628] to-[#1a2845] border-2 border-[#00d9ff]/30 rounded-2xl p-6 shadow-2xl">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl font-righteous text-white">Add to Playlist</h2>
+                <button
+                  onClick={onClose}
+                  className="text-white/70 hover:text-white transition-colors"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div>
+                  <Label className="text-white mb-2 block">
+                    Select Playlist
+                  </Label>
+                  <p className="text-white/50 text-sm mb-3">
+                    Adding {trackIds.length} track{trackIds.length > 1 ? 's' : ''}
+                  </p>
+                  
+                  {loading ? (
+                    <div className="bg-white/5 border border-white/20 rounded-lg p-4 text-center">
+                      <p className="text-white/70">Loading playlists...</p>
+                    </div>
+                  ) : playlists.length === 0 ? (
+                    <div className="bg-white/5 border border-white/20 rounded-lg p-4 text-center">
+                      <p className="text-white/70">No playlists found</p>
+                      <p className="text-white/50 text-sm mt-1">Create a playlist first</p>
+                    </div>
+                  ) : (
+                    <select
+                      value={selectedPlaylistId}
+                      onChange={(e) => setSelectedPlaylistId(e.target.value)}
+                      className="w-full h-10 px-3 rounded-md bg-white/5 border border-white/20 text-white"
+                      required
+                    >
+                      <option value="">Select a playlist...</option>
+                      {playlists.map((playlist) => (
+                        <option key={playlist.id} value={playlist.id}>
+                          {playlist.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+
+                <div className="flex gap-3 pt-4">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={onClose}
+                    className="flex-1 bg-white/5 text-white border-white/20 hover:bg-white/10"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={saving || !selectedPlaylistId || loading}
+                    className="flex-1 bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] hover:from-[#00b8dd] hover:to-[#00dd88] text-[#0a1628]"
+                  >
+                    <ListMusic className="w-4 h-4 mr-2" />
+                    {saving ? 'Adding...' : 'Add to Playlist'}
                   </Button>
                 </div>
               </form>
