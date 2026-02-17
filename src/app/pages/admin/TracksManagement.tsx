@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Music, Plus, Search, Upload, Edit2, Trash2, Play, Pause, X, Filter, Download, Tag, CheckSquare, Square, ListMusic } from 'lucide-react';
+import { Music, Plus, Search, Upload, Edit2, Trash2, Play, Pause, X, Filter, Download, Tag, CheckSquare, Square, ListMusic, Calendar, Info } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Card } from '../../components/ui/card';
 import { Input } from '../../components/ui/input';
@@ -1113,6 +1113,7 @@ interface Playlist {
 }
 
 function AddToPlaylistModal({ isOpen, trackIds, onClose, onSuccess }: { isOpen: boolean; trackIds: string[]; onClose: () => void; onSuccess: () => void }) {
+  const navigate = useNavigate();
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<string>('');
   const [loading, setLoading] = useState(false);
@@ -1152,7 +1153,19 @@ function AddToPlaylistModal({ isOpen, trackIds, onClose, onSuccess }: { isOpen: 
         await api.addTrackToPlaylist(selectedPlaylistId, trackId, 'end');
       }
       
-      toast.success(`Added ${trackIds.length} track${trackIds.length > 1 ? 's' : ''} to playlist`);
+      const selectedPlaylist = playlists.find(p => p.id === selectedPlaylistId);
+      
+      toast.success(
+        `Added ${trackIds.length} track${trackIds.length > 1 ? 's' : ''} to playlist`,
+        {
+          description: 'Go to Schedule Management to set when this playlist plays',
+          action: {
+            label: 'Open Schedule',
+            onClick: () => navigate('/admin/schedule')
+          },
+          duration: 6000,
+        }
+      );
       onSuccess();
     } catch (error) {
       console.error('Error adding tracks to playlist:', error);
@@ -1226,7 +1239,28 @@ function AddToPlaylistModal({ isOpen, trackIds, onClose, onSuccess }: { isOpen: 
                   )}
                 </div>
 
-                <div className="flex gap-3 pt-4">
+                {/* Info about Schedule */}
+                <div className="bg-[#00d9ff]/10 border border-[#00d9ff]/30 rounded-lg p-3">
+                  <div className="flex items-start gap-2">
+                    <Info className="w-4 h-4 text-[#00d9ff] mt-0.5 flex-shrink-0" />
+                    <div className="flex-1">
+                      <p className="text-white/90 text-sm font-medium">Schedule Your Playlist</p>
+                      <p className="text-white/60 text-xs mt-1">
+                        After adding tracks to a playlist, use Schedule Management to set when it plays on air
+                      </p>
+                      <Button
+                        type="button"
+                        onClick={() => navigate('/admin/schedule')}
+                        className="mt-2 w-full text-xs bg-[#00d9ff]/20 text-[#00d9ff] border border-[#00d9ff]/30 hover:bg-[#00d9ff]/30"
+                      >
+                        <Calendar className="w-3 h-3 mr-1" />
+                        Go to Schedule Management
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex gap-3 pt-2">
                   <Button
                     type="button"
                     variant="outline"
