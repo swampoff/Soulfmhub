@@ -46,7 +46,7 @@ import { ListenerDashboard } from './pages/dashboards/ListenerDashboard';
 import { RequestSongPage } from './pages/RequestSongPage';
 import { SendShoutoutPage } from './pages/SendShoutoutPage';
 import { Toaster } from './components/ui/sonner';
-import soulFmLogo from 'figma:asset/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png';
+const soulFmLogo = '/assets/soul-fm-logo.svg';
 import BeachCarDemo from './pages/BeachCarDemo';
 import { Footer } from './components/Footer';
 import { AnimatedPalm } from './components/AnimatedPalm';
