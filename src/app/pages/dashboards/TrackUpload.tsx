@@ -172,15 +172,41 @@ export function TrackUpload() {
         updateTrackStatus(track.id, { progress });
       });
 
+      console.log('Upload response:', response); // Debug logging
+
       if (response.error) {
         throw new Error(response.error);
       }
+
+      // Validate response structure
+      if (!response || typeof response !== 'object') {
+        throw new Error('Invalid response from server');
+      }
+
+      // Extract metadata with fallbacks
+      const metadata = response.metadata || response.track?.metadata || {};
+      const title = metadata.title || response.track?.title || track.file.name.replace(/\.(mp3|wav|m4a|flac)$/i, '');
+      const artist = metadata.artist || response.track?.artist || 'Unknown Artist';
+      
+      // Build safe metadata object
+      const safeMetadata = {
+        title,
+        artist,
+        album: metadata.album || response.track?.album || '',
+        genre: metadata.genre || response.track?.genre || 'Funk',
+        duration: metadata.duration || response.track?.duration || 0,
+        year: metadata.year || response.track?.year || new Date().getFullYear(),
+        bpm: metadata.bpm || response.track?.bpm,
+        coverUrl: metadata.coverUrl || response.track?.coverUrl || response.coverUrl,
+      };
+
+      console.log('Processed metadata:', safeMetadata); // Debug logging
 
       // Update status to processing
       updateTrackStatus(track.id, { 
         status: 'processing', 
         progress: 90,
-        metadata: response.metadata 
+        metadata: safeMetadata 
       });
 
       // Wait a bit for processing
@@ -190,15 +216,20 @@ export function TrackUpload() {
       updateTrackStatus(track.id, { 
         status: 'success', 
         progress: 100,
-        metadata: response.metadata,
-        shortId: response.shortId,
-        streamUrl: response.streamUrl
+        metadata: safeMetadata,
+        shortId: response.shortId || response.track?.id || response.id,
+        streamUrl: response.streamUrl || response.track?.fileUrl || response.fileUrl
       });
 
-      toast.success(`${response.metadata.title} uploaded successfully!`);
+      toast.success(`${safeMetadata.title} uploaded successfully!`);
 
     } catch (error: any) {
       console.error('Upload error:', error);
+      console.error('Error details:', {
+        message: error.message,
+        stack: error.stack,
+        file: track.file.name
+      });
       updateTrackStatus(track.id, { 
         status: 'error', 
         progress: 0,
