@@ -7,12 +7,13 @@ async function fetchWithRetry(
   init?: RequestInit,
   retries = 3,
   backoff = 1500,
+  timeoutMs = 15000,
 ): Promise<Response> {
   let lastError: Error | null = null;
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 15000); // 15 s timeout
+      const timeout = setTimeout(() => controller.abort(), timeoutMs);
       const response = await fetch(input, { ...init, signal: controller.signal });
       clearTimeout(timeout);
       return response;
@@ -145,13 +146,22 @@ export const api = {
 
   // Tracks
   async getTracks(filters?: { genre?: string; search?: string }) {
-    const params = new URLSearchParams(filters as any);
-    const response = await fetchWithRetry(`${API_BASE}/tracks?${params}`);
+    const headers = await getPublicHeaders();
+    const params = new URLSearchParams();
+    if (filters?.genre) params.set('genre', filters.genre);
+    if (filters?.search) params.set('search', filters.search);
+    const qs = params.toString();
+    const response = await fetchWithRetry(`${API_BASE}/tracks${qs ? `?${qs}` : ''}`, { headers });
+    if (!response.ok) {
+      console.error('[API] getTracks failed:', response.status, await response.text().catch(() => ''));
+      return { tracks: [] };
+    }
     return response.json();
   },
 
   async getTrack(id: string) {
-    const response = await fetchWithRetry(`${API_BASE}/tracks/${id}`);
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/tracks/${id}`, { headers });
     return response.json();
   },
 
@@ -166,12 +176,17 @@ export const api = {
   },
 
   async updateTrack(id: string, track: any) {
-    const headers = await getAuthHeaders();
+    const headers = await getPublicHeaders();
     const response = await fetchWithRetry(`${API_BASE}/tracks/${id}`, {
       method: 'PUT',
       headers,
       body: JSON.stringify(track),
     });
+    if (!response.ok) {
+      const errBody = await response.text().catch(() => '');
+      console.error(`[API] updateTrack failed: ${response.status}`, errBody);
+      throw new Error(`Update track failed (${response.status}): ${errBody}`);
+    }
     return response.json();
   },
 
@@ -220,17 +235,18 @@ export const api = {
 
   // Playlists
   async getPlaylists() {
-    const response = await fetchWithRetry(`${API_BASE}/playlists`);
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/playlists`, { headers });
     return response.json();
   },
 
   async getAllPlaylists() {
-    const response = await fetchWithRetry(`${API_BASE}/playlists`);
-    return response.json();
+    return this.getPlaylists();
   },
 
   async getPlaylist(id: string) {
-    const response = await fetchWithRetry(`${API_BASE}/playlists/${id}`);
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/playlists/${id}`, { headers });
     return response.json();
   },
 
@@ -404,6 +420,11 @@ export const api = {
     return response.json();
   },
 
+  async getRecentDonations(limit = 10) {
+    const response = await fetchWithRetry(`${API_BASE}/donations/recent?limit=${limit}`);
+    return response.json();
+  },
+
   // Users Management
   async getAllUsers() {
     const headers = await getAuthHeaders();
@@ -446,53 +467,126 @@ export const api = {
     return response.json();
   },
 
-  // Track Upload with File
+  // Track Upload with File — 3-step: signed URL → direct Storage upload → server processing
   async uploadTrackFile(formData: FormData, onProgress?: (progress: number) => void) {
     const accessToken = await getAccessToken();
-    
-    return new Promise<any>((resolve, reject) => {
+    const file = formData.get('file') as File;
+    if (!file) throw new Error('No file provided');
+
+    // Step 1: Get a signed upload URL from the server (small JSON request)
+    onProgress?.(1);
+    console.log('[API] Step 1: Getting signed upload URL...');
+    const urlResponse = await fetchWithRetry(`${API_BASE}/tracks/get-upload-url`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        originalFilename: file.name,
+        contentType: file.type || 'audio/mpeg',
+      }),
+    });
+
+    if (!urlResponse.ok) {
+      const errText = await urlResponse.text().catch(() => urlResponse.statusText);
+      console.error('[API] Step 1 failed:', urlResponse.status, errText);
+      throw new Error(`Failed to get upload URL (${urlResponse.status}): ${errText}`);
+    }
+
+    const urlData = await urlResponse.json();
+    if (urlData.error) throw new Error(urlData.error);
+
+    const { signedUrl, token: uploadToken, filename, bucket } = urlData;
+    console.log('[API] Signed URL received for:', filename);
+    onProgress?.(5);
+
+    // Step 2: Upload file directly to Supabase Storage via signed URL (XHR for progress)
+    // IMPORTANT: Supabase Kong gateway requires the `apikey` header for ALL requests
+    console.log('[API] Step 2: Uploading file directly to Storage...');
+    await new Promise<void>((resolve, reject) => {
       const xhr = new XMLHttpRequest();
-      
-      // Progress tracking
+
       if (onProgress) {
         xhr.upload.addEventListener('progress', (e) => {
           if (e.lengthComputable) {
-            const progress = Math.round((e.loaded / e.total) * 85); // 0-85%
-            onProgress(progress);
+            // Map 0-100% upload to 5-80% progress
+            const pct = Math.round(5 + (e.loaded / e.total) * 75);
+            onProgress(pct);
           }
         });
       }
 
       xhr.addEventListener('load', () => {
         if (xhr.status >= 200 && xhr.status < 300) {
-          try {
-            const response = JSON.parse(xhr.responseText);
-            resolve(response);
-          } catch (error) {
-            reject(new Error('Invalid response from server'));
-          }
+          console.log('[API] File uploaded to Storage successfully, status:', xhr.status);
+          onProgress?.(80);
+          resolve();
         } else {
+          console.error('[API] Storage upload failed:', xhr.status, xhr.responseText);
+          let errMsg = `Storage upload failed (${xhr.status})`;
           try {
-            const error = JSON.parse(xhr.responseText);
-            reject(new Error(error.error || 'Upload failed'));
-          } catch {
-            reject(new Error(`Upload failed with status ${xhr.status}`));
-          }
+            const errBody = JSON.parse(xhr.responseText);
+            errMsg = errBody.error || errBody.message || errMsg;
+          } catch {}
+          reject(new Error(errMsg));
         }
       });
 
       xhr.addEventListener('error', () => {
-        reject(new Error('Network error during upload'));
+        console.error('[API] Storage upload network error');
+        reject(new Error('Network error during file upload to Storage'));
       });
 
       xhr.addEventListener('abort', () => {
         reject(new Error('Upload cancelled'));
       });
 
-      xhr.open('POST', `${API_BASE}/tracks/upload`);
-      xhr.setRequestHeader('Authorization', `Bearer ${accessToken}`);
-      xhr.send(formData);
+      xhr.timeout = 120000; // 2 min timeout for large files
+      xhr.addEventListener('timeout', () => {
+        reject(new Error('Upload timed out (120s)'));
+      });
+
+      xhr.open('PUT', signedUrl);
+      // Supabase Kong gateway requires apikey header for all requests
+      xhr.setRequestHeader('apikey', publicAnonKey);
+      xhr.setRequestHeader('Authorization', `Bearer ${publicAnonKey}`);
+      xhr.setRequestHeader('Content-Type', file.type || 'audio/mpeg');
+      xhr.send(file);
     });
+
+    // Step 3: Ask server to process the uploaded file (metadata extraction, track creation)
+    console.log('[API] Step 3: Processing uploaded file...');
+    onProgress?.(85);
+
+    const processResponse = await fetchWithRetry(`${API_BASE}/tracks/process`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        filename,
+        bucket,
+        originalFilename: file.name,
+        position: formData.get('position') || 'end',
+        autoAddToLiveStream: formData.get('autoAddToLiveStream') === 'true',
+        generateWaveform: formData.get('generateWaveform') === 'true',
+      }),
+    }, 2, 2000, 45000); // 2 retries, 2s backoff, 45s timeout for metadata processing
+
+    if (!processResponse.ok) {
+      const errText = await processResponse.text().catch(() => processResponse.statusText);
+      console.error('[API] Step 3 failed:', processResponse.status, errText);
+      throw new Error(`Track processing failed (${processResponse.status}): ${errText}`);
+    }
+
+    const result = await processResponse.json();
+    if (result.error) throw new Error(result.error);
+
+    onProgress?.(100);
+    console.log('[API] Track upload complete:', result.track?.title);
+    return result;
   },
 
   // Podcasts
@@ -938,6 +1032,26 @@ export const api = {
   async disconnectCall(callId: string) {
     const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/call-queue/${callId}/disconnect`, {
+      method: 'POST',
+      headers,
+    });
+    return response.json();
+  },
+
+  // Podcast Subscription
+  async togglePodcastSubscription(podcastId: string) {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/podcasts/${podcastId}/subscribe`, {
+      method: 'POST',
+      headers,
+    });
+    return response.json();
+  },
+
+  // Episode Like
+  async toggleEpisodeLike(episodeId: string) {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/podcasts/episodes/${episodeId}/like`, {
       method: 'POST',
       headers,
     });

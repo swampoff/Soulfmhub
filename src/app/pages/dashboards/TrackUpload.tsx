@@ -34,6 +34,7 @@ interface UploadingTrack {
   error?: string;
   shortId?: string;
   streamUrl?: string;
+  audioUrl?: string;
   metadata?: {
     title: string;
     artist: string;
@@ -41,6 +42,7 @@ interface UploadingTrack {
     duration?: number;
     genre?: string;
     year?: number;
+    coverUrl?: string;
   };
 }
 
@@ -61,7 +63,7 @@ export function TrackUpload() {
       audio.src = objectUrl;
       
       // Parse filename for title and artist
-      const fileName = file.name.replace(/\.(mp3|wav|m4a|flac)$/i, '');
+      const fileName = file.name.replace(/\.mp3$/i, '');
       const parts = fileName.split(' - ');
       
       const basicMetadata = {
@@ -123,14 +125,11 @@ export function TrackUpload() {
   }, []);
 
   const handleFiles = (files: File[]) => {
-    // Filter audio files
-    const audioFiles = files.filter(file => {
-      const ext = file.name.toLowerCase();
-      return ext.endsWith('.mp3') || ext.endsWith('.wav') || ext.endsWith('.m4a') || ext.endsWith('.flac');
-    });
+    // Filter MP3 files only
+    const audioFiles = files.filter(file => file.name.toLowerCase().endsWith('.mp3'));
 
     if (audioFiles.length === 0) {
-      toast.error('No audio files found. Please upload MP3, WAV, M4A, or FLAC files.');
+      toast.error('No MP3 files found. Only .mp3 files are supported.');
       return;
     }
 
@@ -192,7 +191,8 @@ export function TrackUpload() {
         progress: 100,
         metadata: response.metadata,
         shortId: response.shortId,
-        streamUrl: response.streamUrl
+        streamUrl: response.streamUrl,
+        audioUrl: response.audioUrl
       });
 
       toast.success(`${response.metadata.title} uploaded successfully!`);
@@ -386,7 +386,7 @@ export function TrackUpload() {
                 <li>✅ <strong>Duration:</strong> Precisely calculated from audio</li>
                 <li>✅ <strong>Auto-tagging:</strong> All tracks tagged with "NEWFUNK"</li>
                 <li>📊 <strong>Waveform:</strong> Optional visual data generation</li>
-                <li>💾 <strong>Formats:</strong> MP3, WAV, M4A, FLAC (max 50 files/batch)</li>
+                <li>💾 <strong>Format:</strong> MP3 only (max 50 files/batch)</li>
               </ul>
             </div>
           </div>
@@ -419,7 +419,7 @@ export function TrackUpload() {
           </motion.div>
           
           <h3 className="text-2xl font-bold text-white mb-2">
-            {isDragging ? 'Drop files here!' : 'Drag & Drop Audio Files'}
+            {isDragging ? 'Drop MP3 files here!' : 'Drag & Drop MP3 Files'}
           </h3>
           
           <p className="text-white/70 mb-4">
@@ -430,26 +430,17 @@ export function TrackUpload() {
             <Badge variant="outline" className="border-[#00d9ff]/30 text-[#00d9ff]">
               MP3
             </Badge>
-            <Badge variant="outline" className="border-[#00d9ff]/30 text-[#00d9ff]">
-              WAV
-            </Badge>
-            <Badge variant="outline" className="border-[#00d9ff]/30 text-[#00d9ff]">
-              M4A
-            </Badge>
-            <Badge variant="outline" className="border-[#00d9ff]/30 text-[#00d9ff]">
-              FLAC
-            </Badge>
           </div>
 
           <p className="text-xs text-white/50 mt-4">
-            Up to 50 files at once • Automatic metadata extraction
+            Up to 50 MP3 files at once • Automatic ID3 metadata extraction
           </p>
 
           <input
             ref={fileInputRef}
             type="file"
             multiple
-            accept=".mp3,.wav,.m4a,.flac,audio/*"
+            accept=".mp3,audio/mpeg"
             onChange={handleFileSelect}
             className="hidden"
           />
@@ -545,18 +536,50 @@ export function TrackUpload() {
 
                   {track.status === 'success' && (
                     <div className="space-y-2 mt-3 pt-3 border-t border-white/5">
-                      {/* Metadata Success Indicator */}
+                      {/* Metadata Success Indicator with cover art */}
                       {track.metadata && (
-                        <div className="flex items-center gap-2 p-2 bg-green-500/10 border border-green-500/30 rounded-lg">
-                          <CheckCircle2 className="w-4 h-4 text-green-400" />
-                          <span className="text-xs text-green-400 font-medium">
-                            ID3 Metadata Extracted
-                          </span>
+                        <div className="flex items-center gap-3 p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
+                          {track.metadata.coverUrl && (
+                            <img
+                              src={track.metadata.coverUrl}
+                              alt="Cover"
+                              className="w-12 h-12 rounded-lg object-cover flex-shrink-0"
+                              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                            />
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <CheckCircle2 className="w-4 h-4 text-green-400 flex-shrink-0" />
+                              <span className="text-xs text-green-400 font-medium">
+                                ID3 Metadata Extracted
+                              </span>
+                            </div>
+                            <p className="text-sm text-white truncate mt-0.5">
+                              {track.metadata.artist} — {track.metadata.title}
+                              {track.metadata.duration && ` (${Math.floor(track.metadata.duration / 60)}:${String(Math.floor(track.metadata.duration % 60)).padStart(2, '0')})`}
+                            </p>
+                          </div>
                           {track.metadata.genre && (
-                            <Badge className="bg-purple-500/20 text-purple-300 text-xs ml-auto">
+                            <Badge className="bg-purple-500/20 text-purple-300 text-xs flex-shrink-0">
                               {track.metadata.genre}
                             </Badge>
                           )}
+                        </div>
+                      )}
+
+                      {/* Inline Audio Player */}
+                      {track.audioUrl && (
+                        <div className="p-3 bg-[#0a1628]/80 border border-white/10 rounded-lg">
+                          <p className="text-xs text-white/50 mb-2 flex items-center gap-1">
+                            <Play className="w-3 h-3" /> Preview
+                          </p>
+                          <audio
+                            controls
+                            preload="none"
+                            src={track.audioUrl}
+                            className="w-full h-8 [&::-webkit-media-controls-panel]:bg-[#0a1628]"
+                            style={{ filter: 'hue-rotate(180deg) saturate(1.5)' }}
+                          />
                         </div>
                       )}
 
@@ -640,7 +663,6 @@ export function TrackUpload() {
                                 size="sm"
                                 variant="outline"
                                 onClick={() => {
-                                  // Open in new tab for testing
                                   window.open(track.streamUrl!, '_blank');
                                 }}
                                 className="border-[#00ffaa]/30 text-[#00ffaa] hover:bg-[#00ffaa]/10 flex-shrink-0"
@@ -651,7 +673,7 @@ export function TrackUpload() {
                             </div>
                             
                             <p className="text-xs text-white/50 mt-2">
-                              Share this link to stream the track • Short ID: <span className="text-[#00d9ff] font-mono">{track.shortId}</span>
+                              Share this link to stream the track
                             </p>
                           </div>
                         </div>

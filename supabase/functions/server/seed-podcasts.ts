@@ -100,7 +100,7 @@ export async function seedPodcasts() {
       },
     ];
 
-    // Save all podcasts
+    // Save all podcasts - use BOTH slug-based and id-based keys for compatibility
     for (const podcast of podcasts) {
       await kv.set(`podcast:${podcast.slug}`, podcast);
       console.log(`✅ Seeded podcast: ${podcast.title}`);
@@ -112,6 +112,160 @@ export async function seedPodcasts() {
     console.log(`✅ Successfully seeded ${podcasts.length} podcasts`);
   } catch (error) {
     console.error('Error seeding podcasts:', error);
+  }
+}
+
+// Seed initial shows data
+export async function seedShows() {
+  try {
+    const existing = await kv.getByPrefix('show:');
+    if (existing.length > 0) {
+      console.log('Shows already seeded, skipping...');
+      return;
+    }
+
+    console.log('Seeding shows...');
+
+    const shows = [
+      {
+        id: crypto.randomUUID(),
+        slug: 'soul-sunrise',
+        title: 'Soul Sunrise',
+        description: 'Start your morning with the smoothest soul, jazz, and R&B. Maya Soul brings the positive vibes to wake up your spirit every weekday.',
+        host: 'Maya Soul',
+        hostAvatar: '',
+        coverImage: '',
+        genre: 'Soul',
+        type: 'live',
+        schedule: [
+          { day: 'Monday', startTime: '06:00', endTime: '10:00' },
+          { day: 'Tuesday', startTime: '06:00', endTime: '10:00' },
+          { day: 'Wednesday', startTime: '06:00', endTime: '10:00' },
+          { day: 'Thursday', startTime: '06:00', endTime: '10:00' },
+          { day: 'Friday', startTime: '06:00', endTime: '10:00' },
+        ],
+        status: 'active',
+        totalListeners: 12400,
+        averageRating: 4.8,
+        featured: true,
+        episodes: [],
+        createdAt: new Date().toISOString(),
+      },
+      {
+        id: crypto.randomUUID(),
+        slug: 'funk-factory',
+        title: 'The Funk Factory',
+        description: 'Non-stop funk, disco, and grooves to get you through the afternoon. Bootsy, Parliament, Earth Wind & Fire - we play it all.',
+        host: 'DJ Groove Master',
+        hostAvatar: '',
+        coverImage: '',
+        genre: 'Funk',
+        type: 'live',
+        schedule: [
+          { day: 'Monday', startTime: '14:00', endTime: '18:00' },
+          { day: 'Wednesday', startTime: '14:00', endTime: '18:00' },
+          { day: 'Friday', startTime: '14:00', endTime: '18:00' },
+        ],
+        status: 'active',
+        totalListeners: 9800,
+        averageRating: 4.7,
+        featured: true,
+        episodes: [],
+        createdAt: new Date().toISOString(),
+      },
+      {
+        id: crypto.randomUUID(),
+        slug: 'jazz-after-dark',
+        title: 'Jazz After Dark',
+        description: 'Late-night jazz vibes for the night owls. From classic Blue Note recordings to contemporary jazz fusion. The perfect wind-down soundtrack.',
+        host: 'Niko',
+        hostAvatar: '',
+        coverImage: '',
+        genre: 'Jazz',
+        type: 'live',
+        schedule: [
+          { day: 'Friday', startTime: '22:00', endTime: '02:00' },
+          { day: 'Saturday', startTime: '22:00', endTime: '02:00' },
+        ],
+        status: 'active',
+        totalListeners: 7600,
+        averageRating: 4.9,
+        featured: false,
+        episodes: [],
+        createdAt: new Date().toISOString(),
+      },
+      {
+        id: crypto.randomUUID(),
+        slug: 'rnb-lounge',
+        title: 'R&B Lounge',
+        description: 'The silkiest R&B tracks from the 90s to today. Usher, SZA, The Weeknd, Aaliyah - smooth vocals and feel-good rhythms all day.',
+        host: 'Smooth Operator',
+        hostAvatar: '',
+        coverImage: '',
+        genre: 'R&B',
+        type: 'live',
+        schedule: [
+          { day: 'Tuesday', startTime: '18:00', endTime: '22:00' },
+          { day: 'Thursday', startTime: '18:00', endTime: '22:00' },
+        ],
+        status: 'active',
+        totalListeners: 8200,
+        averageRating: 4.6,
+        featured: false,
+        episodes: [],
+        createdAt: new Date().toISOString(),
+      },
+      {
+        id: crypto.randomUUID(),
+        slug: 'reggae-riddims',
+        title: 'Reggae Riddims',
+        description: 'From Bob Marley to modern dancehall. Positive vibrations, roots reggae, and Caribbean rhythms to lift your soul every weekend.',
+        host: 'Rhythm Architect',
+        hostAvatar: '',
+        coverImage: '',
+        genre: 'Reggae',
+        type: 'live',
+        schedule: [
+          { day: 'Saturday', startTime: '12:00', endTime: '16:00' },
+          { day: 'Sunday', startTime: '12:00', endTime: '16:00' },
+        ],
+        status: 'active',
+        totalListeners: 6300,
+        averageRating: 4.5,
+        featured: false,
+        episodes: [],
+        createdAt: new Date().toISOString(),
+      },
+      {
+        id: crypto.randomUUID(),
+        slug: 'disco-inferno',
+        title: 'Disco Inferno',
+        description: 'Saturday night fever every weekend! Classic disco, nu-disco, and dance floor anthems. Get your dancing shoes ready.',
+        host: 'Vinyl Detective',
+        hostAvatar: '',
+        coverImage: '',
+        genre: 'Disco',
+        type: 'live',
+        schedule: [
+          { day: 'Saturday', startTime: '20:00', endTime: '00:00' },
+        ],
+        status: 'active',
+        totalListeners: 11200,
+        averageRating: 4.8,
+        featured: true,
+        episodes: [],
+        createdAt: new Date().toISOString(),
+      },
+    ];
+
+    for (const show of shows) {
+      await kv.set(`show:${show.id}`, show);
+      console.log(`✅ Seeded show: ${show.title}`);
+    }
+
+    console.log(`✅ Successfully seeded ${shows.length} shows`);
+  } catch (error) {
+    console.error('Error seeding shows:', error);
   }
 }
 

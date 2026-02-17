@@ -21,7 +21,7 @@ export function MetadataExtractionDemo() {
     {
       icon: Music,
       title: 'Upload Audio File',
-      description: 'Drop your MP3, WAV, M4A, or FLAC file',
+      description: 'Drop your MP3 file',
       color: 'from-[#00d9ff] to-[#0099cc]'
     },
     {

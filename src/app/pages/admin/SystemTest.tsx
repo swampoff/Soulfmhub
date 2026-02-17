@@ -797,6 +797,15 @@ function buildTests(): TestDef[] {
         return ok('Donation stats received', r.data, r.status);
       }
     },
+    {
+      id: 'donations-recent', name: 'GET /donations/recent', category: 'analytics', method: 'GET', authRequired: false,
+      run: async () => {
+        const r = await apiCall('/donations/recent?limit=5');
+        if (!r.ok) return fail(`HTTP ${r.status}`);
+        const count = r.data?.donations?.length ?? 0;
+        return ok(`${count} recent public donations`, r.data, r.status);
+      }
+    },
 
     // ══════════════ SETTINGS ══════════════
     {

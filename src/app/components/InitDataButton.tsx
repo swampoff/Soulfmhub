@@ -9,6 +9,7 @@ import { projectId, publicAnonKey } from '../../../utils/supabase/info';
 
 export function InitDataButton() {
   const [loading, setLoading] = useState(false);
+  const [seedingContent, setSeedingContent] = useState(false);
   const [adminEmail, setAdminEmail] = useState('');
   const [assigningAdmin, setAssigningAdmin] = useState(false);
 
@@ -68,7 +69,7 @@ export function InitDataButton() {
 
       // Create sample news
       for (const news of sampleNews) {
-        await api.createNews(news);
+        await api.createNewsItem(news);
       }
       toast.success(`Created ${sampleNews.length} news articles`);
 
@@ -103,6 +104,36 @@ export function InitDataButton() {
       toast.error(`Failed to initialize data: ${error.message}`);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const seedShowsAndPodcasts = async () => {
+    setSeedingContent(true);
+    toast.info('Seeding shows, podcasts & profiles from server...');
+
+    try {
+      const response = await fetch(
+        `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/seed-all`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${publicAnonKey}`,
+          },
+        }
+      );
+
+      const data = await response.json();
+
+      if (response.ok) {
+        toast.success('Shows, podcasts & profiles seeded successfully!');
+      } else {
+        toast.error(data.error || 'Failed to seed content');
+      }
+    } catch (error: any) {
+      toast.error(`Error: ${error.message}`);
+    } finally {
+      setSeedingContent(false);
     }
   };
 
@@ -155,6 +186,28 @@ export function InitDataButton() {
             className="bg-gradient-to-r from-orange-500 to-pink-500"
           >
             {loading ? 'Initializing...' : 'Initialize Data'}
+          </Button>
+        </div>
+      </Card>
+
+      {/* Seed Shows & Podcasts Card */}
+      <Card className="bg-white/10 backdrop-blur-sm border-white/20 p-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-bold text-white mb-2">
+              Seed Shows, Podcasts & Profiles
+            </h3>
+            <p className="text-white/70 text-sm">
+              Seed rich show/podcast data with episodes and DJ profiles from the server.
+              Uses the dedicated <code className="text-[#00d9ff]">/seed-all</code> endpoint.
+            </p>
+          </div>
+          <Button
+            onClick={seedShowsAndPodcasts}
+            disabled={seedingContent}
+            className="bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] text-slate-900 font-bold"
+          >
+            {seedingContent ? 'Seeding...' : 'Seed Content'}
           </Button>
         </div>
       </Card>

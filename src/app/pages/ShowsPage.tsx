@@ -32,9 +32,9 @@ export function ShowsPage() {
 
   const filteredShows = shows.filter(show => {
     const matchesSearch = !searchQuery || 
-      show.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      show.host?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      show.description?.toLowerCase().includes(searchQuery.toLowerCase());
+      (show.title || show.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (show.host || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (show.description || '').toLowerCase().includes(searchQuery.toLowerCase());
     
     const matchesGenre = !selectedGenre || show.genre === selectedGenre;
     const matchesType = !selectedType || show.type === selectedType;
@@ -194,10 +194,10 @@ export function ShowsPage() {
                   <Card className="bg-white/10 backdrop-blur-sm border-white/20 hover:border-[#00d9ff]/50 transition-all overflow-hidden group h-full">
                     {/* Cover Image */}
                     <div className="relative aspect-video overflow-hidden">
-                      {show.cover ? (
+                      {(show.coverImage || show.cover) ? (
                         <img
-                          src={show.cover}
-                          alt={show.name}
+                          src={show.coverImage || show.cover}
+                          alt={show.title || show.name}
                           className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
                         />
                       ) : (
@@ -242,7 +242,7 @@ export function ShowsPage() {
 
                       {/* Show Info */}
                       <h3 className="text-xl font-bold text-white mb-2 group-hover:text-[#00d9ff] transition-colors line-clamp-1">
-                        {show.name}
+                        {show.title || show.name}
                       </h3>
 
                       {show.host && (
@@ -259,10 +259,10 @@ export function ShowsPage() {
                       )}
 
                       {/* Schedule */}
-                      {show.schedule && (
+                      {(show.schedule) && (
                         <div className="flex items-center gap-2 text-white/50 text-sm mb-4">
                           <Calendar className="w-4 h-4" />
-                          <span>{show.schedule}</span>
+                          <span>{typeof show.schedule === 'string' ? show.schedule : Array.isArray(show.schedule) ? show.schedule.map((s: any) => `${s.day} ${s.startTime}`).join(', ') : ''}</span>
                         </div>
                       )}
 
@@ -271,10 +271,10 @@ export function ShowsPage() {
                         <div className="text-white/60">
                           {show.episodes?.length || 0} episode{show.episodes?.length !== 1 ? 's' : ''}
                         </div>
-                        {show.averageListeners && (
+                        {(show.totalListeners || show.averageListeners) && (
                           <div className="flex items-center gap-1 text-[#00ffaa]">
                             <Users className="w-3.5 h-3.5" />
-                            <span>{show.averageListeners}</span>
+                            <span>{show.totalListeners || show.averageListeners}</span>
                           </div>
                         )}
                       </div>

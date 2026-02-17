@@ -133,18 +133,19 @@ export default function ContentAutomationDashboard() {
   const checkSchedule = async () => {
     setGenerating(true);
     try {
+      const headers = await getAuthHeaders();
       const res = await fetch(
         `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/automation/check-schedule`,
         {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          }
+          headers,
         }
       );
 
       if (!res.ok) {
-        throw new Error('Failed to check schedule');
+        const errText = await res.text().catch(() => res.statusText);
+        console.error('[checkSchedule] Server responded:', res.status, errText);
+        throw new Error(`Failed to check schedule (${res.status})`);
       }
 
       const data = await res.json();
@@ -152,7 +153,7 @@ export default function ContentAutomationDashboard() {
       loadData();
     } catch (error: any) {
       console.error('Check schedule error:', error);
-      toast.error('Ошибка проверки расписания');
+      toast.error(`Ошибка проверки расписания: ${error.message || 'Unknown'}`);
     } finally {
       setGenerating(false);
     }

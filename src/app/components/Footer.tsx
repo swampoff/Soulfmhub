@@ -32,6 +32,16 @@ export function Footer() {
         { label: 'Shows & Podcasts', href: '/shows', icon: Radio },
         { label: 'Music Library', href: '/music', icon: Music },
         { label: 'News', href: '/news', icon: Newspaper },
+        { label: 'Our DJs', href: '/djs', icon: Radio },
+      ]
+    },
+    {
+      title: 'Community',
+      links: [
+        { label: 'Events', href: '/events', icon: Calendar },
+        { label: 'Community Chat', href: '/community', icon: Heart },
+        { label: 'Merch Shop', href: '/merch', icon: Heart },
+        { label: 'Support Us', href: '/support', icon: Heart },
       ]
     },
     {
@@ -39,18 +49,10 @@ export function Footer() {
       links: [
         { label: 'About Radio', href: '/about', icon: Radio },
         { label: 'Our Team', href: '/team', icon: Heart },
-        { label: 'Support Us', href: '/support', icon: Heart },
-        { label: 'Analytics', href: '/analytics', icon: Calendar },
+        { label: 'FAQ', href: '/faq', icon: Heart },
+        { label: 'Contact Us', href: '/contact', icon: Mail },
       ]
     },
-    {
-      title: 'Contact',
-      links: [
-        { label: 'info@soulfm.hub', href: 'mailto:info@soulfm.hub', icon: Mail },
-        { label: '+7 (999) 123-45-67', href: 'tel:+79991234567', icon: Phone },
-        { label: 'Moscow, Russia', href: '#', icon: MapPin },
-      ]
-    }
   ];
 
   const socialLinks = [

@@ -26,6 +26,10 @@ import {
   Tv,
   Upload,
   Users,
+  FileText,
+  Archive,
+  Palette,
+  MessageSquare,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import soulFmLogo from 'figma:asset/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png';
@@ -81,10 +85,14 @@ const MORE_GROUPS: NavGroup[] = [
     id: 'system',
     label: 'System',
     items: [
-      { id: 'analytics',   label: 'Analytics',    icon: BarChart3, path: '/admin/analytics' },
-      { id: 'users',       label: 'Users',        icon: Users,     path: '/admin/users' },
-      { id: 'system-test', label: 'System Test',  icon: TestTube,  path: '/admin/system-test' },
-      { id: 'upload-test', label: 'Upload Test',  icon: FileAudio, path: '/admin/upload-test' },
+      { id: 'analytics',   label: 'Analytics',    icon: BarChart3,      path: '/admin/analytics' },
+      { id: 'users',       label: 'Users',        icon: Users,          path: '/admin/users' },
+      { id: 'logs',        label: 'Logs & Audit', icon: FileText,       path: '/admin/logs' },
+      { id: 'backup',      label: 'Backup & Export', icon: Archive,     path: '/admin/backup' },
+      { id: 'branding',    label: 'Branding',     icon: Palette,        path: '/admin/branding' },
+      { id: 'feedback',    label: 'Feedback',     icon: MessageSquare,  path: '/admin/feedback' },
+      { id: 'system-test', label: 'System Test',  icon: TestTube,       path: '/admin/system-test' },
+      { id: 'upload-test', label: 'Upload Test',  icon: FileAudio,      path: '/admin/upload-test' },
     ],
   },
 ];

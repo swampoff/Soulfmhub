@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -17,13 +17,13 @@ import {
   TrendingUp,
   Sparkles,
   Coffee,
-  Pizza,
   Disc3,
 } from 'lucide-react';
 import { motion } from 'motion/react';
-import { Card as CardComponent } from '../components/ui/card';
 import { SupportFAQ } from '../components/SupportFAQ';
 import { AnimatedPalm } from '../components/AnimatedPalm';
+import { api } from '../../lib/api';
+import { toast } from 'sonner';
 
 const DONATION_TIERS = [
   {
@@ -131,13 +131,27 @@ const IMPACT_STATS = [
   },
 ];
 
-const RECENT_SUPPORTERS = [
-  { name: 'Sarah M.', amount: 25, tier: 'Groove Master', date: '2 hours ago' },
-  { name: 'Marcus J.', amount: 50, tier: 'Soul Patron', date: '5 hours ago' },
-  { name: 'Lisa K.', amount: 10, tier: 'Vinyl Supporter', date: '1 day ago' },
-  { name: 'David R.', amount: 100, tier: 'Radio Legend', date: '1 day ago' },
-  { name: 'Nina S.', amount: 25, tier: 'Groove Master', date: '2 days ago' },
-];
+// Tier lookup for display
+const TIER_LABELS: Record<string, string> = {
+  coffee: 'Coffee Break',
+  vinyl: 'Vinyl Supporter',
+  groove: 'Groove Master',
+  soul: 'Soul Patron',
+  legend: 'Radio Legend',
+  custom: 'Custom Supporter',
+};
+
+function timeAgo(dateStr: string): string {
+  const seconds = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
+  if (seconds < 60) return 'just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  return `${Math.floor(days / 30)}mo ago`;
+}
 
 const FUNDING_BREAKDOWN = [
   { category: 'Broadcasting Equipment', percentage: 30, color: '#00d9ff' },
@@ -151,18 +165,62 @@ export function SupportPage() {
   const [donationType, setDonationType] = useState<'once' | 'monthly'>('monthly');
   const [customAmount, setCustomAmount] = useState('');
   const [selectedTier, setSelectedTier] = useState<string | null>('groove');
+  const [donorName, setDonorName] = useState('');
+  const [donorMessage, setDonorMessage] = useState('');
+  const [donating, setDonating] = useState(false);
+  const [recentDonations, setRecentDonations] = useState<any[]>([]);
+  const [loadingRecent, setLoadingRecent] = useState(true);
 
-  const handleDonate = (tierId: string, amount: number) => {
-    console.log(`Donating $${amount} as ${donationType} to tier ${tierId}`);
-    // Integration with payment processor (Stripe, PayPal, etc.)
-    // For now, just a placeholder
-    alert(`Thank you for your $${amount} ${donationType} donation! 🎉\n\nRedirecting to payment processor...`);
+  const loadRecentDonations = () => {
+    api.getRecentDonations(8).then((res) => {
+      if (res.donations) {
+        setRecentDonations(res.donations);
+      }
+    }).catch((err) => {
+      console.error('Failed to load recent donations:', err);
+    }).finally(() => setLoadingRecent(false));
+  };
+
+  useEffect(() => {
+    loadRecentDonations();
+  }, []);
+
+  const handleDonate = async (tierId: string, amount: number) => {
+    setDonating(true);
+    try {
+      const donation = {
+        name: donorName || 'Anonymous Supporter',
+        amount,
+        tier: tierId,
+        message: donorMessage || null,
+        type: donationType,
+        isAnonymous: !donorName,
+      };
+
+      const result = await api.createDonation(donation);
+
+      if (result.error) {
+        toast.error(result.error);
+      } else {
+        toast.success(`Thank you for your $${amount} donation! Your support keeps the music playing.`);
+        setDonorName('');
+        setDonorMessage('');
+        setCustomAmount('');
+        // Refresh the recent supporters list
+        loadRecentDonations();
+      }
+    } catch (error: any) {
+      console.error('Donation error:', error);
+      toast.error(`Donation failed: ${error.message}`);
+    } finally {
+      setDonating(false);
+    }
   };
 
   const handleCustomDonate = () => {
     const amount = parseFloat(customAmount);
     if (isNaN(amount) || amount <= 0) {
-      alert('Please enter a valid amount');
+      toast.error('Please enter a valid amount');
       return;
     }
     handleDonate('custom', amount);
@@ -317,6 +375,7 @@ export function SupportPage() {
                           e.stopPropagation();
                           handleDonate(tier.id, tier.amount);
                         }}
+                        disabled={donating}
                         className="w-full font-semibold"
                         style={{
                           background: isSelected
@@ -325,7 +384,7 @@ export function SupportPage() {
                           color: isSelected ? '#0a1628' : 'white',
                         }}
                       >
-                        {isSelected ? 'Selected' : 'Select'}
+                        {donating ? 'Processing...' : isSelected ? `Donate $${tier.amount}` : 'Select'}
                       </Button>
                     </div>
                   </Card>
@@ -345,27 +404,44 @@ export function SupportPage() {
           <Card className="bg-white/10 backdrop-blur-sm border-white/20 p-8 max-w-2xl mx-auto">
             <h3 className="text-2xl font-bold text-white mb-4 text-center flex items-center justify-center gap-2">
               <DollarSign className="w-6 h-6 text-[#00d9ff]" />
-              Custom Amount
+              Your Donation
             </h3>
             <p className="text-white/70 text-center mb-6">
-              Want to contribute a different amount? Enter your custom donation below.
+              Add your name and a message, or donate anonymously. Enter a custom amount below.
             </p>
-            <div className="flex gap-4">
-              <div className="flex-1 relative">
-                <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/50" />
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <Input
-                  type="number"
-                  placeholder="Enter amount"
-                  value={customAmount}
-                  onChange={(e) => setCustomAmount(e.target.value)}
-                  className="pl-12 text-lg bg-white/10 border-white/20 text-white placeholder:text-white/50 focus:border-[#00d9ff]"
+                  type="text"
+                  placeholder="Your name (optional)"
+                  value={donorName}
+                  onChange={(e) => setDonorName(e.target.value)}
+                  className="bg-white/10 border-white/20 text-white placeholder:text-white/50 focus:border-[#00d9ff]"
                 />
+                <div className="relative">
+                  <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/50" />
+                  <Input
+                    type="number"
+                    placeholder="Custom amount"
+                    value={customAmount}
+                    onChange={(e) => setCustomAmount(e.target.value)}
+                    className="pl-12 bg-white/10 border-white/20 text-white placeholder:text-white/50 focus:border-[#00d9ff]"
+                  />
+                </div>
               </div>
+              <Input
+                type="text"
+                placeholder="Leave a message (optional)"
+                value={donorMessage}
+                onChange={(e) => setDonorMessage(e.target.value)}
+                className="bg-white/10 border-white/20 text-white placeholder:text-white/50 focus:border-[#00d9ff]"
+              />
               <Button
                 onClick={handleCustomDonate}
-                className="px-8 bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] text-[#0a1628] font-semibold hover:opacity-90"
+                disabled={donating}
+                className="w-full py-6 text-lg bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] text-[#0a1628] font-semibold hover:opacity-90"
               >
-                Donate
+                {donating ? 'Processing...' : `Donate ${customAmount ? `$${customAmount}` : 'Custom Amount'}`}
               </Button>
             </div>
           </Card>
@@ -458,35 +534,54 @@ export function SupportPage() {
           </h2>
           <div className="max-w-3xl mx-auto">
             <Card className="bg-white/10 backdrop-blur-sm border-white/20 divide-y divide-white/10">
-              {RECENT_SUPPORTERS.map((supporter, index) => (
-                <motion.div
-                  key={index}
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.6 + index * 0.05 }}
-                  className="p-4 flex items-center justify-between hover:bg-white/5 transition-colors"
-                >
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-[#00d9ff] to-[#00ffaa] flex items-center justify-center text-[#0a1628] font-bold text-lg">
-                      {supporter.name.charAt(0)}
+              {loadingRecent ? (
+                <div className="p-8 text-center">
+                  <div className="inline-block w-6 h-6 border-2 border-[#00d9ff]/30 border-t-[#00d9ff] rounded-full animate-spin mb-3" />
+                  <p className="text-white/50 text-sm">Loading supporters...</p>
+                </div>
+              ) : recentDonations.length === 0 ? (
+                <div className="p-8 text-center">
+                  <Heart className="w-10 h-10 text-white/20 mx-auto mb-3" />
+                  <p className="text-white/60 font-semibold mb-1">Be the first supporter!</p>
+                  <p className="text-white/40 text-sm">Choose a tier above to get started.</p>
+                </div>
+              ) : (
+                recentDonations.map((supporter: any, index: number) => (
+                  <motion.div
+                    key={supporter.id || index}
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.6 + index * 0.05 }}
+                    className="p-4 flex items-center justify-between hover:bg-white/5 transition-colors"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-[#00d9ff] to-[#00ffaa] flex items-center justify-center text-[#0a1628] font-bold text-lg">
+                        {(supporter.name || 'A').charAt(0).toUpperCase()}
+                      </div>
+                      <div>
+                        <div className="text-white font-semibold">{supporter.name}</div>
+                        <div className="text-white/60 text-sm">
+                          {TIER_LABELS[supporter.tier] || supporter.tier || 'Supporter'}
+                        </div>
+                      </div>
                     </div>
-                    <div>
-                      <div className="text-white font-semibold">{supporter.name}</div>
-                      <div className="text-white/60 text-sm">{supporter.tier}</div>
+                    <div className="text-right">
+                      <div className="text-[#00d9ff] font-bold text-lg">
+                        ${supporter.amount}
+                      </div>
+                      <div className="text-white/50 text-xs">
+                        {supporter.createdAt ? timeAgo(supporter.createdAt) : ''}
+                      </div>
                     </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-[#00d9ff] font-bold text-lg">
-                      ${supporter.amount}
-                    </div>
-                    <div className="text-white/50 text-xs">{supporter.date}</div>
-                  </div>
-                </motion.div>
-              ))}
+                  </motion.div>
+                ))
+              )}
             </Card>
 
             <p className="text-center text-white/60 mt-6 text-sm">
-              Join these amazing supporters and help keep the music alive! 🎵
+              {recentDonations.length > 0
+                ? 'Join these amazing supporters and help keep the music alive!'
+                : 'Your donation will appear here instantly.'}
             </p>
           </div>
         </motion.div>

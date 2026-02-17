@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import { Card } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
@@ -31,10 +31,13 @@ import {
   ChevronDown,
   SlidersHorizontal,
   RefreshCw,
+  ListPlus,
+  Volume2,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { api } from '../../../lib/api';
 import { AdminLayout } from '../../components/admin/AdminLayout';
+import { toast } from 'sonner';
 
 interface Track {
   id: string;
@@ -46,11 +49,19 @@ interface Track {
   bpm?: number;
   key?: string;
   artwork?: string;
-  file_path: string;
+  coverUrl?: string;
+  audioUrl?: string;
+  streamUrl?: string;
+  file_path?: string;
   file_size?: number;
   waveform?: string;
-  created_at: string;
+  created_at?: string;
+  createdAt?: string;
   updated_at?: string;
+  updatedAt?: string;
+  tags?: string[];
+  storageBucket?: string;
+  storageFilename?: string;
 }
 
 interface UploadProgress {
@@ -70,6 +81,259 @@ const MUSICAL_KEYS = [
   'C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'
 ];
 
+const TAG_SUGGESTIONS = [
+  'Chill', 'Upbeat', 'Summer', 'Party', 'Slow Jam', 'Classic',
+  'Remix', 'Live', 'Acoustic', 'Morning', 'Evening', 'Night',
+  'Workout', 'Driving', 'Beach', 'Romantic', 'Groovy', 'Soulful',
+  'Funky', 'Smooth', 'Deep', 'Vocal', 'Instrumental', 'Rare',
+];
+
+function EditTrackModal({
+  track,
+  onSave,
+  onClose,
+}: {
+  track: Track;
+  onSave: (t: Track) => void;
+  onClose: () => void;
+}) {
+  // Ensure genre is always a valid value from the list
+  const initialGenre = track.genre && GENRE_OPTIONS.includes(track.genre)
+    ? track.genre
+    : GENRE_OPTIONS[0];
+  const [form, setForm] = useState<Track>({ ...track, genre: initialGenre });
+  const [tagInput, setTagInput] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const tags = form.tags || [];
+
+  const addTag = (tag: string) => {
+    const trimmed = tag.trim();
+    if (!trimmed || tags.includes(trimmed)) return;
+    setForm({ ...form, tags: [...tags, trimmed] });
+    setTagInput('');
+  };
+
+  const removeTag = (tag: string) => {
+    setForm({ ...form, tags: tags.filter((t) => t !== tag) });
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      addTag(tagInput);
+    }
+  };
+
+  const handleSubmit = async () => {
+    // Final safety guard: ensure genre is never empty
+    const safeForm = {
+      ...form,
+      genre: form.genre && GENRE_OPTIONS.includes(form.genre) ? form.genre : initialGenre,
+    };
+    setSaving(true);
+    await onSave(safeForm);
+    setSaving(false);
+  };
+
+  const availableSuggestions = TAG_SUGGESTIONS.filter((s) => !tags.includes(s));
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ scale: 0.92, y: 24 }}
+        animate={{ scale: 1, y: 0 }}
+        exit={{ scale: 0.92, y: 24 }}
+        className="bg-[#141414] rounded-xl border border-white/10 w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="p-4 sm:p-5 border-b border-white/10 flex items-center justify-between flex-shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="p-2 bg-[#00d9ff]/10 rounded-lg flex-shrink-0">
+              <Edit2 className="size-4 text-[#00d9ff]" />
+            </div>
+            <div className="min-w-0">
+              <h3 className="text-base sm:text-lg font-righteous text-white truncate">Edit Track</h3>
+              <p className="text-xs text-white/40 truncate">{track.title}</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-lg transition-all flex-shrink-0">
+            <X className="size-4 text-white/60" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="p-4 sm:p-5 flex-1 overflow-y-auto space-y-4">
+          {/* Title & Artist */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-white/60 mb-1 block">Title</label>
+              <Input
+                value={form.title}
+                onChange={(e) => setForm({ ...form, title: e.target.value })}
+                className="bg-white/5 border-white/10 text-white text-sm h-9"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-white/60 mb-1 block">Artist</label>
+              <Input
+                value={form.artist}
+                onChange={(e) => setForm({ ...form, artist: e.target.value })}
+                className="bg-white/5 border-white/10 text-white text-sm h-9"
+              />
+            </div>
+          </div>
+
+          {/* Album */}
+          <div>
+            <label className="text-xs text-white/60 mb-1 block">Album</label>
+            <Input
+              value={form.album || ''}
+              onChange={(e) => setForm({ ...form, album: e.target.value })}
+              placeholder="Optional"
+              className="bg-white/5 border-white/10 text-white text-sm h-9"
+            />
+          </div>
+
+          {/* Genre & Key & BPM */}
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="text-xs text-white/60 mb-1 block">Genre</label>
+              <select
+                value={form.genre}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  // If user clears genre, revert to the original track genre
+                  if (!val) {
+                    setForm({ ...form, genre: track.genre || GENRE_OPTIONS[0] });
+                  } else {
+                    setForm({ ...form, genre: val });
+                  }
+                }}
+                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm h-9 focus:outline-none focus:ring-2 focus:ring-[#00d9ff]/50"
+              >
+                {GENRE_OPTIONS.map((g) => (
+                  <option key={g} value={g} className="bg-[#141414]">{g}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-white/60 mb-1 block">Key</label>
+              <select
+                value={form.key || ''}
+                onChange={(e) => setForm({ ...form, key: e.target.value })}
+                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm h-9 focus:outline-none focus:ring-2 focus:ring-[#00d9ff]/50"
+              >
+                <option value="" className="bg-[#141414]">--</option>
+                {MUSICAL_KEYS.map((k) => (
+                  <option key={k} value={k} className="bg-[#141414]">{k}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-white/60 mb-1 block">BPM</label>
+              <Input
+                type="number"
+                value={form.bpm || ''}
+                onChange={(e) => setForm({ ...form, bpm: e.target.value ? Number(e.target.value) : undefined })}
+                placeholder="120"
+                className="bg-white/5 border-white/10 text-white text-sm h-9"
+              />
+            </div>
+          </div>
+
+          {/* Tags */}
+          <div>
+            <label className="text-xs text-white/60 mb-1.5 flex items-center gap-1.5">
+              <Tag className="size-3" />
+              Tags
+            </label>
+
+            {/* Current tags */}
+            {tags.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {tags.map((tag) => (
+                  <span
+                    key={tag}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#00d9ff]/15 text-[#00d9ff] rounded-full text-xs border border-[#00d9ff]/20"
+                  >
+                    {tag}
+                    <button
+                      onClick={() => removeTag(tag)}
+                      className="hover:text-white transition-colors"
+                    >
+                      <X className="size-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* Input */}
+            <div className="flex gap-2">
+              <Input
+                value={tagInput}
+                onChange={(e) => setTagInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Type and press Enter..."
+                className="bg-white/5 border-white/10 text-white text-sm h-8 flex-1"
+              />
+              <button
+                onClick={() => addTag(tagInput)}
+                disabled={!tagInput.trim()}
+                className="px-3 h-8 bg-[#00d9ff]/10 hover:bg-[#00d9ff]/20 text-[#00d9ff] rounded-lg text-xs font-medium transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                <Plus className="size-3.5" />
+              </button>
+            </div>
+
+            {/* Suggestions */}
+            {availableSuggestions.length > 0 && (
+              <div className="mt-2">
+                <p className="text-[10px] text-white/30 mb-1">Suggestions:</p>
+                <div className="flex flex-wrap gap-1">
+                  {availableSuggestions.slice(0, 12).map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => addTag(s)}
+                      className="px-2 py-0.5 bg-white/5 hover:bg-white/10 text-white/50 hover:text-white rounded-full text-[10px] transition-all border border-white/5 hover:border-white/20"
+                    >
+                      + {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="p-4 sm:p-5 border-t border-white/10 flex items-center justify-end gap-2 flex-shrink-0">
+          <Button variant="ghost" size="sm" onClick={onClose} className="text-white/60 hover:text-white text-xs">
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            onClick={handleSubmit}
+            disabled={saving || !form.title.trim() || !form.artist.trim()}
+            className="bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] text-black font-medium text-xs hover:shadow-lg hover:shadow-cyan-500/30 disabled:opacity-40"
+          >
+            {saving ? <Loader2 className="size-3.5 animate-spin mr-1.5" /> : <CheckCircle2 className="size-3.5 mr-1.5" />}
+            Save Changes
+          </Button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 export function MediaLibraryManagement() {
   const [tracks, setTracks] = useState<Track[]>([]);
   const [filteredTracks, setFilteredTracks] = useState<Track[]>([]);
@@ -82,27 +346,46 @@ export function MediaLibraryManagement() {
   const [editingTrack, setEditingTrack] = useState<Track | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
   const [showFilters, setShowFilters] = useState(false);
+  const [playingTrackId, setPlayingTrackId] = useState<string | null>(null);
+  const [playlists, setPlaylists] = useState<any[]>([]);
+  const [playlistDropdownTrackId, setPlaylistDropdownTrackId] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
     loadTracks();
+    loadPlaylists();
   }, []);
 
   useEffect(() => {
     filterTracks();
   }, [tracks, searchQuery, selectedGenre]);
 
-  const loadTracks = async () => {
-    setLoading(true);
+  const loadTracks = async (showSpinner = true) => {
+    if (showSpinner) setLoading(true);
     try {
-      const { tracks: data } = await api.getTracks();
-      setTracks(data || []);
+      const result = await api.getTracks();
+      console.log('[MediaLibrary] getTracks response:', { count: result?.tracks?.length, hasError: !!result?.error });
+      if (result?.error) {
+        console.error('[MediaLibrary] Server error:', result.error);
+      }
+      setTracks(result?.tracks || []);
     } catch (error) {
-      console.error('Error loading tracks:', error);
+      console.error('[MediaLibrary] Error loading tracks:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadPlaylists = async () => {
+    try {
+      const result = await api.getAllPlaylists();
+      console.log('[MediaLibrary] getPlaylists response:', { count: result?.playlists?.length, hasError: !!result?.error });
+      setPlaylists(result?.playlists || []);
+    } catch (error) {
+      console.error('[MediaLibrary] Error loading playlists:', error);
     }
   };
 
@@ -154,17 +437,39 @@ export function MediaLibraryManagement() {
   };
 
   const uploadTrack = async (file: File, index: number) => {
-    for (let progress = 0; progress <= 100; progress += 10) {
-      await new Promise(resolve => setTimeout(resolve, 200));
-      updateUploadProgress(index, { progress, status: 'uploading' });
+    // Create FormData for the real API call
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('position', 'end');
+    formData.append('autoAddToLiveStream', 'true');
+    formData.append('generateWaveform', 'false');
+
+    try {
+      // 2-step upload: signed URL → direct Storage upload → server processing
+      // Progress: 1-5 (getting URL), 5-80 (uploading to Storage), 85-100 (server processing)
+      const response = await api.uploadTrackFile(formData, (progress) => {
+        if (progress >= 85) {
+          updateUploadProgress(index, { progress, status: 'processing' });
+        } else {
+          updateUploadProgress(index, { progress, status: 'uploading' });
+        }
+      });
+
+      if (response.error) {
+        throw new Error(response.error);
+      }
+
+      updateUploadProgress(index, { progress: 100, status: 'success' });
+
+      // Refresh the tracks list
+      await loadTracks(false);
+    } catch (error: any) {
+      console.error(`Upload error for ${file.name}:`, error);
+      updateUploadProgress(index, {
+        status: 'error',
+        error: error.message || 'Upload failed',
+      });
     }
-
-    updateUploadProgress(index, { progress: 100, status: 'processing' });
-    await new Promise(resolve => setTimeout(resolve, 1000));
-
-    updateUploadProgress(index, { progress: 100, status: 'success' });
-    
-    await loadTracks();
   };
 
   const updateUploadProgress = (index: number, updates: Partial<UploadProgress>) => {
@@ -176,16 +481,22 @@ export function MediaLibraryManagement() {
   };
 
   const handleDeleteTracks = async () => {
-    if (!confirm(`Delete ${selectedTracks.length} track(s)?`)) return;
+    if (!confirm(
+      `Permanently delete ${selectedTracks.length} track(s)?\n\nThis will remove the audio files from storage and clean up all playlist references. This action cannot be undone.`
+    )) return;
 
     try {
+      let deleted = 0;
       for (const trackId of selectedTracks) {
         await api.deleteTrack(trackId);
+        deleted++;
       }
+      toast.success(`${deleted} track(s) permanently deleted`);
       setSelectedTracks([]);
       await loadTracks();
     } catch (error) {
       console.error('Error deleting tracks:', error);
+      toast.error('Failed to delete some tracks');
     }
   };
 
@@ -196,12 +507,18 @@ export function MediaLibraryManagement() {
 
   const handleSaveEdit = async (updatedTrack: Track) => {
     try {
-      await api.updateTrack(updatedTrack.id, updatedTrack);
+      const result = await api.updateTrack(updatedTrack.id, updatedTrack);
+      console.log('[MediaLibrary] Track updated:', result);
+      // Optimistic update — immediately reflect changes in the UI
+      setTracks(prev => prev.map(t => t.id === updatedTrack.id ? { ...t, ...updatedTrack, updatedAt: new Date().toISOString() } : t));
       setShowEditModal(false);
       setEditingTrack(null);
-      await loadTracks();
-    } catch (error) {
+      toast.success(`"${updatedTrack.title}" updated`);
+      // Also reload from server to ensure data consistency
+      loadTracks(false);
+    } catch (error: any) {
       console.error('Error updating track:', error);
+      toast.error(`Failed to update track: ${error.message || 'Unknown error'}`);
     }
   };
 
@@ -227,6 +544,104 @@ export function MediaLibraryManagement() {
 
   const genres = ['all', ...GENRE_OPTIONS];
   const allSelected = selectedTracks.length === filteredTracks.length && filteredTracks.length > 0;
+
+  const trackHasAudio = (track: Track) => !!(track.audioUrl || track.streamUrl);
+
+  const handlePlayTrack = (e: React.MouseEvent, track: Track) => {
+    e.stopPropagation();
+    if (!trackHasAudio(track)) return;
+    if (playingTrackId === track.id) {
+      // Pause
+      audioRef.current?.pause();
+      setPlayingTrackId(null);
+    } else {
+      // Play
+      const url = track.audioUrl || track.streamUrl;
+      if (!url) {
+        console.warn('[MediaLibrary] Track has no audioUrl:', track.id, track);
+        toast.error(`Cannot play "${track.title}" — no audio URL available. Try re-uploading the file.`);
+        return;
+      }
+      if (audioRef.current) {
+        audioRef.current.src = url;
+        audioRef.current.play().catch(err => console.error('Play error:', err));
+      }
+      setPlayingTrackId(track.id);
+    }
+  };
+
+  const handleDeleteSingleTrack = async (e: React.MouseEvent, trackId: string) => {
+    e.stopPropagation();
+    const track = tracks.find(t => t.id === trackId);
+    if (!confirm(
+      `Permanently delete "${track?.title || 'this track'}"?\n\nThe audio file will be removed from storage and the track will be removed from all playlists. This cannot be undone.`
+    )) return;
+    try {
+      await api.deleteTrack(trackId);
+      if (playingTrackId === trackId) {
+        audioRef.current?.pause();
+        setPlayingTrackId(null);
+      }
+      toast.success(`"${track?.title || 'Track'}" permanently deleted`);
+      await loadTracks(false);
+    } catch (error) {
+      console.error('Error deleting track:', error);
+      toast.error('Failed to delete track');
+    }
+  };
+
+  const addTrackToPlaylistConfirmed = async (trackId: string, playlistId: string) => {
+    try {
+      await api.addTrackToPlaylist(playlistId, trackId, 'end');
+      const pl = playlists.find(p => p.id === playlistId);
+      const track = tracks.find(t => t.id === trackId);
+      toast.success(`"${track?.title || 'Track'}" added to "${pl?.name || 'playlist'}"`, {
+        description: 'Open the playlist to manage the queue',
+        duration: 3000,
+      });
+      // Refresh playlists so trackIds stay up-to-date
+      loadPlaylists();
+    } catch (error) {
+      console.error('Error adding to playlist:', error);
+      toast.error('Failed to add track to playlist');
+    }
+  };
+
+  const handleAddToPlaylist = async (e: React.MouseEvent, trackId: string, playlistId: string) => {
+    e.stopPropagation();
+    setPlaylistDropdownTrackId(null);
+
+    const pl = playlists.find(p => p.id === playlistId);
+    const track = tracks.find(t => t.id === trackId);
+    const alreadyInPlaylist = (pl?.trackIds || []).includes(trackId);
+
+    if (alreadyInPlaylist) {
+      toast.warning(`"${track?.title || 'Track'}" is already in "${pl?.name || 'playlist'}"`, {
+        description: 'Add it again?',
+        duration: 8000,
+        action: {
+          label: 'Add anyway',
+          onClick: () => addTrackToPlaylistConfirmed(trackId, playlistId),
+        },
+      });
+      return;
+    }
+
+    await addTrackToPlaylistConfirmed(trackId, playlistId);
+  };
+
+  const handleTogglePlaylistDropdown = (e: React.MouseEvent, trackId: string) => {
+    e.stopPropagation();
+    setPlaylistDropdownTrackId(prev => prev === trackId ? null : trackId);
+  };
+
+  // Close playlist dropdown on outside click
+  useEffect(() => {
+    if (!playlistDropdownTrackId) return;
+    const handler = () => setPlaylistDropdownTrackId(null);
+    window.addEventListener('click', handler);
+    return () => window.removeEventListener('click', handler);
+  }, [playlistDropdownTrackId]);
 
   // Drag and Drop handlers
   const handleDragEnter = (e: React.DragEvent) => {
@@ -326,12 +741,12 @@ export function MediaLibraryManagement() {
                 id="file-upload"
                 type="file"
                 multiple
-                accept="audio/*"
+                accept=".mp3,audio/mpeg"
                 onChange={(e) => e.target.files && handleFileSelect(e.target.files)}
                 className="hidden"
               />
               <p className="text-[10px] sm:text-xs text-white/40 mt-2 sm:mt-4">
-                Supported: MP3, WAV, FLAC, AAC, OGG
+                Supported: MP3 (max 50 files per batch)
               </p>
             </div>
           </div>
@@ -676,169 +1091,318 @@ export function MediaLibraryManagement() {
               </Button>
             )}
           </motion.div>
-        ) : (
+        ) : viewMode === 'grid' ? (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className={
-              viewMode === 'grid'
-                ? 'grid grid-cols-1 xs:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 sm:gap-4'
-                : 'space-y-2'
-            }
+            className="grid grid-cols-1 xs:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 sm:gap-4"
           >
             {filteredTracks.map((track, index) => (
               <motion.div
                 key={track.id}
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: index * 0.05 }}
-                className={
-                  viewMode === 'grid'
-                    ? 'bg-[#141414] rounded-lg border border-white/5 hover:border-[#00d9ff]/30 transition-all p-3 sm:p-4 cursor-pointer group'
-                    : 'bg-[#141414] rounded-lg border border-white/5 hover:border-[#00d9ff]/30 transition-all p-3 sm:p-4 cursor-pointer'
-                }
+                transition={{ delay: Math.min(index * 0.03, 0.5) }}
+                className="bg-[#141414] rounded-lg border border-white/5 hover:border-[#00d9ff]/30 transition-all p-3 sm:p-4 cursor-pointer group"
                 onClick={() => toggleTrackSelection(track.id)}
               >
-                {viewMode === 'grid' ? (
-                  <div className="space-y-2 sm:space-y-3">
-                    {/* Artwork */}
-                    <div className="relative aspect-square bg-gradient-to-br from-[#00d9ff]/20 to-[#00ffaa]/20 rounded-lg overflow-hidden">
-                      {track.artwork ? (
-                        <img
-                          src={track.artwork}
-                          alt={track.title}
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center">
-                          <Music className="size-8 sm:size-10 text-[#00d9ff]/40" />
-                        </div>
-                      )}
-                      {/* Selection Checkbox */}
-                      <div className="absolute top-2 right-2">
-                        <div className={`w-5 h-5 sm:w-6 sm:h-6 rounded border-2 flex items-center justify-center transition-all ${
-                          selectedTracks.includes(track.id)
-                            ? 'bg-[#00d9ff] border-[#00d9ff]'
-                            : 'bg-black/40 border-white/40 group-hover:border-white'
-                        }`}>
-                          {selectedTracks.includes(track.id) && (
-                            <CheckCircle2 className="size-3 sm:size-4 text-black" />
-                          )}
+                <div className="space-y-2 sm:space-y-3">
+                  {/* Artwork */}
+                  <div className="relative aspect-square bg-gradient-to-br from-[#00d9ff]/20 to-[#00ffaa]/20 rounded-lg overflow-hidden">
+                    {(track.artwork || track.coverUrl) ? (
+                      <img src={track.artwork || track.coverUrl} alt={track.title} className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <Music className="size-8 sm:size-10 text-[#00d9ff]/40" />
+                      </div>
+                    )}
+                    {trackHasAudio(track) ? (
+                      <button
+                        onClick={(e) => handlePlayTrack(e, track)}
+                        className={`absolute inset-0 flex items-center justify-center bg-black/40 transition-opacity ${playingTrackId === track.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+                      >
+                        {playingTrackId === track.id ? (
+                          <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-[#00d9ff] flex items-center justify-center shadow-lg shadow-cyan-500/30"><Pause className="size-5 sm:size-6 text-black" /></div>
+                        ) : (
+                          <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-white/90 flex items-center justify-center"><Play className="size-5 sm:size-6 text-black ml-0.5" /></div>
+                        )}
+                      </button>
+                    ) : (
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-white/10 flex items-center justify-center" title="No audio file">
+                          <FileAudio className="size-5 sm:size-6 text-white/30" />
                         </div>
                       </div>
-                    </div>
-
-                    {/* Info */}
-                    <div className="space-y-0.5 sm:space-y-1">
-                      <h4 className="font-medium text-white text-xs sm:text-sm truncate">
-                        {track.title}
-                      </h4>
-                      <p className="text-[10px] sm:text-xs text-white/60 truncate">
-                        {track.artist}
-                      </p>
-                      <div className="flex items-center justify-between text-[10px] sm:text-xs text-white/40">
-                        <span className="truncate">{track.genre}</span>
-                        <span className="flex-shrink-0">{formatDuration(track.duration)}</span>
+                    )}
+                    {playingTrackId === track.id && (
+                      <div className="absolute bottom-1.5 left-1.5 flex items-center gap-1 px-1.5 py-0.5 bg-[#00d9ff] rounded text-[9px] font-bold text-black">
+                        <Volume2 className="size-3 animate-pulse" /> PLAYING
                       </div>
-                    </div>
-
-                    {/* Actions */}
-                    <div className="flex items-center gap-1 sm:gap-2 pt-1 sm:pt-2 border-t border-white/5">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleEditTrack(track);
-                        }}
-                        className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 bg-white/5 hover:bg-white/10 rounded text-[10px] sm:text-xs transition-all"
-                      >
-                        <Edit2 className="size-3" />
-                        <span className="hidden sm:inline">Edit</span>
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          // Handle delete
-                        }}
-                        className="flex items-center justify-center gap-1 px-2 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded text-[10px] sm:text-xs transition-all"
-                      >
-                        <Trash2 className="size-3" />
-                      </button>
+                    )}
+                    <div className="absolute top-2 right-2">
+                      <div className={`w-5 h-5 sm:w-6 sm:h-6 rounded border-2 flex items-center justify-center transition-all ${selectedTracks.includes(track.id) ? 'bg-[#00d9ff] border-[#00d9ff]' : 'bg-black/40 border-white/40 group-hover:border-white'}`}>
+                        {selectedTracks.includes(track.id) && <CheckCircle2 className="size-3 sm:size-4 text-black" />}
+                      </div>
                     </div>
                   </div>
-                ) : (
-                  <div className="flex items-center gap-2 sm:gap-3 lg:gap-4">
-                    {/* Checkbox */}
-                    <div className={`w-5 h-5 sm:w-6 sm:h-6 rounded border-2 flex items-center justify-center flex-shrink-0 transition-all ${
-                      selectedTracks.includes(track.id)
-                        ? 'bg-[#00d9ff] border-[#00d9ff]'
-                        : 'bg-black/40 border-white/40 hover:border-white'
-                    }`}>
-                      {selectedTracks.includes(track.id) && (
-                        <CheckCircle2 className="size-3 sm:size-4 text-black" />
-                      )}
-                    </div>
-
-                    {/* Artwork */}
-                    <div className="w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-br from-[#00d9ff]/20 to-[#00ffaa]/20 rounded flex items-center justify-center flex-shrink-0 overflow-hidden">
-                      {track.artwork ? (
-                        <img
-                          src={track.artwork}
-                          alt={track.title}
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <Music className="size-5 sm:size-6 text-[#00d9ff]/40" />
-                      )}
-                    </div>
-
-                    {/* Info */}
-                    <div className="flex-1 min-w-0 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-1 sm:gap-2 lg:gap-4">
-                      <div className="min-w-0">
-                        <h4 className="font-medium text-white text-xs sm:text-sm truncate">
-                          {track.title}
-                        </h4>
-                        <p className="text-[10px] sm:text-xs text-white/60 truncate">
-                          {track.artist}
-                        </p>
-                      </div>
-                      <div className="hidden sm:block min-w-0">
-                        <p className="text-xs text-white/40 truncate">{track.album || '-'}</p>
-                      </div>
-                      <div className="hidden lg:block min-w-0">
-                        <p className="text-xs text-white/40 truncate">{track.genre}</p>
-                      </div>
-                      <div className="hidden lg:block text-xs text-white/40">
-                        {formatDuration(track.duration)}
-                      </div>
-                    </div>
-
-                    {/* Actions */}
-                    <div className="flex items-center gap-1 flex-shrink-0">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleEditTrack(track);
-                        }}
-                        className="p-1.5 sm:p-2 bg-white/5 hover:bg-white/10 rounded transition-all"
-                      >
-                        <Edit2 className="size-3 sm:size-4" />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          // Handle delete
-                        }}
-                        className="p-1.5 sm:p-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded transition-all"
-                      >
-                        <Trash2 className="size-3 sm:size-4" />
-                      </button>
+                  <div className="space-y-0.5 sm:space-y-1">
+                    <h4 className="font-medium text-white text-xs sm:text-sm truncate">{track.title}</h4>
+                    <p className="text-[10px] sm:text-xs text-white/60 truncate">{track.artist}</p>
+                    <div className="flex items-center justify-between text-[10px] sm:text-xs text-white/40">
+                      <span className="truncate">{track.genre}</span>
+                      <span className="flex-shrink-0">{formatDuration(track.duration)}</span>
                     </div>
                   </div>
-                )}
+                  <div className="flex items-center gap-1 sm:gap-2 pt-1 sm:pt-2 border-t border-white/5">
+                    <button onClick={(e) => { e.stopPropagation(); handleEditTrack(track); }} className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 bg-white/5 hover:bg-white/10 rounded text-[10px] sm:text-xs transition-all"><Edit2 className="size-3" /><span className="hidden sm:inline">Edit</span></button>
+                    <div className="relative">
+                      <button onClick={(e) => handleTogglePlaylistDropdown(e, track.id)} className="flex items-center justify-center gap-1 px-2 py-1.5 bg-[#00d9ff]/10 hover:bg-[#00d9ff]/20 text-[#00d9ff] rounded text-[10px] sm:text-xs transition-all" title="Add to playlist"><ListPlus className="size-3" /></button>
+                      {playlistDropdownTrackId === track.id && (
+                        <div className="absolute bottom-full left-0 mb-1 w-48 bg-[#1a1a2e] border border-white/10 rounded-lg shadow-xl z-50 py-1 max-h-48 overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                          <p className="px-3 py-1.5 text-[10px] text-white/40 uppercase tracking-wider font-semibold">Add to playlist</p>
+                          {playlists.length === 0 ? <p className="px-3 py-2 text-xs text-white/50">No playlists</p> : playlists.map((pl) => (<button key={pl.id} onClick={(e) => handleAddToPlaylist(e, track.id, pl.id)} className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#00d9ff]/10 transition-colors truncate">{pl.name}</button>))}
+                        </div>
+                      )}
+                    </div>
+                    <button onClick={(e) => { e.stopPropagation(); handleDeleteSingleTrack(e, track.id); }} className="flex items-center justify-center gap-1 px-2 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded text-[10px] sm:text-xs transition-all"><Trash2 className="size-3" /></button>
+                  </div>
+                </div>
               </motion.div>
             ))}
           </motion.div>
+        ) : (
+          /* ═══ List / Table View ═══ */
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-[#141414] rounded-xl border border-white/5 overflow-hidden">
+            {/* Table Header */}
+            <div className="hidden lg:flex items-center gap-4 px-4 py-2.5 border-b border-white/10 text-[10px] uppercase tracking-wider text-white/30 font-semibold select-none">
+              <div className="w-6 flex-shrink-0">
+                <div
+                  onClick={() => {
+                    if (allSelected) setSelectedTracks([]);
+                    else setSelectedTracks(filteredTracks.map(t => t.id));
+                  }}
+                  className={`w-5 h-5 rounded border-2 flex items-center justify-center cursor-pointer transition-all ${allSelected ? 'bg-[#00d9ff] border-[#00d9ff]' : 'border-white/20 hover:border-white/40'}`}
+                >
+                  {allSelected && <CheckCircle2 className="size-3 text-black" />}
+                </div>
+              </div>
+              <div className="w-10 flex-shrink-0"></div>
+              <div className="flex-[3] min-w-0">Title / Artist</div>
+              <div className="flex-[2] min-w-0">Album</div>
+              <div className="flex-[1.5] min-w-0">Genre</div>
+              <div className="w-14 flex-shrink-0 text-right">Duration</div>
+              <div className="w-28 flex-shrink-0"></div>
+            </div>
+
+            {/* Rows */}
+            <div className="divide-y divide-white/[0.04]">
+              {filteredTracks.map((track, index) => (
+                <div
+                  key={track.id}
+                  onClick={() => toggleTrackSelection(track.id)}
+                  className={`flex items-center gap-2 sm:gap-3 lg:gap-4 px-3 sm:px-4 py-2.5 sm:py-3 cursor-pointer transition-colors ${
+                    selectedTracks.includes(track.id) ? 'bg-[#00d9ff]/5' : 'hover:bg-white/[0.03]'
+                  } ${playingTrackId === track.id ? 'bg-[#00d9ff]/[0.08]' : ''}`}
+                >
+                  {/* Checkbox */}
+                  <div className={`w-5 h-5 sm:w-5 sm:h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-all ${
+                    selectedTracks.includes(track.id)
+                      ? 'bg-[#00d9ff] border-[#00d9ff]'
+                      : 'border-white/20 hover:border-white/40'
+                  }`}>
+                    {selectedTracks.includes(track.id) && <CheckCircle2 className="size-3 text-black" />}
+                  </div>
+
+                  {/* Artwork with Play/Pause overlay */}
+                  {trackHasAudio(track) ? (
+                    <button
+                      onClick={(e) => handlePlayTrack(e, track)}
+                      className="w-10 h-10 relative rounded flex-shrink-0 overflow-hidden group/art"
+                    >
+                      <div className="w-full h-full bg-gradient-to-br from-[#00d9ff]/15 to-[#00ffaa]/10 flex items-center justify-center">
+                        {(track.artwork || track.coverUrl) ? (
+                          <img src={track.artwork || track.coverUrl} alt="" className="w-full h-full object-cover" />
+                        ) : (
+                          <Music className="size-4 text-[#00d9ff]/30" />
+                        )}
+                      </div>
+                      <div className={`absolute inset-0 flex items-center justify-center bg-black/50 rounded transition-opacity ${
+                        playingTrackId === track.id ? 'opacity-100' : 'opacity-0 group-hover/art:opacity-100'
+                      }`}>
+                        {playingTrackId === track.id ? (
+                          <Pause className="size-4 text-white drop-shadow-lg" />
+                        ) : (
+                          <Play className="size-4 text-white ml-0.5 drop-shadow-lg" />
+                        )}
+                      </div>
+                      {playingTrackId === track.id && (
+                        <div className="absolute inset-0 rounded ring-2 ring-[#00d9ff] animate-pulse pointer-events-none" />
+                      )}
+                    </button>
+                  ) : (
+                    <div className="w-10 h-10 relative rounded flex-shrink-0 overflow-hidden" title="No audio file">
+                      <div className="w-full h-full bg-gradient-to-br from-white/5 to-white/[0.02] flex items-center justify-center">
+                        {(track.artwork || track.coverUrl) ? (
+                          <img src={track.artwork || track.coverUrl} alt="" className="w-full h-full object-cover opacity-40" />
+                        ) : (
+                          <FileAudio className="size-4 text-white/15" />
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Title + Artist */}
+                  <div className="flex-[3] min-w-0">
+                    <h4 className="text-sm text-white font-medium truncate leading-tight">
+                      {track.title}
+                      {playingTrackId === track.id && (
+                        <Volume2 className="inline-block size-3 text-[#00d9ff] ml-1.5 animate-pulse" />
+                      )}
+                      {!trackHasAudio(track) && (
+                        <span className="inline-block ml-1.5 text-[9px] text-amber-400/70 bg-amber-400/10 px-1 py-0.5 rounded align-middle">NO FILE</span>
+                      )}
+                    </h4>
+                    <p className="text-xs text-white/45 truncate">{track.artist}</p>
+                  </div>
+
+                  {/* Album — desktop */}
+                  <div className="hidden sm:block flex-[2] min-w-0">
+                    <p className="text-xs text-white/35 truncate">{track.album || '—'}</p>
+                  </div>
+
+                  {/* Genre + Tags — desktop */}
+                  <div className="hidden lg:flex flex-[1.5] min-w-0 items-center gap-1.5">
+                    <span className="text-xs text-white/35 truncate">{track.genre}</span>
+                    {track.tags && track.tags.length > 0 && (
+                      <span className="text-[9px] text-[#00d9ff]/40 bg-[#00d9ff]/[0.06] px-1 py-0.5 rounded flex-shrink-0">
+                        +{track.tags.length}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Duration — desktop */}
+                  <div className="hidden lg:block w-14 flex-shrink-0 text-right">
+                    <span className="text-xs text-white/35 font-mono">{formatDuration(track.duration)}</span>
+                  </div>
+
+                  {/* Duration — mobile */}
+                  <div className="lg:hidden flex-shrink-0">
+                    <span className="text-[10px] text-white/30 font-mono">{formatDuration(track.duration)}</span>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-0.5 sm:gap-1 flex-shrink-0">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleEditTrack(track); }}
+                      className="p-1.5 hover:bg-white/10 rounded transition-all text-white/30 hover:text-white"
+                      title="Edit"
+                    >
+                      <Edit2 className="size-3.5" />
+                    </button>
+                    <div className="relative">
+                      <button
+                        onClick={(e) => handleTogglePlaylistDropdown(e, track.id)}
+                        className="p-1.5 hover:bg-[#00d9ff]/10 rounded transition-all text-[#00d9ff]/40 hover:text-[#00d9ff]"
+                        title="Add to playlist"
+                      >
+                        <ListPlus className="size-3.5" />
+                      </button>
+                      {playlistDropdownTrackId === track.id && (
+                        <div
+                          className="absolute bottom-full right-0 mb-1 w-48 bg-[#1a1a2e] border border-white/10 rounded-lg shadow-xl z-50 py-1 max-h-48 overflow-y-auto"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <p className="px-3 py-1.5 text-[10px] text-white/40 uppercase tracking-wider font-semibold">Add to playlist</p>
+                          {playlists.length === 0 ? (
+                            <p className="px-3 py-2 text-xs text-white/50">No playlists</p>
+                          ) : (
+                            playlists.map((pl) => (
+                              <button
+                                key={pl.id}
+                                onClick={(e) => handleAddToPlaylist(e, track.id, pl.id)}
+                                className="w-full text-left px-3 py-2 text-xs text-white hover:bg-[#00d9ff]/10 transition-colors truncate"
+                              >
+                                {pl.name}
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleDeleteSingleTrack(e, track.id); }}
+                      className="p-1.5 hover:bg-red-500/10 rounded transition-all text-white/20 hover:text-red-400"
+                      title="Delete permanently"
+                    >
+                      <Trash2 className="size-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Footer count */}
+            <div className="px-4 py-2.5 border-t border-white/5 text-xs text-white/25">
+              {filteredTracks.length} track{filteredTracks.length !== 1 ? 's' : ''}
+              {searchQuery || selectedGenre !== 'all' ? ` (filtered from ${tracks.length})` : ''}
+            </div>
+          </motion.div>
         )}
+
+        {/* Edit Track Modal */}
+        <AnimatePresence>
+          {showEditModal && editingTrack && (
+            <EditTrackModal
+              track={editingTrack}
+              onSave={handleSaveEdit}
+              onClose={() => {
+                setShowEditModal(false);
+                setEditingTrack(null);
+              }}
+            />
+          )}
+        </AnimatePresence>
+
+        {/* Hidden Audio Element */}
+        <audio
+          ref={audioRef}
+          onEnded={() => setPlayingTrackId(null)}
+          onError={() => {
+            console.error('[MediaLibrary] Audio playback error');
+            setPlayingTrackId(null);
+          }}
+        />
+
+        {/* Floating Mini Player */}
+        <AnimatePresence>
+          {playingTrackId && (
+            <motion.div
+              initial={{ y: 80, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 80, opacity: 0 }}
+              className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 bg-[#1a1a2e]/95 backdrop-blur-lg border border-[#00d9ff]/30 rounded-xl shadow-2xl shadow-black/40 px-4 py-3 flex items-center gap-3 max-w-sm w-[calc(100%-2rem)]"
+            >
+              <button
+                onClick={(e) => {
+                  const t = tracks.find(t => t.id === playingTrackId);
+                  if (t) handlePlayTrack(e, t);
+                }}
+                className="w-9 h-9 rounded-full bg-[#00d9ff] flex items-center justify-center flex-shrink-0"
+              >
+                <Pause className="size-4 text-black" />
+              </button>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm text-white font-medium truncate">
+                  {tracks.find(t => t.id === playingTrackId)?.title}
+                </p>
+                <p className="text-xs text-white/50 truncate">
+                  {tracks.find(t => t.id === playingTrackId)?.artist}
+                </p>
+              </div>
+              <Volume2 className="size-4 text-[#00d9ff] animate-pulse flex-shrink-0" />
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </AdminLayout>
   );

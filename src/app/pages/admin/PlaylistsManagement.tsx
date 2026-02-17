@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence, Reorder } from 'motion/react';
 import { AdminLayout } from '../../components/admin/AdminLayout';
 import { Button } from '../../components/ui/button';
@@ -22,6 +22,7 @@ import {
   Radio,
   Shuffle,
   Play,
+  Pause,
   Clock,
   ArrowUpDown,
   Zap,
@@ -51,6 +52,7 @@ interface Track {
   duration: number;
   tags?: string[];
   coverUrl?: string;
+  audioUrl?: string;
   bpm?: number;
 }
 
@@ -641,6 +643,27 @@ function PlaylistDetail({
     endTime: '10:00',
   });
   const [quickScheduleSaving, setQuickScheduleSaving] = useState(false);
+  const [playingTrackId, setPlayingTrackId] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const handlePlayTrack = (e: React.MouseEvent, track: Track) => {
+    e.stopPropagation();
+    if (playingTrackId === track.id) {
+      audioRef.current?.pause();
+      setPlayingTrackId(null);
+    } else {
+      const url = track.audioUrl;
+      if (!url) {
+        toast.error('No audio URL for this track');
+        return;
+      }
+      if (audioRef.current) {
+        audioRef.current.src = url;
+        audioRef.current.play().catch(err => console.error('Play error:', err));
+      }
+      setPlayingTrackId(track.id);
+    }
+  };
 
   const DAYS_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   const QUICK_TIME_SLOTS = Array.from({ length: 24 }, (_, i) => `${i.toString().padStart(2, '0')}:00`);
@@ -974,6 +997,24 @@ function PlaylistDetail({
                           {index + 1}
                         </div>
 
+                        {/* Play button */}
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={(e) => handlePlayTrack(e, track)}
+                          className={`w-8 h-8 flex-shrink-0 rounded-full transition-all ${
+                            playingTrackId === track.id
+                              ? 'bg-[#00d9ff]/20 text-[#00d9ff]'
+                              : 'text-white/30 hover:text-white hover:bg-white/10 opacity-0 group-hover:opacity-100'
+                          }`}
+                        >
+                          {playingTrackId === track.id ? (
+                            <Pause className="w-4 h-4" />
+                          ) : (
+                            <Play className="w-4 h-4 ml-0.5" />
+                          )}
+                        </Button>
+
                         {track.coverUrl ? (
                           <img src={track.coverUrl} alt="" className="w-10 h-10 rounded object-cover flex-shrink-0" />
                         ) : (
@@ -1114,6 +1155,23 @@ function PlaylistDetail({
                       <Button
                         size="icon"
                         variant="ghost"
+                        onClick={(e) => handlePlayTrack(e, track)}
+                        className={`w-7 h-7 flex-shrink-0 rounded-full transition-all ${
+                          playingTrackId === track.id
+                            ? 'bg-[#00d9ff]/20 text-[#00d9ff] opacity-100'
+                            : 'text-white/30 hover:text-white hover:bg-white/10 opacity-0 group-hover:opacity-100'
+                        }`}
+                      >
+                        {playingTrackId === track.id ? (
+                          <Pause className="w-3.5 h-3.5" />
+                        ) : (
+                          <Play className="w-3.5 h-3.5 ml-0.5" />
+                        )}
+                      </Button>
+
+                      <Button
+                        size="icon"
+                        variant="ghost"
                         onClick={() => handleAddTrack(track.id)}
                         className="w-7 h-7 text-[#00ffaa]/60 hover:text-[#00ffaa] hover:bg-[#00ffaa]/10 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
                       >
@@ -1196,6 +1254,45 @@ function PlaylistDetail({
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Hidden Audio Element */}
+      <audio
+        ref={audioRef}
+        onEnded={() => setPlayingTrackId(null)}
+        onError={() => {
+          console.error('[Playlist] Audio playback error');
+          setPlayingTrackId(null);
+        }}
+      />
+
+      {/* Floating Mini Player */}
+      <AnimatePresence>
+        {playingTrackId && (() => {
+          const nowPlaying = [...orderedTracks, ...allTracks].find(t => t.id === playingTrackId);
+          if (!nowPlaying) return null;
+          return (
+            <motion.div
+              key="mini-player"
+              initial={{ y: 80, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 80, opacity: 0 }}
+              className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 bg-[#1a1a2e]/95 backdrop-blur-lg border border-[#00d9ff]/30 rounded-xl shadow-2xl shadow-black/40 px-4 py-3 flex items-center gap-3 max-w-sm w-[calc(100%-2rem)]"
+            >
+              <button
+                onClick={(e) => handlePlayTrack(e, nowPlaying)}
+                className="w-9 h-9 rounded-full bg-[#00d9ff] flex items-center justify-center flex-shrink-0"
+              >
+                <Pause className="w-4 h-4 text-black" />
+              </button>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm text-white font-medium truncate">{nowPlaying.title}</p>
+                <p className="text-xs text-white/50 truncate">{nowPlaying.artist}</p>
+              </div>
+              <Volume2 className="w-4 h-4 text-[#00d9ff] animate-pulse flex-shrink-0" />
+            </motion.div>
+          );
+        })()}
+      </AnimatePresence>
     </div>
   );
 }

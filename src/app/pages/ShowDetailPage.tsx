@@ -87,10 +87,10 @@ export function ShowDetailPage() {
               {/* Cover Image */}
               <div className="md:col-span-1">
                 <div className="relative group">
-                  {show.cover ? (
+                  {(show.coverImage || show.cover) ? (
                     <img
-                      src={show.cover}
-                      alt={show.name}
+                      src={show.coverImage || show.cover}
+                      alt={show.title || show.name}
                       className="w-full aspect-square object-cover rounded-lg shadow-2xl"
                     />
                   ) : (
@@ -152,7 +152,7 @@ export function ShowDetailPage() {
                 </div>
 
                 <h1 className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] bg-clip-text text-transparent mb-4" style={{ fontFamily: 'var(--font-family-display)' }}>
-                  {show.name}
+                  {show.title || show.name}
                 </h1>
 
                 {show.host && (
@@ -162,10 +162,10 @@ export function ShowDetailPage() {
                   </div>
                 )}
 
-                {show.schedule && (
+                {(show.schedule) && (
                   <div className="flex items-center gap-2 text-white/80 mb-6">
                     <Calendar className="w-5 h-5 text-[#00d9ff]" />
-                    <span>{show.schedule}</span>
+                    <span>{typeof show.schedule === 'string' ? show.schedule : Array.isArray(show.schedule) ? show.schedule.map((s: any) => `${s.day} ${s.startTime}-${s.endTime}`).join(', ') : ''}</span>
                   </div>
                 )}
 
@@ -185,15 +185,15 @@ export function ShowDetailPage() {
                   </div>
                   <div className="text-center p-4 bg-gradient-to-br from-[#00d9ff]/10 to-[#00ffaa]/10 rounded-lg border border-[#00d9ff]/20">
                     <div className="text-3xl font-bold text-white mb-1">
-                      {show.averageListeners || 0}
+                      {show.totalListeners || show.averageListeners || 0}
                     </div>
-                    <div className="text-sm text-white/60">Avg Listeners</div>
+                    <div className="text-sm text-white/60">Listeners</div>
                   </div>
                   <div className="text-center p-4 bg-gradient-to-br from-[#00d9ff]/10 to-[#00ffaa]/10 rounded-lg border border-[#00d9ff]/20">
                     <div className="text-3xl font-bold text-white mb-1">
-                      {show.totalPlays || 0}
+                      {show.averageRating?.toFixed(1) || show.totalPlays || 0}
                     </div>
-                    <div className="text-sm text-white/60">Total Plays</div>
+                    <div className="text-sm text-white/60">{show.averageRating ? 'Rating' : 'Total Plays'}</div>
                   </div>
                 </div>
               </div>

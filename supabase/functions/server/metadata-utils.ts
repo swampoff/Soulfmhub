@@ -16,6 +16,17 @@ interface ExtractedMetadata {
   };
 }
 
+// Helper: race a promise against a timeout
+function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((resolve) => setTimeout(() => {
+      console.warn(`⏱️  ${label} timed out after ${ms}ms`);
+      resolve(fallback);
+    }, ms))
+  ]);
+}
+
 /**
  * Extract ID3 tags and metadata from audio buffer
  */
@@ -24,9 +35,12 @@ export async function extractMetadata(
   mimeType: string,
   filename: string
 ): Promise<ExtractedMetadata> {
-  // Default values
-  let title = filename.replace(/\.(mp3|wav|m4a|flac)$/i, '');
-  let artist = 'Unknown Artist';
+  // Default values from filename
+  const originalName = filename.replace(/\.(mp3|wav|m4a|flac)$/i, '');
+  const parts = originalName.split(' - ');
+
+  let title = parts.length >= 2 ? parts.slice(1).join(' - ').trim() : originalName;
+  let artist = parts.length >= 2 ? parts[0].trim() : 'Unknown Artist';
   let album = '';
   let genre = 'Funk';
   let year = new Date().getFullYear();
@@ -37,7 +51,14 @@ export async function extractMetadata(
   try {
     console.log('📀 Extracting ID3 tags from audio file...');
     const uint8Array = new Uint8Array(fileBuffer);
-    const metadata = await parseBuffer(uint8Array, mimeType, { duration: true });
+
+    // parseBuffer can hang on some files — enforce 8s timeout
+    const metadata = await withTimeout(
+      parseBuffer(uint8Array, mimeType, { duration: true }),
+      8000,
+      null,
+      'parseBuffer'
+    );
 
     if (metadata) {
       // Extract text metadata
@@ -65,18 +86,11 @@ export async function extractMetadata(
       }
 
       console.log('✅ ID3 tags extracted:', { title, artist, album, duration, genre, year, hasCover: !!coverData });
+    } else {
+      console.warn('⚠️  parseBuffer returned null (likely timed out), using filename fallback');
     }
   } catch (error: any) {
     console.warn('⚠️  Could not extract ID3 tags, using fallback:', error.message);
-
-    // Fallback to filename parsing (Artist - Title format)
-    const originalName = filename.replace(/\.(mp3|wav|m4a|flac)$/i, '');
-    const parts = originalName.split(' - ');
-
-    if (parts.length >= 2) {
-      artist = parts[0].trim();
-      title = parts.slice(1).join(' - ').trim();
-    }
   }
 
   return {
@@ -114,7 +128,8 @@ export async function searchCoverArt(
       headers: {
         'User-Agent': 'SoulFMHub/1.0.0 (niqbello@gmail.com)',
         'Accept': 'application/json'
-      }
+      },
+      signal: AbortSignal.timeout(5000) // 5s timeout for MusicBrainz
     });
 
     if (!searchResponse.ok) {
@@ -146,7 +161,8 @@ export async function searchCoverArt(
       method: 'HEAD',
       headers: {
         'User-Agent': 'SoulFMHub/1.0.0 (niqbello@gmail.com)'
-      }
+      },
+      signal: AbortSignal.timeout(5000) // 5s timeout for Cover Art Archive
     });
     
     if (coverResponse.ok) {
@@ -284,7 +300,9 @@ export async function downloadAndUploadCover(
 ): Promise<string | null> {
   try {
     console.log('📥 Downloading cover from URL...');
-    const response = await fetch(coverUrl);
+    const response = await fetch(coverUrl, {
+      signal: AbortSignal.timeout(5000) // 5s timeout for cover download
+    });
     
     if (!response.ok) {
       console.error('❌ Failed to download cover:', response.status);
@@ -338,33 +356,48 @@ export async function extractCompleteMetadata(
   // Handle cover art
   let coverUrl = '';
 
-  // 1. Try to upload embedded cover
+  // 1. Try to upload embedded cover (5s timeout)
   if (metadata.coverData) {
-    const uploadedUrl = await uploadCoverArt(
-      supabase,
-      metadata.coverData.buffer,
-      metadata.coverData.format,
-      metadata.coverData.extension
+    const uploadedUrl = await withTimeout(
+      uploadCoverArt(
+        supabase,
+        metadata.coverData.buffer,
+        metadata.coverData.format,
+        metadata.coverData.extension
+      ),
+      5000,
+      null,
+      'uploadCoverArt'
     );
     if (uploadedUrl) {
       coverUrl = uploadedUrl;
     }
   }
 
-  // 2. If no embedded cover and search enabled, try MusicBrainz
+  // 2. If no embedded cover and search enabled, try MusicBrainz (with 10s total timeout)
   if (!coverUrl && searchOnline) {
-    const foundCoverUrl = await searchCoverArt(
-      metadata.artist,
-      metadata.title,
-      metadata.album
-    );
-    
-    if (foundCoverUrl) {
-      // Download and re-upload to our storage
-      const uploadedUrl = await downloadAndUploadCover(supabase, foundCoverUrl);
-      if (uploadedUrl) {
-        coverUrl = uploadedUrl;
+    try {
+      const foundCoverUrl = await withTimeout(
+        searchCoverArt(metadata.artist, metadata.title, metadata.album),
+        6000,
+        null,
+        'searchCoverArt'
+      );
+      
+      if (foundCoverUrl) {
+        // Download and re-upload to our storage (with 6s timeout)
+        const uploadedUrl = await withTimeout(
+          downloadAndUploadCover(supabase, foundCoverUrl),
+          6000,
+          null,
+          'downloadAndUploadCover'
+        );
+        if (uploadedUrl) {
+          coverUrl = uploadedUrl;
+        }
       }
+    } catch (e: any) {
+      console.warn('⚠️  Cover art search failed:', e.message);
     }
   }
 

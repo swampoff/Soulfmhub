@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router';
-import { Menu, X, User, Settings } from 'lucide-react';
+import { Menu, X, User, Settings, MessageCircle, Heart } from 'lucide-react';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { useApp } from '../../context/AppContext';
@@ -24,9 +24,10 @@ export function Navigation() {
     { path: '/podcasts', label: 'Shows & Podcasts' },
     { path: '/music', label: 'Music' },
     { path: '/news', label: 'News' },
-    { path: '/team', label: 'Team' },
+    { path: '/djs', label: 'DJs' },
+    { path: '/events', label: 'Events' },
+    { path: '/community', label: 'Community' },
     { path: '/about', label: 'About' },
-    { path: '/analytics', label: 'Analytics' },
     { path: '/support', label: 'Support Us' },
   ];
 
@@ -89,6 +90,30 @@ export function Navigation() {
             {/* Realtime Connection Status */}
             <div className="hidden md:block">
               <RealtimeConnectionStatus showLabel={false} compact={true} />
+            </div>
+
+            {/* Interactive Feature Links */}
+            <div className="hidden xl:flex items-center gap-1.5">
+              <Link to="/request-song">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="gap-1.5 text-[#00d9ff]/80 hover:text-[#00d9ff] hover:bg-[#00d9ff]/10 text-xs h-8 px-2.5"
+                >
+                  <MessageCircle className="w-3.5 h-3.5" />
+                  <span>Request</span>
+                </Button>
+              </Link>
+              <Link to="/send-shoutout">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="gap-1.5 text-[#00ffaa]/80 hover:text-[#00ffaa] hover:bg-[#00ffaa]/10 text-xs h-8 px-2.5"
+                >
+                  <Heart className="w-3.5 h-3.5" />
+                  <span>Shoutout</span>
+                </Button>
+              </Link>
             </div>
 
             {/* Admin Button - Always visible */}
@@ -198,6 +223,33 @@ export function Navigation() {
                 <Settings className="w-4 h-4" />
                 <span>Admin Panel</span>
               </Link>
+
+              {/* Interactive links in mobile menu */}
+              <div className="border-t border-[#00d9ff]/10 mt-2 pt-2">
+                <div className="px-4 pb-1">
+                  <span className="text-[10px] uppercase tracking-wider text-white/30 font-semibold">Interactive</span>
+                </div>
+                <Link
+                  to="/request-song"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className={`px-4 py-3 rounded-lg transition-colors flex items-center gap-2 ${
+                    location.pathname === '/request-song' ? 'bg-[#00d9ff]/20 text-[#00d9ff]' : 'text-gray-300 hover:bg-white/5 hover:text-white'
+                  }`}
+                >
+                  <MessageCircle className="w-4 h-4" />
+                  Request a Song
+                </Link>
+                <Link
+                  to="/send-shoutout"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className={`px-4 py-3 rounded-lg transition-colors flex items-center gap-2 ${
+                    location.pathname === '/send-shoutout' ? 'bg-[#00ffaa]/20 text-[#00ffaa]' : 'text-gray-300 hover:bg-white/5 hover:text-white'
+                  }`}
+                >
+                  <Heart className="w-4 h-4" />
+                  Send a Shoutout
+                </Link>
+              </div>
             </div>
           </div>
         )}

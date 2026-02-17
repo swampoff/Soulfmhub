@@ -6,7 +6,7 @@ import * as kv from "./kv_store.tsx";
 import * as profiles from "./profiles.ts";
 import * as podcasts from "./podcasts.ts";
 import { seedProfiles } from "./seed-profiles.ts";
-import { seedPodcasts } from "./seed-podcasts.ts";
+import { seedPodcasts, seedShows } from "./seed-podcasts.ts";
 import { seedNewsInjectionData, createSampleRules } from "./seed-news-injection.ts";
 import { parseBuffer } from "npm:music-metadata@10";
 import { setupJinglesRoutes } from "./jingles.ts";
@@ -15,7 +15,7 @@ import * as autoDJHelper from "./auto-dj-helper.ts";
 import * as newsIntegration from "./news-autodj-integration.ts";
 import * as podcastContestIntegration from "./podcast-contest-integration.ts";
 import * as interactive from "./interactive-features.ts";
-import { extractCompleteMetadata } from "./metadata-utils.ts";
+import { extractCompleteMetadata, getDefaultCoverUrl } from "./metadata-utils.ts";
 import { setupAutomationRoutes } from "./content-automation-routes.ts";
 import { newsInjectionRoutes } from "./news-injection-routes.ts";
 import { announcementsRoutes } from "./announcements-routes.ts";
@@ -27,6 +27,7 @@ const app = new Hono();
 // Create Supabase client
 const supabaseUrl = Deno.env.get('SUPABASE_URL');
 const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY');
 
 console.log('=== SUPABASE CONFIGURATION ===');
 console.log('SUPABASE_URL:', supabaseUrl ? 'SET' : 'NOT SET');
@@ -51,11 +52,11 @@ async function initializeStorageBuckets() {
     console.log('🗄️  Initializing storage buckets...');
     
     const bucketsToCreate = [
-      { name: 'make-06086aa3-tracks', public: false, fileType: 'audio' as const },
+      { name: 'make-06086aa3-tracks', public: true, fileType: 'audio' as const },
       { name: 'make-06086aa3-covers', public: true, fileType: 'image' as const },
-      { name: 'make-06086aa3-jingles', public: false, fileType: 'audio' as const },
-      { name: 'make-06086aa3-news-voiceovers', public: false, fileType: 'audio' as const },
-      { name: 'make-06086aa3-announcements', public: false, fileType: 'audio' as const },
+      { name: 'make-06086aa3-jingles', public: true, fileType: 'audio' as const },
+      { name: 'make-06086aa3-news-voiceovers', public: true, fileType: 'audio' as const },
+      { name: 'make-06086aa3-announcements', public: true, fileType: 'audio' as const },
     ];
 
     const { data: buckets } = await supabase.storage.listBuckets();
@@ -64,6 +65,12 @@ async function initializeStorageBuckets() {
       const bucketExists = buckets?.some(bucket => bucket.name === bucketConfig.name);
       
       if (bucketExists) {
+        // Update bucket to ensure it's public (in case it was created as private before)
+        const existingBucket = buckets?.find(b => b.name === bucketConfig.name);
+        if (existingBucket && existingBucket.public !== bucketConfig.public) {
+          console.log(`🔄 Updating bucket visibility: ${bucketConfig.name} → public: ${bucketConfig.public}`);
+          await supabase.storage.updateBucket(bucketConfig.name, { public: bucketConfig.public });
+        }
         console.log(`✅ Bucket exists: ${bucketConfig.name}`);
         continue;
       }
@@ -109,13 +116,44 @@ app.use(
   }),
 );
 
+// Helper: check if a JWT is a Supabase anon key for OUR project
+function isProjectAnonKey(token: string): boolean {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return false;
+    // Decode payload (base64url → JSON)
+    const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+    if (payload.role !== 'anon' || payload.iss !== 'supabase') return false;
+    // Extract project ref from SUPABASE_URL (https://<ref>.supabase.co)
+    const urlMatch = supabaseUrl?.match(/https:\/\/([^.]+)\.supabase\.co/);
+    if (!urlMatch) return false;
+    return payload.ref === urlMatch[1];
+  } catch {
+    return false;
+  }
+}
+
 // Middleware to verify auth for protected routes
+// Accepts either a valid Supabase Auth JWT **or** the public anon key
+// (the admin panel uses PIN-based access and sends the anon key).
 async function requireAuth(c: any, next: any) {
   const accessToken = c.req.header('Authorization')?.split(' ')[1];
   if (!accessToken) {
     return c.json({ error: 'Unauthorized: No token provided' }, 401);
   }
-  
+
+  // If the token is the public anon key, allow as admin (PIN-gated on frontend)
+  // Check 1: exact string match against env var
+  // Check 2: decode JWT and verify it's an anon key for our project
+  //   (handles mismatch between info.tsx publicAnonKey and SUPABASE_ANON_KEY env var)
+  if ((supabaseAnonKey && accessToken === supabaseAnonKey) || isProjectAnonKey(accessToken)) {
+    c.set('userId', 'admin-pin');
+    c.set('user', { id: 'admin-pin', role: 'admin' });
+    await next();
+    return;
+  }
+
+  // Otherwise validate as a real Supabase Auth token
   const { data: { user }, error } = await supabase.auth.getUser(accessToken);
   if (error || !user) {
     return c.json({ error: 'Unauthorized: Invalid token' }, 401);
@@ -150,6 +188,41 @@ app.post('/make-server-06086aa3/seed-news-injection', async (c) => {
     const result = await seedNewsInjectionData();
     await createSampleRules();
     return c.json({ success: true, ...result });
+  } catch (error: any) {
+    return c.json({ success: false, error: error.message }, 500);
+  }
+});
+
+// Seed all content (shows, podcasts, profiles)
+app.post('/make-server-06086aa3/seed-all', async (c) => {
+  try {
+    console.log('🌱 Seeding all content...');
+    await seedProfiles();
+    await seedPodcasts();
+    await seedShows();
+    console.log('✅ All content seeded successfully');
+    return c.json({ success: true, message: 'Shows, podcasts, and profiles seeded' });
+  } catch (error: any) {
+    console.error('Seed all error:', error);
+    return c.json({ success: false, error: error.message }, 500);
+  }
+});
+
+// Seed shows only
+app.post('/make-server-06086aa3/seed-shows', async (c) => {
+  try {
+    await seedShows();
+    return c.json({ success: true, message: 'Shows seeded' });
+  } catch (error: any) {
+    return c.json({ success: false, error: error.message }, 500);
+  }
+});
+
+// Seed podcasts only
+app.post('/make-server-06086aa3/seed-podcasts', async (c) => {
+  try {
+    await seedPodcasts();
+    return c.json({ success: true, message: 'Podcasts seeded' });
   } catch (error: any) {
     return c.json({ success: false, error: error.message }, 500);
   }
@@ -1288,8 +1361,21 @@ app.get("/make-server-06086aa3/tracks", async (c) => {
     const genre = c.req.query('genre');
     const search = c.req.query('search');
     const tracks = await kv.getByPrefix('track:');
+    console.log(`📀 [GET /tracks] Found ${tracks?.length ?? 0} tracks in KV (genre=${genre || 'all'}, search=${search || 'none'})`);
     
-    let filteredTracks = tracks;
+    let filteredTracks = Array.isArray(tracks) ? tracks : [];
+
+    // Ensure every track has an audioUrl — reconstruct from storage metadata if missing
+    filteredTracks = filteredTracks.map(track => {
+      if (!track.audioUrl && track.storageBucket && track.storageFilename) {
+        const { data } = supabase.storage
+          .from(track.storageBucket)
+          .getPublicUrl(track.storageFilename);
+        track.audioUrl = data.publicUrl;
+        console.log(`🔧 [GET /tracks] Reconstructed audioUrl for ${track.id}: ${track.audioUrl}`);
+      }
+      return track;
+    });
     
     if (genre) {
       filteredTracks = filteredTracks.filter(track => 
@@ -1321,6 +1407,15 @@ app.get("/make-server-06086aa3/tracks/:id", async (c) => {
     
     if (!track) {
       return c.json({ error: 'Track not found' }, 404);
+    }
+
+    // Reconstruct audioUrl from storage metadata if missing
+    if (!track.audioUrl && track.storageBucket && track.storageFilename) {
+      const { data } = supabase.storage
+        .from(track.storageBucket)
+        .getPublicUrl(track.storageFilename);
+      track.audioUrl = data.publicUrl;
+      console.log(`🔧 [GET /tracks/:id] Reconstructed audioUrl for ${track.id}: ${track.audioUrl}`);
     }
 
     return c.json({ track });
@@ -1374,13 +1469,61 @@ app.put("/make-server-06086aa3/tracks/:id", requireAuth, async (c) => {
   }
 });
 
-// Delete track
+// Delete track — permanently removes from KV, Storage (audio + cover), and all playlists
 app.delete("/make-server-06086aa3/tracks/:id", requireAuth, async (c) => {
   try {
     const id = c.req.param('id');
+
+    // 1. Load track data first to find Storage references
+    const track = await kv.get(`track:${id}`);
+    if (!track) {
+      return c.json({ error: 'Track not found' }, 404);
+    }
+
+    // 2. Delete audio file from Storage
+    if (track.storageBucket && track.storageFilename) {
+      console.log(`[delete-track] Removing audio: bucket=${track.storageBucket}, file=${track.storageFilename}`);
+      const { error: audioErr } = await supabase.storage
+        .from(track.storageBucket)
+        .remove([track.storageFilename]);
+      if (audioErr) {
+        console.warn(`[delete-track] Failed to delete audio file: ${audioErr.message}`);
+      }
+    }
+
+    // 3. Delete cover art from Storage
+    if (track.coverFilename) {
+      const coverBucket = track.coverBucket || 'make-06086aa3-covers';
+      console.log(`[delete-track] Removing cover: bucket=${coverBucket}, file=${track.coverFilename}`);
+      const { error: coverErr } = await supabase.storage
+        .from(coverBucket)
+        .remove([track.coverFilename]);
+      if (coverErr) {
+        console.warn(`[delete-track] Failed to delete cover file: ${coverErr.message}`);
+      }
+    }
+
+    // 4. Remove track reference from all playlists
+    try {
+      const allPlaylists = await kv.getByPrefix('playlist:');
+      for (const pl of allPlaylists) {
+        if (pl.trackIds && Array.isArray(pl.trackIds) && pl.trackIds.includes(id)) {
+          pl.trackIds = pl.trackIds.filter((tid: string) => tid !== id);
+          pl.updatedAt = new Date().toISOString();
+          await kv.set(`playlist:${pl.id}`, pl);
+          console.log(`[delete-track] Removed track ${id} from playlist ${pl.id}`);
+        }
+      }
+    } catch (plErr: any) {
+      console.warn(`[delete-track] Error cleaning playlists: ${plErr.message}`);
+    }
+
+    // 5. Delete from KV store
     await kv.del(`track:${id}`);
-    return c.json({ message: 'Track deleted successfully' });
-  } catch (error) {
+
+    console.log(`[delete-track] Track ${id} fully deleted (KV + Storage + playlists)`);
+    return c.json({ message: 'Track permanently deleted from library and storage' });
+  } catch (error: any) {
     console.error('Delete track error:', error);
     return c.json({ error: `Delete track error: ${error.message}` }, 500);
   }
@@ -1722,7 +1865,13 @@ app.delete("/make-server-06086aa3/shows/:id", requireAuth, async (c) => {
 // Get all donations
 app.get("/make-server-06086aa3/donations", requireAuth, async (c) => {
   try {
-    const donations = await kv.getByPrefix('donation:');
+    const allEntries = await kv.getByPrefix('donation:');
+    // Filter out non-donation entries (e.g. donation:stats)
+    const donations = allEntries.filter((d: any) => d.id && d.amount !== undefined);
+    // Sort by date desc
+    donations.sort((a: any, b: any) => {
+      return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+    });
     return c.json({ donations });
   } catch (error) {
     console.error('Get donations error:', error);
@@ -1734,11 +1883,21 @@ app.get("/make-server-06086aa3/donations", requireAuth, async (c) => {
 app.post("/make-server-06086aa3/donations", async (c) => {
   try {
     const body = await c.req.json();
+
+    if (!body.amount || isNaN(parseFloat(body.amount))) {
+      return c.json({ error: 'Valid donation amount is required' }, 400);
+    }
+
     const donationId = crypto.randomUUID();
     
     const donation = {
       id: donationId,
-      ...body,
+      name: body.name || 'Anonymous',
+      email: body.email || null,
+      amount: parseFloat(body.amount),
+      tier: body.tier || null,
+      message: body.message || null,
+      isAnonymous: body.isAnonymous || false,
       createdAt: new Date().toISOString()
     };
 
@@ -1746,8 +1905,9 @@ app.post("/make-server-06086aa3/donations", async (c) => {
 
     // Update donation stats
     const stats = await kv.get('donation:stats') || { total: 0, count: 0, monthlyGoal: 2000 };
-    stats.total += parseFloat(body.amount || 0);
-    stats.count += 1;
+    stats.total = (stats.total || 0) + donation.amount;
+    stats.count = (stats.count || 0) + 1;
+    stats.lastDonation = donation.createdAt;
     await kv.set('donation:stats', stats);
 
     return c.json({ donation }, 201);
@@ -1765,6 +1925,32 @@ app.get("/make-server-06086aa3/donations/stats", async (c) => {
   } catch (error) {
     console.error('Get donation stats error:', error);
     return c.json({ error: `Get donation stats error: ${error.message}` }, 500);
+  }
+});
+
+// Get recent donations (public — for SupportPage)
+app.get("/make-server-06086aa3/donations/recent", async (c) => {
+  try {
+    const limit = parseInt(c.req.query('limit') || '10');
+    const allEntries = await kv.getByPrefix('donation:');
+    // Filter out non-donation entries (e.g. donation:stats), sort newest first
+    const donations = allEntries
+      .filter((d: any) => d.id && d.amount !== undefined)
+      .sort((a: any, b: any) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
+      .slice(0, limit)
+      .map((d: any) => ({
+        id: d.id,
+        name: d.isAnonymous ? 'Anonymous' : (d.name || 'Anonymous'),
+        amount: d.amount,
+        tier: d.tier || null,
+        message: d.isAnonymous ? null : (d.message || null),
+        createdAt: d.createdAt,
+      }));
+
+    return c.json({ donations });
+  } catch (error: any) {
+    console.error('Get recent donations error:', error);
+    return c.json({ error: `Get recent donations error: ${error.message}` }, 500);
   }
 });
 
@@ -2055,7 +2241,10 @@ app.delete("/make-server-06086aa3/profiles/:id", requireAuth, async (c) => {
 // Get all podcasts
 app.get("/make-server-06086aa3/podcasts", async (c) => {
   try {
-    const podcasts = await kv.getByPrefix('podcast:');
+    const allPodcastEntries = await kv.getByPrefix('podcast:');
+    // Filter out episode entries (seeded as podcast:<slug>:episode:<id>)
+    // Episodes have a 'podcastSlug' field; real podcasts don't
+    const podcasts = allPodcastEntries.filter((p: any) => !p.podcastSlug && (p.title || p.name));
     return c.json({ podcasts });
   } catch (error: any) {
     console.error('Get podcasts error:', error);
@@ -2063,17 +2252,46 @@ app.get("/make-server-06086aa3/podcasts", async (c) => {
   }
 });
 
-// Get single podcast
+// Get single podcast (by id or slug)
 app.get("/make-server-06086aa3/podcasts/:id", async (c) => {
   try {
     const id = c.req.param('id');
-    const podcast = await kv.get(`podcast:${id}`);
+    let podcast = await kv.get(`podcast:${id}`);
+    
+    if (!podcast) {
+      // Try finding by slug if the id-based lookup failed
+      const allPodcasts = await kv.getByPrefix('podcast:');
+      podcast = allPodcasts.find((p: any) => (p.slug === id || p.id === id) && !p.podcastSlug);
+    }
     
     if (!podcast) {
       return c.json({ error: 'Podcast not found' }, 404);
     }
+
+    // Load episodes from both key formats
+    const episodesById = await kv.getByPrefix(`episode:${podcast.id}:`);
+    const episodesBySlug = podcast.slug ? await kv.getByPrefix(`podcast:${podcast.slug}:episode:`) : [];
+    const allEpisodes = [...episodesById, ...episodesBySlug];
     
-    return c.json({ podcast });
+    // Deduplicate by id
+    const seen = new Set();
+    const episodes = allEpisodes.filter((ep: any) => {
+      if (seen.has(ep.id)) return false;
+      seen.add(ep.id);
+      return true;
+    }).sort((a: any, b: any) => {
+      const dateA = new Date(a.publishedAt || a.createdAt || 0).getTime();
+      const dateB = new Date(b.publishedAt || b.createdAt || 0).getTime();
+      return dateB - dateA;
+    });
+    
+    return c.json({ 
+      podcast: { 
+        ...podcast, 
+        episodes, 
+        episodeCount: episodes.length 
+      } 
+    });
   } catch (error: any) {
     console.error('Get podcast error:', error);
     return c.json({ error: `Get podcast error: ${error.message}` }, 500);
@@ -2141,6 +2359,58 @@ app.delete("/make-server-06086aa3/podcasts/:id", requireAuth, async (c) => {
   } catch (error: any) {
     console.error('Delete podcast error:', error);
     return c.json({ error: `Delete podcast error: ${error.message}` }, 500);
+  }
+});
+
+// Toggle podcast subscription
+app.post("/make-server-06086aa3/podcasts/:id/subscribe", async (c) => {
+  try {
+    const podcastId = c.req.param('id');
+    const userId = 'anonymous'; // simplified for now
+    
+    const subscriptionKey = `subscription:${userId}:podcast:${podcastId}`;
+    const existing = await kv.get(subscriptionKey);
+    
+    if (existing) {
+      await kv.del(subscriptionKey);
+      return c.json({ subscribed: false });
+    } else {
+      await kv.set(subscriptionKey, {
+        userId,
+        podcastId,
+        subscribedAt: new Date().toISOString(),
+      });
+      return c.json({ subscribed: true });
+    }
+  } catch (error: any) {
+    console.error('Toggle subscription error:', error);
+    return c.json({ error: `Toggle subscription error: ${error.message}` }, 500);
+  }
+});
+
+// Toggle episode like
+app.post("/make-server-06086aa3/podcasts/episodes/:id/like", async (c) => {
+  try {
+    const episodeId = c.req.param('id');
+    const userId = 'anonymous'; // simplified for now
+    
+    const likeKey = `like:${userId}:episode:${episodeId}`;
+    const existing = await kv.get(likeKey);
+    
+    if (existing) {
+      await kv.del(likeKey);
+      return c.json({ liked: false });
+    } else {
+      await kv.set(likeKey, {
+        userId,
+        episodeId,
+        likedAt: new Date().toISOString(),
+      });
+      return c.json({ liked: true });
+    }
+  } catch (error: any) {
+    console.error('Toggle like error:', error);
+    return c.json({ error: `Toggle like error: ${error.message}` }, 500);
   }
 });
 
@@ -2376,36 +2646,105 @@ app.post("/make-server-06086aa3/icecast/metadata", requireAuth, async (c) => {
   }
 });
 
-// ==================== TRACK UPLOAD WITH FILE ====================
+// ==================== TRACK UPLOAD (2-STEP: SIGNED URL + PROCESS) ====================
 
-// Track upload endpoint (supports multipart/form-data)
-app.post("/make-server-06086aa3/tracks/upload", requireAuth, async (c) => {
+// Helper to generate unique shortId
+function generateShortId() {
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  let shortId = '';
+  for (let i = 0; i < 6; i++) {
+    shortId += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return shortId;
+}
+
+// Helper: race a promise against a timeout
+function withServerTimeout<T>(promise: Promise<T>, ms: number, fallback: T, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((resolve) => setTimeout(() => {
+      console.warn(`⏱️  ${label} timed out after ${ms}ms, using fallback`);
+      resolve(fallback);
+    }, ms))
+  ]);
+}
+
+// Step 1: Get a signed upload URL for direct-to-Storage upload (bypasses Edge Function body limit)
+app.post("/make-server-06086aa3/tracks/get-upload-url", requireAuth, async (c) => {
   try {
-    const formData = await c.req.formData();
-    const file = formData.get('file') as File;
-    const position = formData.get('position') as string || 'end';
-    const autoAddToLiveStream = formData.get('autoAddToLiveStream') === 'true';
-    
-    if (!file) {
-      return c.json({ error: 'No file provided' }, 400);
+    const body = await c.req.json();
+    const { originalFilename, contentType } = body;
+    console.log(`📤 [get-upload-url] Request: filename=${originalFilename}, type=${contentType}`);
+
+    if (!originalFilename) {
+      return c.json({ error: 'originalFilename is required' }, 400);
     }
-    
-    // Validate file type
-    const allowedTypes = ['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audio/m4a', 'audio/flac'];
-    if (!allowedTypes.includes(file.type) && !file.name.match(/\.(mp3|wav|m4a|flac)$/i)) {
-      return c.json({ error: 'Invalid file type. Only MP3, WAV, M4A, and FLAC are supported.' }, 400);
+
+    // Validate MP3
+    const allowedTypes = ['audio/mpeg', 'audio/mp3'];
+    const isMP3 = allowedTypes.includes(contentType || '') || /\.mp3$/i.test(originalFilename);
+    if (!isMP3) {
+      return c.json({ error: 'Invalid file type. Only MP3 files are supported.' }, 400);
     }
-    
-    // Generate unique shortId (6 characters, alphanumeric)
-    const generateShortId = () => {
-      const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-      let shortId = '';
-      for (let i = 0; i < 6; i++) {
-        shortId += chars.charAt(Math.floor(Math.random() * chars.length));
-      }
-      return shortId;
-    };
-    
+
+    const bucket = 'make-06086aa3-tracks';
+    const timestamp = Date.now();
+    const randomString = Math.random().toString(36).substring(7);
+    const extension = originalFilename.split('.').pop() || 'mp3';
+    const filename = `track-${timestamp}-${randomString}.${extension}`;
+
+    // Create a signed upload URL (valid 10 minutes)
+    console.log(`📤 [get-upload-url] Creating signed URL for bucket=${bucket}, file=${filename}`);
+    const { data, error } = await supabase.storage
+      .from(bucket)
+      .createSignedUploadUrl(filename);
+
+    if (error) {
+      console.error('❌ [get-upload-url] Signed URL creation failed:', error);
+      return c.json({ error: `Failed to create upload URL: ${error.message}` }, 500);
+    }
+
+    if (!data?.signedUrl) {
+      console.error('❌ [get-upload-url] No signedUrl in response:', JSON.stringify(data));
+      return c.json({ error: 'No signed URL returned from storage' }, 500);
+    }
+
+    console.log(`✅ [get-upload-url] Signed URL created for: ${filename} (url length: ${data.signedUrl.length})`);
+
+    return c.json({
+      signedUrl: data.signedUrl,
+      token: data.token,
+      path: data.path,
+      filename,
+      bucket,
+    });
+  } catch (error: any) {
+    console.error('❌ [get-upload-url] Error:', error);
+    return c.json({ error: `Failed to create upload URL: ${error.message}` }, 500);
+  }
+});
+
+// Step 2: Process an already-uploaded file (extract metadata, create track record)
+app.post("/make-server-06086aa3/tracks/process", requireAuth, async (c) => {
+  try {
+    const body = await c.req.json();
+    const {
+      filename,
+      bucket: reqBucket,
+      originalFilename,
+      position = 'end',
+      autoAddToLiveStream = true,
+      generateWaveform: enableWaveform = false,
+    } = body;
+
+    console.log(`🎵 [process] Request: file=${filename}, original=${originalFilename}, position=${position}`);
+
+    if (!filename || !originalFilename) {
+      return c.json({ error: 'filename and originalFilename are required' }, 400);
+    }
+
+    const bucket = reqBucket || 'make-06086aa3-tracks';
+
     // Ensure shortId is unique
     let shortId = generateShortId();
     let existing = await kv.get(`shortlink:${shortId}`);
@@ -2413,60 +2752,79 @@ app.post("/make-server-06086aa3/tracks/upload", requireAuth, async (c) => {
       shortId = generateShortId();
       existing = await kv.get(`shortlink:${shortId}`);
     }
-    
-    // Generate unique filename
-    const timestamp = Date.now();
-    const randomString = Math.random().toString(36).substring(7);
-    const extension = file.name.split('.').pop() || 'mp3';
-    const filename = `track-${timestamp}-${randomString}.${extension}`;
-    
-    // Upload to Supabase Storage
-    const bucket = 'make-06086aa3-tracks';
-    
-    // Create bucket if it doesn't exist
-    const { data: buckets } = await supabase.storage.listBuckets();
-    const bucketExists = buckets?.some(b => b.name === bucket);
-    if (!bucketExists) {
-      await supabase.storage.createBucket(bucket, { public: false });
-    }
-    
-    // Upload file
-    const fileBuffer = await file.arrayBuffer();
-    const { data: uploadData, error: uploadError } = await supabase.storage
-      .from(bucket)
-      .upload(filename, fileBuffer, {
-        contentType: file.type,
-        upsert: false
-      });
-    
-    if (uploadError) {
-      console.error('Storage upload error:', uploadError);
-      return c.json({ error: `Failed to upload file: ${uploadError.message}` }, 500);
-    }
-    
+
     // Get public URL
     const { data: urlData } = supabase.storage
       .from(bucket)
       .getPublicUrl(filename);
-    
+
     const audioUrl = urlData.publicUrl;
-    
-    // 🎵 Extract complete metadata with ID3 tags, cover art search, and waveform
-    console.log('🎵 Starting complete metadata extraction...');
-    const enableWaveform = formData.get('generateWaveform') === 'true';
-    
-    const { metadata: extractedMetadata, coverUrl, waveform } = await extractCompleteMetadata(
-      supabase,
-      fileBuffer,
-      file.type,
-      file.name,
-      {
-        searchOnline: true, // Search MusicBrainz if no embedded cover
-        generateWaveform: enableWaveform, // Optional waveform generation
-        waveformSamples: 100
+    console.log(`🎵 [process] Public URL: ${audioUrl}`);
+
+    // Download the file from Storage to extract metadata
+    console.log('🎵 [process] Downloading file from Storage for metadata extraction...');
+
+    // Parse filename for fallback metadata
+    const originalName = originalFilename.replace(/\.(mp3|wav|m4a|flac)$/i, '');
+    const nameParts = originalName.split(' - ');
+    const fallbackTitle = nameParts.length >= 2 ? nameParts.slice(1).join(' - ').trim() : originalName;
+    const fallbackArtist = nameParts.length >= 2 ? nameParts[0].trim() : 'Unknown Artist';
+
+    const fallbackResult = {
+      metadata: {
+        title: fallbackTitle,
+        artist: fallbackArtist,
+        album: '',
+        genre: 'Funk',
+        year: new Date().getFullYear(),
+        duration: 180,
+        bpm: undefined as number | undefined,
+        coverData: undefined as any,
+      },
+      coverUrl: getDefaultCoverUrl('Funk'),
+      waveform: undefined as number[] | undefined,
+    };
+
+    let metadataResult = fallbackResult;
+
+    try {
+      // Download the file from storage (service role key has access)
+      console.log(`🎵 [process] Downloading from bucket=${bucket}, file=${filename}...`);
+      const { data: fileData, error: downloadError } = await supabase.storage
+        .from(bucket)
+        .download(filename);
+
+      if (downloadError || !fileData) {
+        console.warn(`⚠️  [process] Could not download file for metadata extraction: ${downloadError?.message || 'no data returned'}`);
+        console.warn(`⚠️  [process] Using fallback metadata from filename: ${originalFilename}`);
+      } else {
+        const fileBuffer = await fileData.arrayBuffer();
+        console.log(`📦 Downloaded ${(fileBuffer.byteLength / 1024 / 1024).toFixed(1)}MB for metadata extraction`);
+
+        // Run full metadata extraction with a 15-second timeout
+        metadataResult = await withServerTimeout(
+          extractCompleteMetadata(
+            supabase,
+            fileBuffer,
+            'audio/mpeg',
+            originalFilename,
+            {
+              searchOnline: true,
+              generateWaveform: enableWaveform,
+              waveformSamples: 100,
+            }
+          ),
+          15000,
+          fallbackResult,
+          'extractCompleteMetadata'
+        );
       }
-    );
-    
+    } catch (metaErr: any) {
+      console.warn('⚠️  Metadata extraction failed, using fallback:', metaErr.message);
+    }
+
+    const { metadata: extractedMetadata, coverUrl, waveform } = metadataResult;
+
     const {
       title,
       artist,
@@ -2474,9 +2832,9 @@ app.post("/make-server-06086aa3/tracks/upload", requireAuth, async (c) => {
       genre,
       year,
       duration,
-      bpm
+      bpm,
     } = extractedMetadata;
-    
+
     const metadata = {
       title,
       artist,
@@ -2487,41 +2845,40 @@ app.post("/make-server-06086aa3/tracks/upload", requireAuth, async (c) => {
       bpm,
       coverUrl,
       audioUrl,
-      waveform, // Waveform data for visualization
-      shortId, // Short link ID
-      streamUrl: `https://soulfm.stream/${shortId}`, // Full streaming URL
-      storageFilename: filename, // Original storage filename
+      waveform,
+      shortId,
+      streamUrl: `${Deno.env.get('SUPABASE_URL')}/functions/v1/make-server-06086aa3/stream/${shortId}`,
+      storageFilename: filename,
       storageBucket: bucket,
-      tags: ['NEWFUNK'], // Auto-tag with NEWFUNK
-      playCount: 0, // Initialize play count
+      tags: ['NEWFUNK'],
+      playCount: 0,
       uploadedBy: c.get('userId'),
-      uploadedAt: new Date().toISOString()
+      uploadedAt: new Date().toISOString(),
     };
-    
+
     // Create track in database
     const trackId = `track_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const track = {
       id: trackId,
       ...metadata,
       createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
+      updatedAt: new Date().toISOString(),
     };
-    
+
     await kv.set(`track:${trackId}`, track);
-    
-    // Create shortlink mapping (for quick lookup)
+
+    // Create shortlink mapping
     await kv.set(`shortlink:${shortId}`, {
       trackId,
       shortId,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
     });
-    
+
     // Add to Live Stream playlist if requested
     if (autoAddToLiveStream) {
       let livePlaylist = await kv.get('playlist:livestream');
-      
+
       if (!livePlaylist) {
-        // Create Live Stream playlist if it doesn't exist
         livePlaylist = {
           id: 'livestream',
           name: 'Live Stream',
@@ -2529,23 +2886,22 @@ app.post("/make-server-06086aa3/tracks/upload", requireAuth, async (c) => {
           genre: 'Mixed',
           trackIds: [],
           createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
+          updatedAt: new Date().toISOString(),
         };
       }
-      
-      // Add track to playlist
+
       if (position === 'start') {
         livePlaylist.trackIds = [trackId, ...(livePlaylist.trackIds || [])];
       } else {
         livePlaylist.trackIds = [...(livePlaylist.trackIds || []), trackId];
       }
-      
+
       livePlaylist.updatedAt = new Date().toISOString();
       await kv.set('playlist:livestream', livePlaylist);
     }
-    
-    console.log(`Track uploaded: ${metadata.title} by ${metadata.artist} → ${metadata.streamUrl}`);
-    
+
+    console.log(`✅ Track processed: ${metadata.title} by ${metadata.artist} → ${metadata.streamUrl}`);
+
     return c.json({
       message: 'Track uploaded successfully',
       track,
@@ -2553,16 +2909,19 @@ app.post("/make-server-06086aa3/tracks/upload", requireAuth, async (c) => {
         title: metadata.title,
         artist: metadata.artist,
         album: metadata.album,
-        duration: metadata.duration
+        duration: metadata.duration,
+        genre: metadata.genre,
+        year: metadata.year,
+        coverUrl: metadata.coverUrl,
       },
       shortId,
       streamUrl: metadata.streamUrl,
-      addedToLiveStream: autoAddToLiveStream
+      audioUrl: metadata.audioUrl,
+      addedToLiveStream: autoAddToLiveStream,
     });
-    
   } catch (error: any) {
-    console.error('Track upload error:', error);
-    return c.json({ error: `Failed to upload track: ${error.message}` }, 500);
+    console.error('Track process error:', error);
+    return c.json({ error: `Failed to process track: ${error.message}` }, 500);
   }
 });
 
@@ -3612,33 +3971,38 @@ app.post("/make-server-06086aa3/upload/audio", async (c) => {
       return c.json({ error: `Upload failed: ${error.message}` }, 500);
     }
 
-    // Create signed URL (private bucket, valid for 1 year)
-    const { data: signedUrlData, error: signedError } = await supabase.storage
-      .from('make-06086aa3-tracks')
-      .createSignedUrl(filePath, 31536000); // 1 year
-
-    if (signedError) {
-      console.error('Signed URL error:', signedError);
-      return c.json({ error: `Failed to create signed URL: ${signedError.message}` }, 500);
-    }
-
     // Extract metadata if requested
     let metadata = null;
     if (extractMetadata) {
       try {
         const buffer = new Uint8Array(arrayBuffer);
-        const parsedMetadata = await parseBuffer(buffer, file.type || 'audio/mpeg');
-        metadata = extractCompleteMetadata(parsedMetadata);
-        console.log('Extracted audio metadata:', metadata);
+        const parsedMeta = await parseBuffer(buffer, file.type || 'audio/mpeg', { duration: true });
+        if (parsedMeta) {
+          metadata = {
+            title: parsedMeta.common.title || null,
+            artist: parsedMeta.common.artist || parsedMeta.common.albumartist || null,
+            album: parsedMeta.common.album || null,
+            genre: parsedMeta.common.genre?.[0] || null,
+            year: parsedMeta.common.year || null,
+            duration: parsedMeta.format.duration ? Math.floor(parsedMeta.format.duration) : null,
+            bpm: parsedMeta.common.bpm || null,
+          };
+          console.log('Extracted audio metadata:', metadata);
+        }
       } catch (metadataError) {
         console.error('Metadata extraction error:', metadataError);
         // Don't fail upload if metadata extraction fails
       }
     }
 
+    // Buckets are public now — use public URL instead of signed URL
+    const { data: publicUrlData } = supabase.storage
+      .from('make-06086aa3-tracks')
+      .getPublicUrl(filePath);
+
     return c.json({
       success: true,
-      url: signedUrlData.signedUrl,
+      url: publicUrlData.publicUrl,
       path: filePath,
       size: file.size,
       type: file.type,
