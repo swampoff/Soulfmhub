@@ -7,10 +7,12 @@ import { Button } from '../components/ui/button';
 import { Search, Radio, Clock, Users, Play, Calendar, Mic, Podcast } from 'lucide-react';
 import { api } from '../../lib/api';
 import { motion } from 'motion/react';
+import { toast } from 'sonner';
 
 export function ShowsPage() {
   const [shows, setShows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedGenre, setSelectedGenre] = useState<string | null>(null);
   const [selectedType, setSelectedType] = useState<string | null>(null);
@@ -21,10 +23,34 @@ export function ShowsPage() {
 
   const loadShows = async () => {
     try {
-      const { shows: data } = await api.getShows();
-      setShows(data || []);
-    } catch (error) {
+      setLoading(true);
+      setError(null);
+      
+      console.log('Loading shows from API...'); // Debug log
+      const response = await api.getShows();
+      console.log('Shows API response:', response); // Debug log
+      
+      // Handle different response structures
+      let showsData = [];
+      if (response.shows) {
+        showsData = response.shows;
+      } else if (Array.isArray(response)) {
+        showsData = response;
+      } else if (response.data) {
+        showsData = response.data;
+      }
+      
+      console.log('Parsed shows data:', showsData); // Debug log
+      setShows(showsData || []);
+      
+      if (!showsData || showsData.length === 0) {
+        console.log('No shows found in response');
+      }
+    } catch (error: any) {
       console.error('Error loading shows:', error);
+      const errorMessage = error.message || 'Failed to load shows';
+      setError(errorMessage);
+      toast.error(`Failed to load shows: ${errorMessage}`);
     } finally {
       setLoading(false);
     }
@@ -284,6 +310,30 @@ export function ShowsPage() {
               </motion.div>
             ))}
           </div>
+        ) : error ? (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.2 }}
+          >
+            <Card className="p-12 bg-white/10 backdrop-blur-sm border-white/20 text-center">
+              <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-red-500/20 flex items-center justify-center">
+                <Radio className="w-8 h-8 text-red-400" />
+              </div>
+              <p className="text-white/70 text-lg mb-2">
+                Failed to load shows
+              </p>
+              <p className="text-white/50 text-sm mb-4">
+                {error}
+              </p>
+              <Button
+                onClick={loadShows}
+                className="bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] text-[#0a1628] hover:from-[#00b8dd] hover:to-[#00dd88]"
+              >
+                Try Again
+              </Button>
+            </Card>
+          </motion.div>
         ) : (
           <motion.div
             initial={{ opacity: 0 }}
