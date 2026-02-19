@@ -30,9 +30,12 @@ export function RootLayout() {
 }
 
 // ── Public Layout ────────────────────────────────────────────────────
+import { StartExperienceOverlay } from './components/StartExperienceOverlay';
+
 export function PublicLayout() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#0a1628] via-[#0d1a2d] to-[#0a1628] relative">
+      <StartExperienceOverlay />
       {/* Global Animated Palms */}
       <div className="fixed inset-0 pointer-events-none z-0">
         <AnimatedPalm side="left" delay={0} />
