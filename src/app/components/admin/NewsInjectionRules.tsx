@@ -34,7 +34,7 @@ import {
   Eye
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { projectId } from '/utils/supabase/info';
+import { projectId } from '../../../../utils/supabase/info';
 import { getAuthHeaders } from '../../../lib/api';
 
 interface InjectionRule {

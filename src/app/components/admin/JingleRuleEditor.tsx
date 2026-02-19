@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Trash2, Clock, Hash, Calendar, Radio, Save, X, Zap, Copy } from 'lucide-react';
-import { projectId } from '/utils/supabase/info';
+import { projectId } from '../../../../utils/supabase/info';
 import { getAccessToken } from '../../../lib/api';
 import { JINGLE_CATEGORIES, getCategoryInfo } from './jingle-categories';
 import { AutomationPresets } from './AutomationPresets';

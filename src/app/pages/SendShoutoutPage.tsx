@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { Button } from '../components/ui/button';
 import { Card } from '../components/ui/card';
-import { projectId, publicAnonKey } from '/utils/supabase/info';
+import { projectId, publicAnonKey } from '../../../utils/supabase/info';
 import { toast } from 'sonner';
 import { Heart, Send, Cake, Gift, Star, MapPin, User, MessageSquare } from 'lucide-react';
 

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router';
-import { Menu, X, User, Settings, MessageCircle, Heart } from 'lucide-react';
+import { Menu, X, User, MessageCircle, Heart } from 'lucide-react';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { useApp } from '../../context/AppContext';
@@ -116,18 +116,6 @@ export function Navigation() {
               </Link>
             </div>
 
-            {/* Admin Button - Always visible */}
-            <Link to="/admin">
-              <Button 
-                size="sm"
-                variant="ghost"
-                className="gap-2 text-[#00ffaa] hover:bg-[#00ffaa]/10 border border-[#00ffaa]/30 hover:border-[#00ffaa]/50 hidden sm:flex"
-              >
-                <Settings className="w-4 h-4" />
-                <span>Admin</span>
-              </Button>
-            </Link>
-
             {/* Live Badge */}
             {streamStatus?.status === 'online' && (
               <Badge className="bg-[#00ff88]/20 text-[#00ff88] border border-[#00ff88]/40 gap-2 px-3 py-1.5 hidden sm:flex">
@@ -172,16 +160,7 @@ export function Navigation() {
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
-            ) : (
-              <Link to="/setup">
-                <Button 
-                  size="sm" 
-                  className="bg-[#00d9ff] hover:bg-[#00b8dd] text-[#0a1628] font-semibold"
-                >
-                  Sign In
-                </Button>
-              </Link>
-            )}
+            ) : null}
 
             {/* Mobile Menu Button */}
             <Button
@@ -214,16 +193,6 @@ export function Navigation() {
                 </Link>
               ))}
               
-              {/* Admin link in mobile menu */}
-              <Link
-                to="/admin"
-                onClick={() => setMobileMenuOpen(false)}
-                className="px-4 py-3 rounded-lg transition-colors flex items-center gap-2 text-[#00ffaa] hover:bg-[#00ffaa]/10 border border-[#00ffaa]/30"
-              >
-                <Settings className="w-4 h-4" />
-                <span>Admin Panel</span>
-              </Link>
-
               {/* Interactive links in mobile menu */}
               <div className="border-t border-[#00d9ff]/10 mt-2 pt-2">
                 <div className="px-4 pb-1">

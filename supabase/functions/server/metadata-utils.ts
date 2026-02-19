@@ -254,20 +254,27 @@ export function getDefaultCoverUrl(genre?: string): string {
 /**
  * Upload cover art to Supabase Storage
  */
+export interface CoverUploadResult {
+  url: string;
+  filename: string;
+  bucket: string;
+}
+
 export async function uploadCoverArt(
   supabase: any,
   coverBuffer: Uint8Array,
   format: string,
   extension: string,
   prefix: string = 'cover'
-): Promise<string | null> {
+): Promise<CoverUploadResult | null> {
   try {
     const timestamp = Date.now();
     const randomString = Math.random().toString(36).substring(7);
     const filename = `${prefix}-${timestamp}-${randomString}.${extension}`;
+    const bucket = 'make-06086aa3-covers';
 
     const { data, error } = await supabase.storage
-      .from('make-06086aa3-covers')
+      .from(bucket)
       .upload(filename, coverBuffer, {
         contentType: format,
         upsert: false
@@ -278,12 +285,18 @@ export async function uploadCoverArt(
       return null;
     }
 
-    const { data: urlData } = supabase.storage
-      .from('make-06086aa3-covers')
-      .getPublicUrl(filename);
+    // Buckets are private — generate signed URL (2h TTL)
+    const { data: signedData, error: signedError } = await supabase.storage
+      .from(bucket)
+      .createSignedUrl(filename, 7200);
 
-    console.log('✅ Cover art uploaded to storage');
-    return urlData.publicUrl;
+    if (signedData?.signedUrl) {
+      console.log('✅ Cover art uploaded to storage (signed URL)');
+      return { url: signedData.signedUrl, filename, bucket };
+    }
+
+    console.warn('⚠️ Cover uploaded but signed URL generation failed:', signedError?.message);
+    return null;
   } catch (error: any) {
     console.error('❌ Upload cover error:', error.message);
     return null;
@@ -297,7 +310,7 @@ export async function downloadAndUploadCover(
   supabase: any,
   coverUrl: string,
   prefix: string = 'cover'
-): Promise<string | null> {
+): Promise<CoverUploadResult | null> {
   try {
     console.log('📥 Downloading cover from URL...');
     const response = await fetch(coverUrl, {
@@ -342,6 +355,8 @@ export async function extractCompleteMetadata(
 ): Promise<{
   metadata: ExtractedMetadata;
   coverUrl: string;
+  coverBucket?: string;
+  coverFilename?: string;
   waveform?: number[];
 }> {
   const {
@@ -355,10 +370,12 @@ export async function extractCompleteMetadata(
 
   // Handle cover art
   let coverUrl = '';
+  let coverBucket: string | undefined;
+  let coverFilename: string | undefined;
 
   // 1. Try to upload embedded cover (5s timeout)
   if (metadata.coverData) {
-    const uploadedUrl = await withTimeout(
+    const uploadResult = await withTimeout(
       uploadCoverArt(
         supabase,
         metadata.coverData.buffer,
@@ -369,8 +386,10 @@ export async function extractCompleteMetadata(
       null,
       'uploadCoverArt'
     );
-    if (uploadedUrl) {
-      coverUrl = uploadedUrl;
+    if (uploadResult) {
+      coverUrl = uploadResult.url;
+      coverBucket = uploadResult.bucket;
+      coverFilename = uploadResult.filename;
     }
   }
 
@@ -386,14 +405,16 @@ export async function extractCompleteMetadata(
       
       if (foundCoverUrl) {
         // Download and re-upload to our storage (with 6s timeout)
-        const uploadedUrl = await withTimeout(
+        const uploadResult = await withTimeout(
           downloadAndUploadCover(supabase, foundCoverUrl),
           6000,
           null,
           'downloadAndUploadCover'
         );
-        if (uploadedUrl) {
-          coverUrl = uploadedUrl;
+        if (uploadResult) {
+          coverUrl = uploadResult.url;
+          coverBucket = uploadResult.bucket;
+          coverFilename = uploadResult.filename;
         }
       }
     } catch (e: any) {
@@ -416,6 +437,8 @@ export async function extractCompleteMetadata(
   return {
     metadata,
     coverUrl,
+    coverBucket,
+    coverFilename,
     waveform
   };
 }

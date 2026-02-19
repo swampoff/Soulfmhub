@@ -62,6 +62,9 @@ import { LogsAuditPage } from './pages/admin/LogsAuditPage';
 import { BackupExportPage } from './pages/admin/BackupExportPage';
 import { BrandingPage } from './pages/admin/BrandingPage';
 import { FeedbackManagement } from './pages/admin/FeedbackManagement';
+import { AIDevTeamPage } from './pages/admin/AIDevTeamPage';
+import { BroadcastTeamPage } from './pages/admin/BroadcastTeamPage';
+import { EditorialDepartmentPage } from './pages/admin/EditorialDepartmentPage';
 
 // ── Router ───────────────────────────────────────────────────────────
 export const router = createBrowserRouter([
@@ -106,7 +109,6 @@ export const router = createBrowserRouter([
 
       // ═══════════════════ Standalone Pages (no layout) ═══════════════════
       { path: 'play/:uniqueId', Component: PublicPlayer },
-      { path: 'setup', Component: AdminSetupPage },
       { path: 'demo/beach-car', Component: BeachCarDemo },
 
       // ═══════════════════ Admin Routes ═══════════════════
@@ -153,6 +155,15 @@ export const router = createBrowserRouter([
           { path: 'backup', Component: BackupExportPage },
           { path: 'branding', Component: BrandingPage },
           { path: 'feedback', Component: FeedbackManagement },
+
+          // AI Dev Team
+          { path: 'ai-team', Component: AIDevTeamPage },
+
+          // Broadcast Team
+          { path: 'broadcast-team', Component: BroadcastTeamPage },
+
+          // Editorial Department (Эфирный Отдел)
+          { path: 'editorial', Component: EditorialDepartmentPage },
 
           // Admin-side interactive views
           { path: 'request-song', Component: RequestSongPage },

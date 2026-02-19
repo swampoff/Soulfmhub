@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { Card } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
@@ -33,6 +33,7 @@ import {
   RefreshCw,
   ListPlus,
   Volume2,
+  VolumeX,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { api } from '../../../lib/api';
@@ -349,9 +350,17 @@ export function MediaLibraryManagement() {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
   const [showFilters, setShowFilters] = useState(false);
   const [playingTrackId, setPlayingTrackId] = useState<string | null>(null);
+  const [isPaused, setIsPaused] = useState(false);
   const [playlists, setPlaylists] = useState<any[]>([]);
   const [playlistDropdownTrackId, setPlaylistDropdownTrackId] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const seekBarRef = useRef<HTMLDivElement | null>(null);
+  const intentionalStopRef = useRef(false); // suppress onerror after user-initiated stop
+  const [audioCurrentTime, setAudioCurrentTime] = useState(0);
+  const [audioDuration, setAudioDuration] = useState(0);
+  const [isSeeking, setIsSeeking] = useState(false);
+  const [playerVolume, setPlayerVolume] = useState(0.8);
+  const [playerMuted, setPlayerMuted] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -547,28 +556,102 @@ export function MediaLibraryManagement() {
 
   const trackHasAudio = (track: Track) => !!(track.audioUrl || track.streamUrl);
 
-  const handlePlayTrack = (e: React.MouseEvent, track: Track) => {
+  /** Cleanly stop audio without triggering the onError toast */
+  const stopAudio = useCallback(() => {
+    intentionalStopRef.current = true;
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.removeAttribute('src');
+      audioRef.current.load(); // reset the element
+    }
+    setPlayingTrackId(null);
+    setIsPaused(false);
+    setAudioCurrentTime(0);
+    setAudioDuration(0);
+  }, []);
+
+  const handlePlayTrack = async (e: React.MouseEvent, track: Track) => {
     e.stopPropagation();
     if (!trackHasAudio(track)) return;
+
     if (playingTrackId === track.id) {
-      // Pause
-      audioRef.current?.pause();
+      // Same track — toggle pause/resume
+      if (isPaused) {
+        audioRef.current?.play().catch(err => console.error('Resume error:', err));
+        setIsPaused(false);
+      } else {
+        audioRef.current?.pause();
+        setIsPaused(true);
+      }
+      return;
+    }
+
+    // Different track — fetch a fresh signed URL, then play
+    setAudioCurrentTime(0);
+    setAudioDuration(0);
+    setIsPaused(false);
+    setPlayingTrackId(track.id); // show mini-player immediately (loading state)
+
+    let url = track.audioUrl || track.streamUrl;
+
+    // Always request a fresh signed URL — stored URLs may be expired / public-on-private-bucket
+    try {
+      const fresh = await api.getTrackPlayUrl(track.id);
+      if (fresh?.audioUrl) {
+        url = fresh.audioUrl;
+        console.log(`[MediaLibrary] Fresh signed URL for "${track.title}"`);
+      } else if (fresh?.error) {
+        console.warn(`[MediaLibrary] play-url error for "${track.title}":`, fresh.error);
+      }
+    } catch (err) {
+      console.warn('[MediaLibrary] Could not fetch fresh play URL, using stored URL:', err);
+    }
+
+    if (!url) {
+      console.warn('[MediaLibrary] Track has no audioUrl:', track.id, track);
+      toast.error(`Cannot play "${track.title}" — no audio URL available. Try re-uploading the file.`);
       setPlayingTrackId(null);
-    } else {
-      // Play
-      const url = track.audioUrl || track.streamUrl;
-      if (!url) {
-        console.warn('[MediaLibrary] Track has no audioUrl:', track.id, track);
-        toast.error(`Cannot play "${track.title}" — no audio URL available. Try re-uploading the file.`);
-        return;
-      }
-      if (audioRef.current) {
-        audioRef.current.src = url;
-        audioRef.current.play().catch(err => console.error('Play error:', err));
-      }
-      setPlayingTrackId(track.id);
+      return;
+    }
+
+    if (audioRef.current) {
+      audioRef.current.src = url;
+      audioRef.current.volume = playerMuted ? 0 : playerVolume;
+      audioRef.current.play().catch(err => {
+        console.error(`[MediaLibrary] Play error for "${track.title}" (url=${url?.substring(0, 80)}...):`, err);
+        toast.error(`Playback failed for "${track.title}". The audio file may be missing from storage.`);
+      });
     }
   };
+
+  const fmtTime = (s: number) =>
+    `${Math.floor(s / 60)}:${String(Math.floor(s) % 60).padStart(2, '0')}`;
+
+  const handleSeekPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (!audioRef.current || !audioDuration) return;
+    setIsSeeking(true);
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+    const ratio = x / rect.width;
+    const newTime = ratio * audioDuration;
+    audioRef.current.currentTime = newTime;
+    setAudioCurrentTime(newTime);
+  }, [audioDuration]);
+
+  const handleSeekPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isSeeking || !audioRef.current || !audioDuration) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+    const ratio = x / rect.width;
+    const newTime = ratio * audioDuration;
+    audioRef.current.currentTime = newTime;
+    setAudioCurrentTime(newTime);
+  }, [isSeeking, audioDuration]);
+
+  const handleSeekPointerUp = useCallback(() => {
+    setIsSeeking(false);
+  }, []);
 
   const handleDeleteSingleTrack = async (e: React.MouseEvent, trackId: string) => {
     e.stopPropagation();
@@ -579,8 +662,7 @@ export function MediaLibraryManagement() {
     try {
       await api.deleteTrack(trackId);
       if (playingTrackId === trackId) {
-        audioRef.current?.pause();
-        setPlayingTrackId(null);
+        stopAudio(); // uses intentionalStopRef to suppress false onerror
       }
       toast.success(`"${track?.title || 'Track'}" permanently deleted`);
       await loadTracks(false);
@@ -1121,7 +1203,7 @@ export function MediaLibraryManagement() {
                         onClick={(e) => handlePlayTrack(e, track)}
                         className={`absolute inset-0 flex items-center justify-center bg-black/40 transition-opacity ${playingTrackId === track.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
                       >
-                        {playingTrackId === track.id ? (
+                        {playingTrackId === track.id && !isPaused ? (
                           <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-[#00d9ff] flex items-center justify-center shadow-lg shadow-cyan-500/30"><Pause className="size-5 sm:size-6 text-black" /></div>
                         ) : (
                           <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-white/90 flex items-center justify-center"><Play className="size-5 sm:size-6 text-black ml-0.5" /></div>
@@ -1135,8 +1217,8 @@ export function MediaLibraryManagement() {
                       </div>
                     )}
                     {playingTrackId === track.id && (
-                      <div className="absolute bottom-1.5 left-1.5 flex items-center gap-1 px-1.5 py-0.5 bg-[#00d9ff] rounded text-[9px] font-bold text-black">
-                        <Volume2 className="size-3 animate-pulse" /> PLAYING
+                      <div className={`absolute bottom-1.5 left-1.5 flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold ${isPaused ? 'bg-amber-400 text-black' : 'bg-[#00d9ff] text-black'}`}>
+                        <Volume2 className={`size-3 ${isPaused ? '' : 'animate-pulse'}`} /> {isPaused ? 'PAUSED' : 'PLAYING'}
                       </div>
                     )}
                     <div className="absolute top-2 right-2">
@@ -1229,14 +1311,14 @@ export function MediaLibraryManagement() {
                       <div className={`absolute inset-0 flex items-center justify-center bg-black/50 rounded transition-opacity ${
                         playingTrackId === track.id ? 'opacity-100' : 'opacity-0 group-hover/art:opacity-100'
                       }`}>
-                        {playingTrackId === track.id ? (
+                        {playingTrackId === track.id && !isPaused ? (
                           <Pause className="size-4 text-white drop-shadow-lg" />
                         ) : (
                           <Play className="size-4 text-white ml-0.5 drop-shadow-lg" />
                         )}
                       </div>
                       {playingTrackId === track.id && (
-                        <div className="absolute inset-0 rounded ring-2 ring-[#00d9ff] animate-pulse pointer-events-none" />
+                        <div className={`absolute inset-0 rounded ring-2 pointer-events-none ${isPaused ? 'ring-amber-400' : 'ring-[#00d9ff] animate-pulse'}`} />
                       )}
                     </button>
                   ) : (
@@ -1366,42 +1448,168 @@ export function MediaLibraryManagement() {
         {/* Hidden Audio Element */}
         <audio
           ref={audioRef}
-          onEnded={() => setPlayingTrackId(null)}
-          onError={() => {
-            console.error('[MediaLibrary] Audio playback error');
+          onTimeUpdate={() => {
+            if (audioRef.current && !isSeeking) {
+              setAudioCurrentTime(audioRef.current.currentTime);
+            }
+          }}
+          onLoadedMetadata={() => {
+            if (audioRef.current) {
+              setAudioDuration(audioRef.current.duration || 0);
+              audioRef.current.volume = playerMuted ? 0 : playerVolume;
+            }
+          }}
+          onEnded={() => {
             setPlayingTrackId(null);
+            setIsPaused(false);
+            setAudioCurrentTime(0);
+            setAudioDuration(0);
+          }}
+          onError={(e) => {
+            // Ignore errors triggered by intentional stop (removeAttribute('src') + load())
+            if (intentionalStopRef.current) {
+              intentionalStopRef.current = false;
+              return;
+            }
+            const audio = e.currentTarget as HTMLAudioElement;
+            const mediaError = audio.error;
+            const src = audio.src?.substring(0, 120);
+            const code = mediaError?.code;
+            const msg = mediaError?.message || 'unknown';
+            // MediaError codes: 1=ABORTED, 2=NETWORK, 3=DECODE, 4=SRC_NOT_SUPPORTED
+            console.error(`[MediaLibrary] Audio error: code=${code} msg="${msg}" src="${src}"`);
+            const playingTrack = tracks.find(t => t.id === playingTrackId);
+            if (code === 4 || code === 2) {
+              toast.error(
+                `Cannot play "${playingTrack?.title || 'track'}" — the audio file may be missing from storage or the URL expired. Try refreshing the page.`
+              );
+            }
+            setPlayingTrackId(null);
+            setIsPaused(false);
+            setAudioCurrentTime(0);
+            setAudioDuration(0);
           }}
         />
 
-        {/* Floating Mini Player */}
+        {/* Floating Mini Player with Seek Bar */}
         <AnimatePresence>
-          {playingTrackId && (
-            <motion.div
-              initial={{ y: 80, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              exit={{ y: 80, opacity: 0 }}
-              className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 bg-[#1a1a2e]/95 backdrop-blur-lg border border-[#00d9ff]/30 rounded-xl shadow-2xl shadow-black/40 px-4 py-3 flex items-center gap-3 max-w-sm w-[calc(100%-2rem)]"
-            >
-              <button
-                onClick={(e) => {
-                  const t = tracks.find(t => t.id === playingTrackId);
-                  if (t) handlePlayTrack(e, t);
-                }}
-                className="w-9 h-9 rounded-full bg-[#00d9ff] flex items-center justify-center flex-shrink-0"
+          {playingTrackId && (() => {
+            const playingTrack = tracks.find(t => t.id === playingTrackId);
+            const progress = audioDuration > 0 ? (audioCurrentTime / audioDuration) * 100 : 0;
+            return (
+              <motion.div
+                initial={{ y: 100, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                exit={{ y: 100, opacity: 0 }}
+                transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+                className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 bg-[#0f1c2e]/95 backdrop-blur-xl border border-[#00d9ff]/25 rounded-2xl shadow-2xl shadow-black/50 w-[calc(100%-2rem)] max-w-md overflow-hidden"
               >
-                <Pause className="size-4 text-black" />
-              </button>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm text-white font-medium truncate">
-                  {tracks.find(t => t.id === playingTrackId)?.title}
-                </p>
-                <p className="text-xs text-white/50 truncate">
-                  {tracks.find(t => t.id === playingTrackId)?.artist}
-                </p>
-              </div>
-              <Volume2 className="size-4 text-[#00d9ff] animate-pulse flex-shrink-0" />
-            </motion.div>
-          )}
+                {/* Seek bar at the top of the player — thin accent line */}
+                <div
+                  ref={seekBarRef}
+                  className="relative h-2 sm:h-1.5 bg-white/10 cursor-pointer group/seek hover:h-3 transition-[height] duration-150"
+                  onPointerDown={handleSeekPointerDown}
+                  onPointerMove={handleSeekPointerMove}
+                  onPointerUp={handleSeekPointerUp}
+                >
+                  {/* Buffered / progress */}
+                  <div
+                    className="absolute inset-y-0 left-0 bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] transition-[width] duration-100"
+                    style={{ width: `${progress}%` }}
+                  />
+                  {/* Thumb dot — visible on hover / seeking */}
+                  <div
+                    className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3.5 h-3.5 rounded-full bg-white shadow-lg shadow-[#00d9ff]/30 border-2 border-[#00d9ff] transition-opacity ${isSeeking ? 'opacity-100 scale-110' : 'opacity-0 group-hover/seek:opacity-100'}`}
+                    style={{ left: `${progress}%` }}
+                  />
+                </div>
+
+                {/* Main content row */}
+                <div className="flex items-center gap-3 px-4 py-3">
+                  {/* Album art */}
+                  <div className="relative w-11 h-11 flex-shrink-0">
+                    <div className="w-11 h-11 rounded-lg bg-gradient-to-br from-[#00d9ff]/20 to-[#00ffaa]/15 flex items-center justify-center overflow-hidden">
+                      {(playingTrack?.artwork || playingTrack?.coverUrl) ? (
+                        <img src={playingTrack.artwork || playingTrack.coverUrl} alt="" className="w-full h-full object-cover" />
+                      ) : (
+                        <Music className="size-5 text-[#00d9ff]/60" />
+                      )}
+                    </div>
+                    {/* Spinning ring — pauses when track is paused */}
+                    {!isPaused && (
+                      <motion.div
+                        className="absolute inset-0 rounded-lg border border-[#00ffaa]/40"
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 4, repeat: Infinity, ease: 'linear' }}
+                      />
+                    )}
+                  </div>
+
+                  {/* Title + Artist + time */}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-white font-medium truncate">
+                      {playingTrack?.title}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-xs text-white/50 truncate flex-1">
+                        {playingTrack?.artist}
+                      </p>
+                      <span className="text-[10px] text-white/30 font-mono tabular-nums flex-shrink-0">
+                        {fmtTime(audioCurrentTime)}{audioDuration > 0 ? ` / ${fmtTime(audioDuration)}` : ''}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Play/Pause button */}
+                  <button
+                    onClick={(e) => {
+                      if (playingTrack) handlePlayTrack(e, playingTrack);
+                    }}
+                    className="w-10 h-10 rounded-full bg-gradient-to-br from-[#00d9ff] to-[#00ffaa] flex items-center justify-center flex-shrink-0 hover:scale-105 active:scale-95 transition-transform shadow-lg shadow-[#00d9ff]/20"
+                  >
+                    {isPaused
+                      ? <Play className="size-4 text-[#0a1628] ml-0.5" />
+                      : <Pause className="size-4 text-[#0a1628]" />}
+                  </button>
+
+                  {/* Volume control — hidden on small screens */}
+                  <div className="hidden sm:flex items-center gap-1.5 flex-shrink-0">
+                    <button
+                      onClick={() => {
+                        const next = !playerMuted;
+                        setPlayerMuted(next);
+                        if (audioRef.current) audioRef.current.volume = next ? 0 : playerVolume;
+                      }}
+                      className="text-white/40 hover:text-white/70 transition-colors"
+                    >
+                      {playerMuted ? <VolumeX className="size-3.5" /> : <Volume2 className="size-3.5" />}
+                    </button>
+                    <input
+                      type="range"
+                      min={0} max={1} step={0.05}
+                      value={playerMuted ? 0 : playerVolume}
+                      onChange={e => {
+                        const v = +e.target.value;
+                        setPlayerVolume(v);
+                        setPlayerMuted(v === 0);
+                        if (audioRef.current) audioRef.current.volume = v;
+                      }}
+                      className="w-14 h-1 accent-[#00d9ff] cursor-pointer"
+                    />
+                  </div>
+
+                  {/* Close / stop — uses stopAudio() to set intentionalStopRef and prevent false onerror toast */}
+                  <button
+                    onClick={() => stopAudio()}
+                    className="text-white/30 hover:text-white/60 transition-colors flex-shrink-0"
+                    title="Stop"
+                  >
+                    <X className="size-4" />
+                  </button>
+                </div>
+              </motion.div>
+            );
+          })()}
         </AnimatePresence>
       </div>
     </AdminLayout>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Play, Pause, Upload, Plus, Filter, Grid3x3, List, Trash2, Edit2, Volume2 } from 'lucide-react';
-import { projectId } from '/utils/supabase/info';
+import { projectId } from '../../../../utils/supabase/info';
 import { getAccessToken } from '../../../lib/api';
 import { JingleUploadButton } from './JingleUploadButton';
 import { JINGLE_CATEGORIES, getCategoryInfo, CATEGORY_GROUPS } from './jingle-categories';

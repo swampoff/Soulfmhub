@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Clock, Calendar, AlertCircle, Eye, EyeOff } from 'lucide-react';
-import { projectId } from '/utils/supabase/info';
+import { projectId } from '../../../../utils/supabase/info';
 import { getAccessToken } from '../../../lib/api';
 import { getCategoryInfo } from './jingle-categories';
 

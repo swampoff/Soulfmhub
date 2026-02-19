@@ -10,7 +10,7 @@ import { Badge } from '../ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '../ui/dialog';
 import { Clock, Plus, Edit, Trash2, Radio, Sparkles, Wind } from 'lucide-react';
 import { toast } from 'sonner';
-import { projectId } from '/utils/supabase/info';
+import { projectId } from '../../../../utils/supabase/info';
 import { getAccessToken } from '../../../lib/api';
 
 interface ScheduleItem {

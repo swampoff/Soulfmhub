@@ -680,6 +680,8 @@ function PlaylistDetail({
         title: playlist.name,
         isActive: true,
         repeatWeekly: true,
+        utcOffsetMinutes: new Date().getTimezoneOffset(),
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       });
       toast.success(`Scheduled "${playlist.name}" at ${quickScheduleForm.dayOfWeek === 'daily' ? 'Daily' : DAYS_SHORT[parseInt(quickScheduleForm.dayOfWeek)]} ${quickScheduleForm.startTime}`);
       setQuickScheduleOpen(false);

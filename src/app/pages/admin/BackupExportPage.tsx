@@ -1,15 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AdminLayout } from '../../components/admin/AdminLayout';
 import { Card } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
 import {
   Download,
-  Upload,
   Database,
   Archive,
   Shield,
-  RefreshCw,
   CheckCircle,
   Clock,
   HardDrive,
@@ -17,27 +15,19 @@ import {
   FileAudio,
   Image,
   Loader2,
-  AlertCircle,
   FolderArchive,
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { toast } from 'sonner';
+import { api } from '../../../lib/api';
 
-interface BackupItem {
+interface ExportHistoryItem {
   id: string;
-  name: string;
-  date: string;
-  size: string;
-  type: 'full' | 'data' | 'media';
-  status: 'completed' | 'in-progress' | 'failed';
+  timestamp: string;
+  message: string;
+  level: string;
+  userId?: string;
 }
-
-const RECENT_BACKUPS: BackupItem[] = [
-  { id: '1', name: 'Full Backup — Feb 17, 2026', date: '2026-02-17T10:30:00Z', size: '2.4 GB', type: 'full', status: 'completed' },
-  { id: '2', name: 'Data Export — Feb 15, 2026', date: '2026-02-15T14:00:00Z', size: '12 MB', type: 'data', status: 'completed' },
-  { id: '3', name: 'Media Backup — Feb 14, 2026', date: '2026-02-14T08:00:00Z', size: '1.8 GB', type: 'media', status: 'completed' },
-  { id: '4', name: 'Data Export — Feb 10, 2026', date: '2026-02-10T16:00:00Z', size: '11 MB', type: 'data', status: 'completed' },
-];
 
 const EXPORT_OPTIONS = [
   {
@@ -46,7 +36,6 @@ const EXPORT_OPTIONS = [
     description: 'Export all track metadata, tags, and genre info as JSON',
     icon: FileAudio,
     color: '#00d9ff',
-    format: 'JSON',
   },
   {
     id: 'playlists',
@@ -54,7 +43,6 @@ const EXPORT_OPTIONS = [
     description: 'Export all playlists with track references',
     icon: FileJson,
     color: '#00ffaa',
-    format: 'JSON',
   },
   {
     id: 'schedule',
@@ -62,7 +50,6 @@ const EXPORT_OPTIONS = [
     description: 'Export schedule blocks and time slots',
     icon: Clock,
     color: '#FF8C42',
-    format: 'JSON',
   },
   {
     id: 'shows',
@@ -70,7 +57,6 @@ const EXPORT_OPTIONS = [
     description: 'Export show info, episodes, and descriptions',
     icon: Database,
     color: '#E91E63',
-    format: 'JSON',
   },
   {
     id: 'settings',
@@ -78,15 +64,13 @@ const EXPORT_OPTIONS = [
     description: 'Export all configuration and branding settings',
     icon: Shield,
     color: '#9C27B0',
-    format: 'JSON',
   },
   {
-    id: 'covers',
-    label: 'Cover Art',
-    description: 'Download all cover art images as a ZIP archive',
-    icon: Image,
+    id: 'news',
+    label: 'News Articles',
+    description: 'Export all news and blog articles as JSON',
+    icon: FileJson,
     color: '#FFD700',
-    format: 'ZIP',
   },
 ];
 
@@ -94,26 +78,78 @@ function formatBackupDate(ts: string) {
   return new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
+function downloadJson(data: any, filename: string) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export function BackupExportPage() {
   const [exporting, setExporting] = useState<Set<string>>(new Set());
   const [backupRunning, setBackupRunning] = useState(false);
+  const [history, setHistory] = useState<ExportHistoryItem[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(true);
+
+  useEffect(() => {
+    loadHistory();
+  }, []);
+
+  const loadHistory = async () => {
+    setLoadingHistory(true);
+    try {
+      const result = await api.getExportHistory();
+      setHistory(result.history || []);
+    } catch (error) {
+      console.error('[Backup] Error loading history:', error);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
 
   const handleExport = async (id: string) => {
     setExporting((prev) => new Set(prev).add(id));
-    await new Promise((r) => setTimeout(r, 2000));
-    setExporting((prev) => {
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
-    toast.success(`${EXPORT_OPTIONS.find((o) => o.id === id)?.label} exported successfully!`);
+    try {
+      const data = await api.exportData(id);
+      if (data.error) {
+        throw new Error(data.error);
+      }
+      const filename = `soulfm-${id}-${new Date().toISOString().slice(0, 10)}.json`;
+      downloadJson(data, filename);
+      toast.success(`${EXPORT_OPTIONS.find((o) => o.id === id)?.label} exported successfully!`);
+      loadHistory(); // refresh history
+    } catch (error: any) {
+      console.error('[Backup] Export error:', error);
+      toast.error(`Export failed: ${error.message || 'Unknown error'}`);
+    } finally {
+      setExporting((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
   };
 
   const handleFullBackup = async () => {
     setBackupRunning(true);
-    await new Promise((r) => setTimeout(r, 3000));
-    setBackupRunning(false);
-    toast.success('Full backup completed!');
+    try {
+      const data = await api.exportData('full');
+      if (data.error) {
+        throw new Error(data.error);
+      }
+      const filename = `soulfm-full-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      downloadJson(data, filename);
+      toast.success('Full backup completed and downloaded!');
+      loadHistory();
+    } catch (error: any) {
+      console.error('[Backup] Full backup error:', error);
+      toast.error(`Full backup failed: ${error.message || 'Unknown error'}`);
+    } finally {
+      setBackupRunning(false);
+    }
   };
 
   return (
@@ -126,7 +162,7 @@ export function BackupExportPage() {
               <Archive className="w-6 h-6 text-[#00d9ff]" />
               Backup & Export
             </h1>
-            <p className="text-sm text-white/40 mt-1">Manage backups and export station data</p>
+            <p className="text-sm text-white/40 mt-1">Export and download station data as JSON</p>
           </div>
           <Button
             onClick={handleFullBackup}
@@ -134,7 +170,7 @@ export function BackupExportPage() {
             className="bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] text-slate-900 font-bold gap-2"
           >
             {backupRunning ? (
-              <><Loader2 className="w-4 h-4 animate-spin" /> Running Backup...</>
+              <><Loader2 className="w-4 h-4 animate-spin" /> Preparing Backup...</>
             ) : (
               <><FolderArchive className="w-4 h-4" /> Full Backup Now</>
             )}
@@ -149,8 +185,8 @@ export function BackupExportPage() {
                 <HardDrive className="w-5 h-5 text-[#00d9ff]" />
               </div>
               <div>
-                <div className="text-xl font-bold text-white">4.2 GB</div>
-                <div className="text-xs text-white/40">Total Data Size</div>
+                <div className="text-xl font-bold text-white">{EXPORT_OPTIONS.length}</div>
+                <div className="text-xs text-white/40">Export Types</div>
               </div>
             </div>
           </Card>
@@ -160,8 +196,8 @@ export function BackupExportPage() {
                 <CheckCircle className="w-5 h-5 text-[#00ffaa]" />
               </div>
               <div>
-                <div className="text-xl font-bold text-white">{RECENT_BACKUPS.length}</div>
-                <div className="text-xs text-white/40">Total Backups</div>
+                <div className="text-xl font-bold text-white">{history.length}</div>
+                <div className="text-xs text-white/40">Total Exports</div>
               </div>
             </div>
           </Card>
@@ -171,8 +207,10 @@ export function BackupExportPage() {
                 <Clock className="w-5 h-5 text-[#FFD700]" />
               </div>
               <div>
-                <div className="text-xl font-bold text-white">Today</div>
-                <div className="text-xs text-white/40">Last Backup</div>
+                <div className="text-xl font-bold text-white">
+                  {history.length > 0 ? formatBackupDate(history[0].timestamp).split(',')[0] : 'Never'}
+                </div>
+                <div className="text-xs text-white/40">Last Export</div>
               </div>
             </div>
           </Card>
@@ -199,7 +237,7 @@ export function BackupExportPage() {
                       <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${opt.color}15` }}>
                         <Icon className="w-5 h-5" style={{ color: opt.color }} />
                       </div>
-                      <Badge variant="outline" className="text-[10px] text-white/40 border-white/10">{opt.format}</Badge>
+                      <Badge variant="outline" className="text-[10px] text-white/40 border-white/10">JSON</Badge>
                     </div>
                     <h3 className="text-sm font-bold text-white mb-1">{opt.label}</h3>
                     <p className="text-xs text-white/40 mb-3">{opt.description}</p>
@@ -223,55 +261,54 @@ export function BackupExportPage() {
           </div>
         </div>
 
-        {/* Recent Backups */}
+        {/* Export History */}
         <div>
           <h2 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
             <Shield className="w-5 h-5 text-[#00ffaa]" />
-            Recent Backups
+            Export History
           </h2>
           <Card className="bg-white/5 border-white/10 overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-white/10">
-                    <th className="text-left p-3 text-white/40 font-medium">Backup</th>
-                    <th className="text-left p-3 text-white/40 font-medium">Date</th>
-                    <th className="text-left p-3 text-white/40 font-medium">Size</th>
-                    <th className="text-left p-3 text-white/40 font-medium">Status</th>
-                    <th className="text-right p-3 text-white/40 font-medium">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {RECENT_BACKUPS.map((backup) => (
-                    <tr key={backup.id} className="border-b border-white/5 hover:bg-white/[0.03]">
-                      <td className="p-3">
-                        <div className="flex items-center gap-2">
-                          <Archive className="w-4 h-4 text-white/30" />
-                          <span className="text-white/70">{backup.name}</span>
-                        </div>
-                      </td>
-                      <td className="p-3 text-white/50 text-xs">{formatBackupDate(backup.date)}</td>
-                      <td className="p-3 text-white/50">{backup.size}</td>
-                      <td className="p-3">
-                        <Badge className="bg-[#00ffaa]/10 text-[#00ffaa] border-0 gap-1 text-[10px]">
-                          <CheckCircle className="w-3 h-3" /> Completed
-                        </Badge>
-                      </td>
-                      <td className="p-3 text-right">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="text-white/40 hover:text-white gap-1"
-                          onClick={() => toast.info('Download started')}
-                        >
-                          <Download className="w-3 h-3" />
-                        </Button>
-                      </td>
+            {loadingHistory ? (
+              <div className="text-center py-8">
+                <Loader2 className="w-6 h-6 animate-spin text-[#00d9ff] mx-auto mb-2" />
+                <p className="text-xs text-white/30">Loading history...</p>
+              </div>
+            ) : history.length === 0 ? (
+              <div className="text-center py-8">
+                <Archive className="w-8 h-8 text-white/15 mx-auto mb-2" />
+                <p className="text-xs text-white/30">No exports yet. Use the buttons above to export data.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-white/10">
+                      <th className="text-left p-3 text-white/40 font-medium">Export</th>
+                      <th className="text-left p-3 text-white/40 font-medium">Date</th>
+                      <th className="text-left p-3 text-white/40 font-medium">Status</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {history.map((item) => (
+                      <tr key={item.id} className="border-b border-white/5 hover:bg-white/[0.03]">
+                        <td className="p-3">
+                          <div className="flex items-center gap-2">
+                            <Archive className="w-4 h-4 text-white/30" />
+                            <span className="text-white/70">{item.message}</span>
+                          </div>
+                        </td>
+                        <td className="p-3 text-white/50 text-xs">{formatBackupDate(item.timestamp)}</td>
+                        <td className="p-3">
+                          <Badge className="bg-[#00ffaa]/10 text-[#00ffaa] border-0 gap-1 text-[10px]">
+                            <CheckCircle className="w-3 h-3" /> Completed
+                          </Badge>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </Card>
         </div>
       </div>

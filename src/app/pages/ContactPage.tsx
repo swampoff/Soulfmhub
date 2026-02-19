@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { toast } from 'sonner';
+import { api } from '../../lib/api';
 
 const SOCIAL_LINKS = [
   { icon: Instagram, label: 'Instagram', handle: '@soulfmhub', color: '#E4405F', href: '#' },
@@ -54,13 +55,28 @@ export function ContactPage() {
       return;
     }
     setSending(true);
-    // Simulate send
-    await new Promise((r) => setTimeout(r, 1500));
-    setSending(false);
-    setSent(true);
-    toast.success('Message sent! We\'ll get back to you soon.');
-    setFormData({ name: '', email: '', subject: SUBJECTS[0], message: '' });
-    setTimeout(() => setSent(false), 4000);
+    try {
+      const result = await api.submitFeedback({
+        name: formData.name,
+        email: formData.email,
+        subject: formData.subject,
+        message: formData.message,
+        rating: 3,
+        category: formData.subject,
+      });
+      if (result.error) {
+        throw new Error(result.error);
+      }
+      setSent(true);
+      toast.success('Message sent! We\'ll get back to you soon.');
+      setFormData({ name: '', email: '', subject: SUBJECTS[0], message: '' });
+      setTimeout(() => setSent(false), 4000);
+    } catch (error: any) {
+      console.error('[Contact] Submit error:', error);
+      toast.error(`Failed to send: ${error.message || 'Unknown error'}`);
+    } finally {
+      setSending(false);
+    }
   };
 
   return (

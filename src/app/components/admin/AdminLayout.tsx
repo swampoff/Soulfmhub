@@ -30,6 +30,8 @@ import {
   Archive,
   Palette,
   MessageSquare,
+  Bot,
+  Clapperboard,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import soulFmLogo from 'figma:asset/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png';
@@ -91,6 +93,9 @@ const MORE_GROUPS: NavGroup[] = [
       { id: 'backup',      label: 'Backup & Export', icon: Archive,     path: '/admin/backup' },
       { id: 'branding',    label: 'Branding',     icon: Palette,        path: '/admin/branding' },
       { id: 'feedback',    label: 'Feedback',     icon: MessageSquare,  path: '/admin/feedback' },
+      { id: 'ai-team',     label: 'AI Dev Team',  icon: Bot,            path: '/admin/ai-team' },
+      { id: 'broadcast-team', label: 'Broadcast Team', icon: Radio,     path: '/admin/broadcast-team' },
+      { id: 'editorial',    label: 'Editorial Dept', icon: Clapperboard,  path: '/admin/editorial' },
       { id: 'system-test', label: 'System Test',  icon: TestTube,       path: '/admin/system-test' },
       { id: 'upload-test', label: 'Upload Test',  icon: FileAudio,      path: '/admin/upload-test' },
     ],

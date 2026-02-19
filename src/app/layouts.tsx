@@ -7,6 +7,7 @@ import { Footer } from './components/Footer';
 import { AnimatedPalm } from './components/AnimatedPalm';
 import { AdminLoginPage } from './components/AdminLoginPage';
 import { Toaster } from './components/ui/sonner';
+import { supabase } from '../lib/supabase';
 
 // ── Scroll to top on route change ────────────────────────────────────
 function ScrollToTop() {
@@ -54,6 +55,38 @@ export function AdminAccessLayout() {
   const [isAdmin, setIsAdmin] = useState(() => {
     return sessionStorage.getItem('soul-fm-admin') === 'true';
   });
+  const [checking, setChecking] = useState(!sessionStorage.getItem('soul-fm-admin'));
+
+  // Re-validate Supabase session on mount (sessionStorage is just a fast cache)
+  useEffect(() => {
+    if (isAdmin) {
+      // Quick revalidation: if sessionStorage says admin, verify session exists
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (!session) {
+          // Session expired — require re-login
+          sessionStorage.removeItem('soul-fm-admin');
+          setIsAdmin(false);
+        }
+      });
+      return;
+    }
+    // No cached admin flag — check if there's an active session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        sessionStorage.setItem('soul-fm-admin', 'true');
+        setIsAdmin(true);
+      }
+      setChecking(false);
+    });
+  }, []);
+
+  if (checking) {
+    return (
+      <div className="fixed inset-0 flex items-center justify-center bg-[#060d18]">
+        <div className="w-6 h-6 border-2 border-[#00d9ff]/30 border-t-[#00d9ff] rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   if (!isAdmin) {
     return (

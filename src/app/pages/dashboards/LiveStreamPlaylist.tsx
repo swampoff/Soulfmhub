@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, Reorder, AnimatePresence } from 'motion/react';
 import { Button } from '../../components/ui/button';
 import { Card } from '../../components/ui/card';
@@ -20,8 +20,15 @@ import {
   Clock,
   Filter,
   Download,
-  Share2
+  Share2,
+  Plus,
+  Calendar,
+  Loader2,
+  ExternalLink,
+  AlertTriangle,
+  RefreshCw,
 } from 'lucide-react';
+import { useNavigate } from 'react-router';
 
 interface Track {
   id: string;
@@ -48,6 +55,7 @@ interface Playlist {
 }
 
 export function LiveStreamPlaylist() {
+  const navigate = useNavigate();
   const [playlist, setPlaylist] = useState<Playlist | null>(null);
   const [tracks, setTracks] = useState<Track[]>([]);
   const [orderedTracks, setOrderedTracks] = useState<Track[]>([]);
@@ -58,21 +66,57 @@ export function LiveStreamPlaylist() {
   const [playingTrackId, setPlayingTrackId] = useState<string | null>(null);
   const [filterTag, setFilterTag] = useState<string | null>(null);
 
+  // Schedule status
+  const [scheduleStatus, setScheduleStatus] = useState<any>(null);
+  const [loadingSchedule, setLoadingSchedule] = useState(false);
+  const [isAutoRefreshing, setIsAutoRefreshing] = useState(false);
+  const scheduleIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   const genres = ['all', 'soul', 'funk', 'jazz', 'disco', 'reggae', 'blues', 'r&b', 'afrobeat'];
+
+  const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
   useEffect(() => {
     loadPlaylist();
     loadAllTracks();
+    loadScheduleStatus();
+
+    // Auto-refresh schedule status every 30 seconds to catch slot transitions
+    scheduleIntervalRef.current = setInterval(() => {
+      refreshScheduleSilent();
+    }, 30_000);
+
+    return () => {
+      if (scheduleIntervalRef.current) {
+        clearInterval(scheduleIntervalRef.current);
+      }
+    };
   }, []);
 
-  useEffect(() => {
-    if (playlist && allTracks.length > 0) {
-      const ordered = playlist.trackIds
-        .map(id => allTracks.find(t => t.id === id))
-        .filter(Boolean) as Track[];
-      setOrderedTracks(ordered);
+  const loadScheduleStatus = async () => {
+    setLoadingSchedule(true);
+    try {
+      const data = await api.getRadioScheduleStatus();
+      setScheduleStatus(data);
+    } catch (e: any) {
+      console.error('[LiveStreamPlaylist] schedule status error:', e);
+    } finally {
+      setLoadingSchedule(false);
     }
-  }, [playlist, allTracks]);
+  };
+
+  /** Silent background refresh — doesn't hide the banner */
+  const refreshScheduleSilent = async () => {
+    setIsAutoRefreshing(true);
+    try {
+      const data = await api.getRadioScheduleStatus();
+      setScheduleStatus(data);
+    } catch (e: any) {
+      console.error('[LiveStreamPlaylist] schedule auto-refresh error:', e);
+    } finally {
+      setIsAutoRefreshing(false);
+    }
+  };
 
   const loadPlaylist = async () => {
     try {
@@ -250,6 +294,143 @@ export function LiveStreamPlaylist() {
           </Button>
         </div>
       </motion.div>
+
+      {/* ── Schedule Status Banner ──────────────────────────────────── */}
+      <AnimatePresence>
+        {scheduleStatus && !loadingSchedule && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            className="space-y-3"
+          >
+            {/* Active schedule slot — currently driving the broadcast */}
+            {scheduleStatus.currentSchedule ? (
+              <div className="p-4 rounded-xl border border-[#00d9ff]/30 bg-[#00d9ff]/5 backdrop-blur-sm">
+                <div className="flex items-start gap-3">
+                  <div className="p-2 bg-[#00d9ff]/15 rounded-lg mt-0.5">
+                    <Calendar className="w-5 h-5 text-[#00d9ff]" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <h3 className="text-sm font-bold text-white">Schedule Active</h3>
+                      <Badge className="bg-[#00ffaa]/15 text-[#00ffaa] border-[#00ffaa]/30 text-[10px]">
+                        {scheduleStatus.isOnline ? 'ON AIR' : 'READY'}
+                      </Badge>
+                    </div>
+                    <p className="text-white/80 text-sm font-semibold truncate">
+                      {scheduleStatus.currentSchedule.title}
+                    </p>
+                    <p className="text-white/50 text-xs mt-0.5">
+                      Playlist: <span className="text-[#00d9ff]">{scheduleStatus.currentSchedule.playlistName || scheduleStatus.currentSchedule.playlistId}</span>
+                      {' · '}
+                      {DAY_NAMES[scheduleStatus.currentSchedule.dayOfWeek ?? new Date().getDay()]}{' '}
+                      {scheduleStatus.currentSchedule.startTime}–{scheduleStatus.currentSchedule.endTime}
+                    </p>
+                    {scheduleStatus.activeScheduleSlot && (
+                      <p className="text-[10px] text-[#00ffaa]/70 mt-1 flex items-center gap-1">
+                        <Radio className="w-3 h-3" />
+                        Auto DJ is broadcasting from this schedule slot
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <button
+                      onClick={loadScheduleStatus}
+                      className="text-white/30 hover:text-white/60 transition-colors p-1"
+                      title="Refresh schedule status"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isAutoRefreshing ? 'animate-spin' : ''}`} />
+                    </button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="border-[#00d9ff]/30 text-[#00d9ff] hover:bg-[#00d9ff]/10 text-xs"
+                      onClick={() => navigate('/admin/schedule')}
+                    >
+                      <ExternalLink className="w-3 h-3 mr-1" />
+                      Schedule
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ) : scheduleStatus.isOnline ? (
+              /* Auto DJ is running but from the fallback Live Stream playlist */
+              <div className="p-3 rounded-xl border border-[#00ffaa]/20 bg-[#00ffaa]/5 backdrop-blur-sm">
+                <div className="flex items-center gap-3">
+                  <Radio className="w-4 h-4 text-[#00ffaa] flex-shrink-0" />
+                  <p className="text-sm text-white/70">
+                    Auto DJ is broadcasting from <span className="text-[#00ffaa] font-semibold">this Live Stream playlist</span> (no schedule slot active)
+                  </p>
+                  <button
+                    onClick={loadScheduleStatus}
+                    className="text-white/30 hover:text-white/60 transition-colors p-1 flex-shrink-0 ml-auto"
+                    title="Refresh"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${isAutoRefreshing ? 'animate-spin' : ''}`} />
+                  </button>
+                </div>
+              </div>
+            ) : scheduleStatus.totalScheduleSlots > 0 ? (
+              /* Not on air, but there are scheduled slots coming up */
+              <div className="p-3 rounded-xl border border-white/10 bg-white/3 backdrop-blur-sm">
+                <div className="flex items-center gap-3">
+                  <Calendar className="w-4 h-4 text-white/40 flex-shrink-0" />
+                  <p className="text-xs text-white/50">
+                    <span className="text-white/70 font-semibold">{scheduleStatus.totalScheduleSlots}</span> schedule slot{scheduleStatus.totalScheduleSlots !== 1 ? 's' : ''} configured.
+                    {' '}When Auto DJ starts, it will prioritize the active slot's playlist.
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-[#00d9ff]/60 hover:text-[#00d9ff] text-xs flex-shrink-0 ml-auto"
+                    onClick={() => navigate('/admin/schedule')}
+                  >
+                    View
+                    <ExternalLink className="w-3 h-3 ml-1" />
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+
+            {/* Upcoming schedule slots (compact, max 3) */}
+            {scheduleStatus.upcomingSlots?.length > 0 && (
+              <div className="flex items-center gap-2 flex-wrap px-1">
+                <span className="text-[10px] text-white/30 uppercase tracking-wider">Upcoming:</span>
+                {scheduleStatus.upcomingSlots.slice(0, 3).map((slot: any) => (
+                  <Badge
+                    key={slot.id}
+                    variant="outline"
+                    className="border-white/10 text-white/50 text-[10px] font-normal"
+                  >
+                    {DAY_NAMES[slot.dayOfWeek ?? 0]} {slot.startTime} — {slot.title}
+                  </Badge>
+                ))}
+                {scheduleStatus.upcomingSlots.length > 3 && (
+                  <span className="text-[10px] text-white/25">
+                    +{scheduleStatus.upcomingSlots.length - 3} more
+                  </span>
+                )}
+                {/* Auto-refresh indicator */}
+                <span className="text-[9px] text-white/20 ml-auto flex items-center gap-1">
+                  <RefreshCw className={`w-2.5 h-2.5 ${isAutoRefreshing ? 'animate-spin text-[#00d9ff]/40' : ''}`} />
+                  auto-updates every 30s
+                </span>
+              </div>
+            )}
+
+            {/* Auto-refresh indicator (fallback when no upcoming slots) */}
+            {(!scheduleStatus.upcomingSlots || scheduleStatus.upcomingSlots.length === 0) && (
+              <div className="flex items-center justify-end px-1">
+                <span className="text-[9px] text-white/20 flex items-center gap-1">
+                  <RefreshCw className={`w-2.5 h-2.5 ${isAutoRefreshing ? 'animate-spin text-[#00d9ff]/40' : ''}`} />
+                  auto-updates every 30s
+                </span>
+              </div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Current Playlist */}

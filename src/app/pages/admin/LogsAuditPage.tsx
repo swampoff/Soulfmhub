@@ -9,21 +9,18 @@ import {
   AlertTriangle,
   Info,
   Search,
-  Filter,
   Clock,
   RefreshCw,
   CheckCircle,
   XCircle,
-  AlertCircle,
   Download,
   Trash2,
-  Radio,
   User,
-  Settings,
-  Music,
-  Shield,
+  Loader2,
 } from 'lucide-react';
 import { motion } from 'motion/react';
+import { api } from '../../../lib/api';
+import { toast } from 'sonner';
 
 type LogLevel = 'all' | 'info' | 'warning' | 'error' | 'success';
 
@@ -36,28 +33,6 @@ interface LogEntry {
   details?: string;
   userId?: string;
   ip?: string;
-}
-
-function generateMockLogs(): LogEntry[] {
-  const now = new Date();
-  const entries: LogEntry[] = [
-    { id: '1', timestamp: new Date(now.getTime() - 120000).toISOString(), level: 'info', category: 'Auth', message: 'Admin logged in via PIN', userId: 'admin-pin', ip: '192.168.1.10' },
-    { id: '2', timestamp: new Date(now.getTime() - 300000).toISOString(), level: 'success', category: 'Media', message: 'Track uploaded successfully: "Summer Breeze.mp3"', userId: 'admin-pin' },
-    { id: '3', timestamp: new Date(now.getTime() - 450000).toISOString(), level: 'info', category: 'Stream', message: 'Stream status checked — online, 142 listeners' },
-    { id: '4', timestamp: new Date(now.getTime() - 600000).toISOString(), level: 'warning', category: 'Storage', message: 'Storage bucket "tracks" approaching 80% capacity' },
-    { id: '5', timestamp: new Date(now.getTime() - 900000).toISOString(), level: 'error', category: 'API', message: 'Failed to fetch metadata for track ID: trk_abc123', details: 'Timeout after 15000ms' },
-    { id: '6', timestamp: new Date(now.getTime() - 1200000).toISOString(), level: 'info', category: 'Schedule', message: 'Playlist rotation updated for evening slot' },
-    { id: '7', timestamp: new Date(now.getTime() - 1500000).toISOString(), level: 'success', category: 'System', message: 'Server health check passed — all services operational' },
-    { id: '8', timestamp: new Date(now.getTime() - 1800000).toISOString(), level: 'info', category: 'Auth', message: 'Admin session extended', userId: 'admin-pin' },
-    { id: '9', timestamp: new Date(now.getTime() - 2100000).toISOString(), level: 'warning', category: 'Stream', message: 'Listener count dropped below threshold (< 10)' },
-    { id: '10', timestamp: new Date(now.getTime() - 2400000).toISOString(), level: 'error', category: 'Media', message: 'Cover art upload failed: file exceeds 5MB limit', userId: 'admin-pin' },
-    { id: '11', timestamp: new Date(now.getTime() - 3000000).toISOString(), level: 'success', category: 'Media', message: 'Track metadata updated: "Night Jazz Session"', userId: 'admin-pin' },
-    { id: '12', timestamp: new Date(now.getTime() - 3600000).toISOString(), level: 'info', category: 'System', message: 'KV store cleanup — 0 expired entries removed' },
-    { id: '13', timestamp: new Date(now.getTime() - 4200000).toISOString(), level: 'info', category: 'Interactive', message: 'Song request received: "Superstition" by Stevie Wonder' },
-    { id: '14', timestamp: new Date(now.getTime() - 5000000).toISOString(), level: 'warning', category: 'Auth', message: 'Invalid PIN attempt detected', ip: '10.0.0.55' },
-    { id: '15', timestamp: new Date(now.getTime() - 7200000).toISOString(), level: 'success', category: 'Stream', message: 'Auto DJ seamless transition completed' },
-  ];
-  return entries;
 }
 
 const LEVEL_CONFIG = {
@@ -80,12 +55,55 @@ export function LogsAuditPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setLogs(generateMockLogs());
-      setLoading(false);
-    }, 500);
-    return () => clearTimeout(timer);
+    loadLogs();
   }, []);
+
+  const loadLogs = async () => {
+    setLoading(true);
+    try {
+      const result = await api.getAuditLogs(200);
+      const items = (result.logs || []).map((l: any) => ({
+        id: l.id || crypto.randomUUID(),
+        timestamp: l.timestamp || new Date().toISOString(),
+        level: l.level || 'info',
+        category: l.category || 'System',
+        message: l.message || '',
+        details: l.details || undefined,
+        userId: l.userId || undefined,
+        ip: l.ip || undefined,
+      }));
+      setLogs(items);
+    } catch (error) {
+      console.error('[Logs] Error loading:', error);
+      toast.error('Failed to load logs');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleClearLogs = async () => {
+    if (!confirm(`Clear all ${logs.length} log entries? This cannot be undone.`)) return;
+    try {
+      await api.clearAuditLogs();
+      setLogs([]);
+      toast.success('All logs cleared');
+    } catch (error) {
+      console.error('[Logs] Clear error:', error);
+      toast.error('Failed to clear logs');
+    }
+  };
+
+  const handleExportLogs = () => {
+    const data = JSON.stringify(logs, null, 2);
+    const blob = new Blob([data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `soulfm-logs-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success('Logs exported');
+  };
 
   const filteredLogs = logs.filter((log) => {
     const matchesSearch = !search || log.message.toLowerCase().includes(search.toLowerCase()) || log.category.toLowerCase().includes(search.toLowerCase());
@@ -101,13 +119,18 @@ export function LogsAuditPage() {
     success: logs.filter((l) => l.level === 'success').length,
   };
 
-  const handleRefresh = () => {
-    setLoading(true);
-    setTimeout(() => {
-      setLogs(generateMockLogs());
-      setLoading(false);
-    }, 500);
-  };
+  if (loading) {
+    return (
+      <AdminLayout>
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <div className="text-center">
+            <Loader2 className="size-10 animate-spin text-[#00d9ff] mx-auto mb-4" />
+            <p className="text-white/60 text-sm">Loading audit logs...</p>
+          </div>
+        </div>
+      </AdminLayout>
+    );
+  }
 
   return (
     <AdminLayout>
@@ -122,14 +145,20 @@ export function LogsAuditPage() {
             <p className="text-sm text-white/40 mt-1">Monitor system events, errors, and admin activity</p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={handleRefresh} className="border-white/10 text-white/60 hover:text-white gap-1">
-              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            <Button variant="outline" size="sm" onClick={loadLogs} className="border-white/10 text-white/60 hover:text-white gap-1">
+              <RefreshCw className="w-4 h-4" />
               Refresh
             </Button>
-            <Button variant="outline" size="sm" className="border-white/10 text-white/60 hover:text-white gap-1">
+            <Button variant="outline" size="sm" onClick={handleExportLogs} className="border-white/10 text-white/60 hover:text-white gap-1">
               <Download className="w-4 h-4" />
               Export
             </Button>
+            {logs.length > 0 && (
+              <Button variant="outline" size="sm" onClick={handleClearLogs} className="border-red-500/20 text-red-400/60 hover:text-red-400 gap-1">
+                <Trash2 className="w-4 h-4" />
+                Clear
+              </Button>
+            )}
           </div>
         </div>
 
@@ -195,7 +224,7 @@ export function LogsAuditPage() {
                       key={log.id}
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
-                      transition={{ delay: i * 0.02 }}
+                      transition={{ delay: Math.min(i * 0.02, 0.5) }}
                       className="border-b border-white/5 hover:bg-white/[0.03] transition-colors"
                     >
                       <td className="p-3">
@@ -238,7 +267,12 @@ export function LogsAuditPage() {
           {filteredLogs.length === 0 && (
             <div className="text-center py-12">
               <FileText className="w-10 h-10 text-white/15 mx-auto mb-3" />
-              <p className="text-white/30 text-sm">No logs matching your criteria</p>
+              <p className="text-white/30 text-sm">{logs.length === 0 ? 'No audit logs yet. Actions like uploads, edits, and exports will appear here.' : 'No logs matching your criteria'}</p>
+            </div>
+          )}
+          {filteredLogs.length > 0 && (
+            <div className="px-4 py-2.5 border-t border-white/5 text-xs text-white/25">
+              {filteredLogs.length} log{filteredLogs.length !== 1 ? 's' : ''}{levelFilter !== 'all' ? ` (filtered from ${logs.length})` : ''}
             </div>
           )}
         </Card>

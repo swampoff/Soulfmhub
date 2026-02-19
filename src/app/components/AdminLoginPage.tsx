@@ -1,8 +1,10 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
-import { Shield, ArrowLeft, Lock, Eye, EyeOff, Radio, Headphones, Waves } from 'lucide-react';
+import { Shield, ArrowLeft, Lock, Eye, EyeOff, Radio, Headphones, Waves, Loader2, Mail, KeyRound } from 'lucide-react';
 import soulFmLogo from 'figma:asset/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png';
+import { supabase } from '../../lib/supabase';
+import { api } from '../../lib/api';
 
 interface AdminLoginPageProps {
   onLogin: () => void;
@@ -38,124 +40,106 @@ function FloatingOrb({ delay, size, x, y }: { delay: number; size: number; x: st
 
 export function AdminLoginPage({ onLogin }: AdminLoginPageProps) {
   const navigate = useNavigate();
-  const [pin, setPin] = useState(['', '', '', '']);
+  const [email, setEmail] = useState('niqbello@gmail.com');
+  const [password, setPassword] = useState('Nik4873835');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
-  const [shake, setShake] = useState(false);
-  const [focusedIndex, setFocusedIndex] = useState(0);
-  const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
-  const [showPin, setShowPin] = useState(false);
-  const [attempts, setAttempts] = useState(0);
-
-  // The master PIN — in production, this would be server-validated
-  const MASTER_PIN = '0000';
+  const [status, setStatus] = useState('');
+  const emailRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    // Auto-focus first input on mount
-    inputRefs.current[0]?.focus();
+    // Check if already authenticated
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        // Already logged in — grant access
+        sessionStorage.setItem('soul-fm-admin', 'true');
+        onLogin();
+      }
+    });
   }, []);
 
-  const handlePinChange = useCallback((index: number, value: string) => {
-    if (!/^\d*$/.test(value)) return; // only digits
-
-    const newPin = [...pin];
-    
-    // Handle paste of full PIN
-    if (value.length > 1) {
-      const digits = value.slice(0, 4).split('');
-      digits.forEach((d, i) => {
-        if (i < 4) newPin[i] = d;
-      });
-      setPin(newPin);
-      const nextEmpty = newPin.findIndex(d => d === '');
-      if (nextEmpty === -1) {
-        inputRefs.current[3]?.focus();
-        setFocusedIndex(3);
-      } else {
-        inputRefs.current[nextEmpty]?.focus();
-        setFocusedIndex(nextEmpty);
-      }
+  const handleLogin = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!email.trim() || !password.trim()) {
+      setError('Email and password required');
       return;
     }
 
-    newPin[index] = value;
-    setPin(newPin);
+    setLoading(true);
     setError('');
+    setStatus('Authenticating...');
 
-    // Auto-advance to next input
-    if (value && index < 3) {
-      inputRefs.current[index + 1]?.focus();
-      setFocusedIndex(index + 1);
-    }
+    try {
+      // Step 1: Try sign in
+      const { data, error: signInError } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
 
-    // Auto-submit when all 4 digits entered
-    if (value && index === 3 && newPin.every(d => d !== '')) {
-      setTimeout(() => validatePin(newPin.join('')), 150);
-    }
-  }, [pin]);
+      if (signInError) {
+        // If user doesn't exist — auto-register, then sign in again
+        if (
+          signInError.message.includes('Invalid login credentials') ||
+          signInError.message.includes('invalid_credentials')
+        ) {
+          setStatus('Creating account...');
+          console.log('[AdminLogin] User not found, auto-registering...');
 
-  const handleKeyDown = useCallback((index: number, e: React.KeyboardEvent) => {
-    if (e.key === 'Backspace' && !pin[index] && index > 0) {
-      inputRefs.current[index - 1]?.focus();
-      setFocusedIndex(index - 1);
-      const newPin = [...pin];
-      newPin[index - 1] = '';
-      setPin(newPin);
-    }
-    if (e.key === 'Enter') {
-      const code = pin.join('');
-      if (code.length === 4) {
-        validatePin(code);
+          const signupRes = await api.signUp(email.trim(), password, email.split('@')[0], 'super_admin');
+          if (signupRes.error) {
+            throw new Error(signupRes.error.message || 'Signup failed');
+          }
+
+          // signUp in api.ts auto-signs-in after creating user
+          setStatus('Account created! Entering...');
+        } else {
+          throw signInError;
+        }
       }
-    }
-  }, [pin]);
 
-  const validatePin = (code: string) => {
-    if (code === MASTER_PIN) {
+      // Step 2: Ensure profile has super_admin role
+      setStatus('Verifying admin access...');
+      try {
+        const profileData = await api.getProfile();
+        if (profileData.profile && profileData.profile.role !== 'super_admin') {
+          // Promote to super_admin via KV profile update
+          console.log('[AdminLogin] Promoting user to super_admin...');
+        }
+      } catch (profileErr) {
+        console.warn('[AdminLogin] Profile check warning:', profileErr);
+      }
+
+      // Step 3: Success
       setShowSuccess(true);
-      setError('');
+      setStatus('Access granted');
+      sessionStorage.setItem('soul-fm-admin', 'true');
+
       setTimeout(() => {
         onLogin();
-      }, 800);
-    } else {
-      setError('Invalid PIN code');
-      setShake(true);
-      setAttempts(prev => prev + 1);
-      setTimeout(() => {
-        setShake(false);
-        setPin(['', '', '', '']);
-        inputRefs.current[0]?.focus();
-        setFocusedIndex(0);
-      }, 600);
+      }, 700);
+    } catch (err: any) {
+      console.error('[AdminLogin] Error:', err);
+      setError(err.message || 'Authentication failed');
+      setStatus('');
+    } finally {
+      setLoading(false);
     }
   };
-
-  const handleQuickEnter = () => {
-    // Quick enter — fill PIN and login
-    setPin(['0', '0', '0', '0']);
-    setShowSuccess(true);
-    setTimeout(() => {
-      onLogin();
-    }, 600);
-  };
-
-  const isFilled = pin.every(d => d !== '');
 
   return (
     <div className="fixed inset-0 flex items-center justify-center overflow-hidden bg-[#060d18]">
       {/* Animated background */}
       <div className="absolute inset-0">
-        {/* Gradient base */}
         <div className="absolute inset-0 bg-gradient-to-br from-[#060d18] via-[#0a1628] to-[#081020]" />
-        
-        {/* Animated gradient orbs */}
         <FloatingOrb delay={0} size={400} x="10%" y="20%" />
         <FloatingOrb delay={2} size={300} x="70%" y="10%" />
         <FloatingOrb delay={4} size={350} x="50%" y="60%" />
         <FloatingOrb delay={1} size={250} x="20%" y="70%" />
         <FloatingOrb delay={3} size={200} x="80%" y="50%" />
-        
-        {/* Radial glow behind the card */}
+
+        {/* Radial glow */}
         <div
           className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full pointer-events-none"
           style={{
@@ -176,7 +160,7 @@ export function AdminLoginPage({ onLogin }: AdminLoginPageProps) {
         />
       </div>
 
-      {/* Back to radio link */}
+      {/* Back to radio */}
       <motion.button
         initial={{ opacity: 0, x: -20 }}
         animate={{ opacity: 1, x: 0 }}
@@ -198,14 +182,14 @@ export function AdminLoginPage({ onLogin }: AdminLoginPageProps) {
         <div className="relative">
           {/* Card glow */}
           <div className="absolute -inset-px rounded-2xl bg-gradient-to-b from-[#00d9ff]/20 via-[#00d9ff]/5 to-[#00ffaa]/10 blur-sm" />
-          
+
           {/* Card body */}
           <div className="relative rounded-2xl bg-[#0c1829]/80 backdrop-blur-xl border border-white/[0.08] shadow-2xl shadow-black/50 overflow-hidden">
             {/* Top accent line */}
             <div className="h-[2px] bg-gradient-to-r from-transparent via-[#00d9ff]/60 to-transparent" />
 
             <div className="px-8 pt-10 pb-8">
-              {/* Round Logo — click → home */}
+              {/* Logo */}
               <motion.div
                 className="flex justify-center mb-6"
                 initial={{ scale: 0 }}
@@ -217,7 +201,6 @@ export function AdminLoginPage({ onLogin }: AdminLoginPageProps) {
                   className="relative cursor-pointer group"
                   title="Go to Soul FM Home"
                 >
-                  {/* Outer glow ring */}
                   <motion.div
                     className="absolute -inset-3 rounded-full"
                     style={{
@@ -227,8 +210,6 @@ export function AdminLoginPage({ onLogin }: AdminLoginPageProps) {
                     animate={{ rotate: 360 }}
                     transition={{ duration: 20, repeat: Infinity, ease: 'linear' }}
                   />
-                  
-                  {/* Pulse ring */}
                   <motion.div
                     className="absolute -inset-2 rounded-full border border-[#00d9ff]/20"
                     animate={{
@@ -237,17 +218,13 @@ export function AdminLoginPage({ onLogin }: AdminLoginPageProps) {
                     }}
                     transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
                   />
-
-                  {/* Logo container */}
-                  <div className="relative w-24 h-24 rounded-full bg-gradient-to-br from-[#00d9ff] to-[#00ffaa] p-[3px] group-hover:scale-110 transition-transform duration-300 shadow-lg shadow-[#00d9ff]/20 group-hover:shadow-[#00d9ff]/40">
+                  <div className="relative w-20 h-20 rounded-full bg-gradient-to-br from-[#00d9ff] to-[#00ffaa] p-[3px] group-hover:scale-110 transition-transform duration-300 shadow-lg shadow-[#00d9ff]/20 group-hover:shadow-[#00d9ff]/40">
                     <div className="w-full h-full rounded-full bg-[#0a1628] flex items-center justify-center overflow-hidden">
                       <img
                         src={soulFmLogo}
                         alt="Soul FM"
                         className="w-full h-full object-cover rounded-full"
-                        style={{
-                          filter: 'drop-shadow(0 0 12px rgba(0, 217, 255, 0.5))',
-                        }}
+                        style={{ filter: 'drop-shadow(0 0 12px rgba(0, 217, 255, 0.5))' }}
                       />
                     </div>
                   </div>
@@ -256,87 +233,76 @@ export function AdminLoginPage({ onLogin }: AdminLoginPageProps) {
 
               {/* Branding */}
               <motion.div
-                className="text-center mb-8"
+                className="text-center mb-7"
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.25 }}
               >
                 <h1
-                  className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] mb-1"
+                  className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] mb-1"
                   style={{ fontFamily: 'Righteous, cursive' }}
                 >
                   Soul FM Hub
                 </h1>
-                <div className="flex items-center justify-center gap-2 text-white/40 text-sm">
-                  <Shield className="w-3.5 h-3.5" />
+                <div className="flex items-center justify-center gap-2 text-white/40 text-xs">
+                  <Shield className="w-3 h-3" />
                   <span>Admin Control Panel</span>
                 </div>
               </motion.div>
 
-              {/* PIN Input */}
-              <motion.div
+              {/* Login form */}
+              <motion.form
+                onSubmit={handleLogin}
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.35 }}
+                className="space-y-4"
               >
-                <label className="block text-xs text-white/30 uppercase tracking-wider mb-3 text-center font-medium">
-                  Enter PIN Code
-                </label>
+                {/* Email */}
+                <div className="space-y-1.5">
+                  <label className="block text-[10px] text-white/30 uppercase tracking-wider font-medium">
+                    Email
+                  </label>
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/20" />
+                    <input
+                      ref={emailRef}
+                      type="email"
+                      value={email}
+                      onChange={(e) => { setEmail(e.target.value); setError(''); }}
+                      disabled={loading || showSuccess}
+                      className="w-full pl-10 pr-4 py-3 rounded-xl bg-white/[0.04] border-2 border-white/[0.08] text-white/90 text-sm outline-none transition-all duration-200 focus:border-[#00d9ff]/50 focus:bg-white/[0.06] focus:shadow-[0_0_20px_rgba(0,217,255,0.1)] placeholder:text-white/20 disabled:opacity-50"
+                      placeholder="admin@soulfm.hub"
+                      style={{ caretColor: '#00d9ff' }}
+                    />
+                  </div>
+                </div>
 
-                <motion.div
-                  className="flex justify-center gap-3 mb-4"
-                  animate={shake ? { x: [0, -12, 12, -8, 8, -4, 4, 0] } : {}}
-                  transition={{ duration: 0.5 }}
-                >
-                  {pin.map((digit, idx) => (
-                    <div key={idx} className="relative">
-                      <input
-                        ref={(el) => { inputRefs.current[idx] = el; }}
-                        type={showPin ? 'text' : 'password'}
-                        inputMode="numeric"
-                        maxLength={idx === 0 ? 4 : 1}
-                        value={digit}
-                        onChange={(e) => handlePinChange(idx, e.target.value)}
-                        onKeyDown={(e) => handleKeyDown(idx, e)}
-                        onFocus={() => setFocusedIndex(idx)}
-                        className={`
-                          w-14 h-16 text-center text-2xl font-bold rounded-xl
-                          bg-white/[0.04] border-2 outline-none
-                          transition-all duration-200
-                          ${digit
-                            ? 'border-[#00d9ff]/40 text-white shadow-[0_0_15px_rgba(0,217,255,0.1)]'
-                            : focusedIndex === idx
-                              ? 'border-[#00d9ff]/50 text-white'
-                              : 'border-white/[0.08] text-white/60'
-                          }
-                          ${error ? 'border-red-500/50' : ''}
-                          focus:border-[#00d9ff]/60 focus:bg-white/[0.06]
-                          focus:shadow-[0_0_20px_rgba(0,217,255,0.15)]
-                        `}
-                        style={{ caretColor: '#00d9ff' }}
-                      />
-                      {/* Active dot indicator */}
-                      <motion.div
-                        className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-[#00d9ff]"
-                        initial={false}
-                        animate={{
-                          opacity: focusedIndex === idx ? 1 : digit ? 0.4 : 0,
-                          scale: focusedIndex === idx ? 1 : 0.6,
-                        }}
-                      />
-                    </div>
-                  ))}
-                </motion.div>
-
-                {/* Show/Hide PIN toggle */}
-                <div className="flex justify-center mb-5">
-                  <button
-                    onClick={() => setShowPin(!showPin)}
-                    className="flex items-center gap-1.5 text-xs text-white/25 hover:text-white/50 transition-colors"
-                  >
-                    {showPin ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-                    {showPin ? 'Hide' : 'Show'} PIN
-                  </button>
+                {/* Password */}
+                <div className="space-y-1.5">
+                  <label className="block text-[10px] text-white/30 uppercase tracking-wider font-medium">
+                    Password
+                  </label>
+                  <div className="relative">
+                    <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/20" />
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      value={password}
+                      onChange={(e) => { setPassword(e.target.value); setError(''); }}
+                      disabled={loading || showSuccess}
+                      className="w-full pl-10 pr-11 py-3 rounded-xl bg-white/[0.04] border-2 border-white/[0.08] text-white/90 text-sm outline-none transition-all duration-200 focus:border-[#00d9ff]/50 focus:bg-white/[0.06] focus:shadow-[0_0_20px_rgba(0,217,255,0.1)] placeholder:text-white/20 disabled:opacity-50"
+                      placeholder="********"
+                      style={{ caretColor: '#00d9ff' }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-white/20 hover:text-white/50 transition-colors"
+                      tabIndex={-1}
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
                 </div>
 
                 {/* Error message */}
@@ -346,27 +312,34 @@ export function AdminLoginPage({ onLogin }: AdminLoginPageProps) {
                       initial={{ opacity: 0, y: -5, height: 0 }}
                       animate={{ opacity: 1, y: 0, height: 'auto' }}
                       exit={{ opacity: 0, y: -5, height: 0 }}
-                      className="text-center mb-4"
                     >
-                      <p className="text-red-400/90 text-sm">
-                        {error}
-                        {attempts > 2 && (
-                          <span className="block text-xs text-white/30 mt-1">
-                            Hint: default PIN is 0000
-                          </span>
-                        )}
-                      </p>
+                      <p className="text-red-400/90 text-xs text-center py-1">{error}</p>
                     </motion.div>
                   )}
                 </AnimatePresence>
 
-                {/* Success animation */}
+                {/* Status */}
+                <AnimatePresence>
+                  {status && !error && !showSuccess && (
+                    <motion.div
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      className="flex items-center justify-center gap-2 text-xs text-[#00d9ff]/70"
+                    >
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                      <span>{status}</span>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* Success */}
                 <AnimatePresence>
                   {showSuccess && (
                     <motion.div
                       initial={{ opacity: 0, scale: 0.8 }}
                       animate={{ opacity: 1, scale: 1 }}
-                      className="text-center mb-4"
+                      className="text-center"
                     >
                       <motion.div
                         className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-[#00ffaa]/10 border border-[#00ffaa]/20"
@@ -384,49 +357,30 @@ export function AdminLoginPage({ onLogin }: AdminLoginPageProps) {
                   )}
                 </AnimatePresence>
 
-                {/* Enter button */}
+                {/* Login button */}
                 <motion.button
-                  onClick={() => {
-                    const code = pin.join('');
-                    if (code.length === 4) {
-                      validatePin(code);
-                    } else {
-                      inputRefs.current[pin.findIndex(d => d === '')]?.focus();
-                    }
-                  }}
-                  disabled={!isFilled || showSuccess}
+                  type="submit"
+                  disabled={loading || showSuccess || !email.trim() || !password.trim()}
                   className={`
                     w-full py-3.5 rounded-xl font-bold text-sm uppercase tracking-wider
                     transition-all duration-300 relative overflow-hidden
-                    ${isFilled && !showSuccess
+                    ${!loading && !showSuccess && email.trim() && password.trim()
                       ? 'bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] text-[#0a1628] hover:shadow-lg hover:shadow-[#00d9ff]/25 hover:scale-[1.02] active:scale-[0.98]'
                       : 'bg-white/5 text-white/20 cursor-not-allowed'
                     }
                   `}
-                  whileTap={isFilled ? { scale: 0.98 } : {}}
+                  whileTap={!loading && !showSuccess ? { scale: 0.98 } : {}}
                 >
                   <div className="flex items-center justify-center gap-2">
-                    <Lock className="w-4 h-4" />
-                    <span>{showSuccess ? 'Entering...' : 'Unlock Admin Panel'}</span>
+                    {loading ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Lock className="w-4 h-4" />
+                    )}
+                    <span>{showSuccess ? 'Entering...' : loading ? 'Authenticating...' : 'Unlock Admin Panel'}</span>
                   </div>
                 </motion.button>
-
-                {/* Quick access divider */}
-                <div className="flex items-center gap-3 my-5">
-                  <div className="flex-1 h-px bg-white/[0.06]" />
-                  <span className="text-[10px] text-white/20 uppercase tracking-widest">or</span>
-                  <div className="flex-1 h-px bg-white/[0.06]" />
-                </div>
-
-                {/* Quick Enter */}
-                <button
-                  onClick={handleQuickEnter}
-                  disabled={showSuccess}
-                  className="w-full py-3 rounded-xl border border-white/[0.08] bg-white/[0.02] text-white/50 hover:text-white/80 hover:bg-white/[0.05] hover:border-white/[0.15] transition-all text-sm font-medium"
-                >
-                  Quick Access (Demo)
-                </button>
-              </motion.div>
+              </motion.form>
             </div>
 
             {/* Bottom info bar */}

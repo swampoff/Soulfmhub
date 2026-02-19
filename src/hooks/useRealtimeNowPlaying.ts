@@ -107,8 +107,14 @@ export function useRealtimeNowPlaying() {
     
     listeners.add(handleUpdate);
 
+    // ── Periodic polling (safety net — Realtime can miss events) ──
+    const pollInterval = setInterval(() => {
+      loadInitialData();
+    }, 8000);
+
     // Cleanup
     return () => {
+      clearInterval(pollInterval);
       listeners.delete(handleUpdate);
       subscriberCount--;
       cleanupChannel();

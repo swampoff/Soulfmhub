@@ -6,25 +6,28 @@ async function fetchWithRetry(
   input: RequestInfo | URL,
   init?: RequestInit,
   retries = 3,
-  backoff = 1500,
-  timeoutMs = 15000,
+  backoff = 2000,
+  timeoutMs = 30000,
 ): Promise<Response> {
   let lastError: Error | null = null;
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), timeoutMs);
+      const tid = setTimeout(() => controller.abort('timeout'), timeoutMs);
       const response = await fetch(input, { ...init, signal: controller.signal });
-      clearTimeout(timeout);
+      clearTimeout(tid);
       return response;
     } catch (err: any) {
       lastError = err;
+      const reason = err?.name === 'AbortError' ? `timeout after ${timeoutMs}ms` : (err?.message || err);
       console.warn(
         `[API] Fetch attempt ${attempt + 1}/${retries} failed:`,
-        err?.message || err,
+        reason,
       );
       if (attempt < retries - 1) {
-        await new Promise((r) => setTimeout(r, backoff * (attempt + 1)));
+        const delay = backoff * (attempt + 1);
+        console.log(`[API] Retrying in ${delay}ms...`);
+        await new Promise((r) => setTimeout(r, delay));
       }
     }
   }
@@ -165,6 +168,18 @@ export const api = {
     return response.json();
   },
 
+  /** Get a fresh signed audio URL for playback (lightweight, no full track data). */
+  async getTrackPlayUrl(id: string): Promise<{ audioUrl?: string; coverUrl?: string; error?: string }> {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/tracks/${id}/play-url`, { headers });
+    if (!response.ok) {
+      const errText = await response.text().catch(() => response.statusText);
+      console.error(`[API] getTrackPlayUrl failed for ${id}:`, response.status, errText);
+      return { error: errText };
+    }
+    return response.json();
+  },
+
   async createTrack(track: any) {
     const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/tracks`, {
@@ -300,7 +315,8 @@ export const api = {
 
   // Schedules
   async getAllSchedules() {
-    const response = await fetchWithRetry(`${API_BASE}/schedule`);
+    // Cache-bust to avoid CDN / browser serving stale schedule list
+    const response = await fetchWithRetry(`${API_BASE}/schedule?_t=${Date.now()}`);
     return response.json();
   },
 
@@ -780,6 +796,41 @@ export const api = {
     return `${API_BASE}/stream`;
   },
 
+  // Get debug info for Auto DJ (raw KV state)
+  async getDebugInfo() {
+    const response = await fetchWithRetry(`${API_BASE}/radio/debug`);
+    return response.json();
+  },
+
+  // Raw KV schedule dump for diagnostics
+  async getKVScheduleDump() {
+    const response = await fetchWithRetry(`${API_BASE}/radio/kv-schedule-dump?_t=${Date.now()}`);
+    return response.json();
+  },
+
+  // Migrate old schedule slots to IANA timezone (DST-correct)
+  async migrateTimezone(timezone: string) {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/radio/migrate-timezone`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ timezone }),
+    });
+    return response.json();
+  },
+
+  // Get Auto DJ queue (upcoming tracks with metadata)
+  async getRadioQueue() {
+    const response = await fetchWithRetry(`${API_BASE}/radio/queue`);
+    return response.json();
+  },
+
+  // Get radio schedule status (current slot, upcoming, Auto DJ link)
+  async getRadioScheduleStatus() {
+    const response = await fetchWithRetry(`${API_BASE}/radio/schedule-status`);
+    return response.json();
+  },
+
   // Get stream info for public player
   async getStreamInfo(shortId: string) {
     const response = await fetchWithRetry(`${API_BASE}/stream/info/${shortId}`);
@@ -1097,6 +1148,461 @@ export const api = {
       method: 'DELETE',
       headers,
     });
+    return response.json();
+  },
+
+  // ==================== FEEDBACK ====================
+
+  async getFeedback() {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/feedback`, { headers });
+    return response.json();
+  },
+
+  async submitFeedback(feedback: { name?: string; email?: string; subject: string; message: string; rating?: number; category?: string }) {
+    const response = await fetchWithRetry(`${API_BASE}/feedback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(feedback),
+    });
+    return response.json();
+  },
+
+  async updateFeedback(id: string, updates: any) {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/feedback/${id}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(updates),
+    });
+    return response.json();
+  },
+
+  async deleteFeedback(id: string) {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/feedback/${id}`, {
+      method: 'DELETE',
+      headers,
+    });
+    return response.json();
+  },
+
+  // ==================== BRANDING SETTINGS ====================
+
+  async getBrandingSettings() {
+    const response = await fetchWithRetry(`${API_BASE}/settings/branding`);
+    return response.json();
+  },
+
+  async updateBrandingSettings(settings: any) {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/settings/branding`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(settings),
+    });
+    return response.json();
+  },
+
+  // ==================== AUDIT LOGS ====================
+
+  async getAuditLogs(limit = 100) {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/logs?limit=${limit}`, { headers });
+    return response.json();
+  },
+
+  async createAuditLog(entry: { level?: string; category?: string; message: string; details?: string }) {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/logs`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(entry),
+    });
+    return response.json();
+  },
+
+  async clearAuditLogs() {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/logs`, {
+      method: 'DELETE',
+      headers,
+    });
+    return response.json();
+  },
+
+  // ==================== BACKUP / EXPORT ====================
+
+  async exportData(type: string) {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/export/${type}`, { headers });
+    return response.json();
+  },
+
+  async getExportHistory() {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/export-history`, { headers });
+    return response.json();
+  },
+
+  // ==================== ADMIN DASHBOARD STATS ====================
+
+  async getDashboardStats() {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/admin/dashboard-stats`, { headers });
+    return response.json();
+  },
+
+  // ==================== AI DEV TEAM ====================
+
+  async getAITeamMembers() {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/ai-team/members`, { headers });
+    return response.json();
+  },
+
+  async updateAITeamMember(memberId: string, updates: Record<string, any>) {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/ai-team/members/${memberId}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(updates),
+    });
+    return response.json();
+  },
+
+  async getAITeamTasks() {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/ai-team/tasks`, { headers });
+    return response.json();
+  },
+
+  async createAITeamTask(task: { title: string; description?: string; priority?: string; assigneeId?: string; labels?: string[] }) {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/ai-team/tasks`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(task),
+    });
+    return response.json();
+  },
+
+  async updateAITeamTask(taskId: string, updates: Record<string, any>) {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/ai-team/tasks/${taskId}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(updates),
+    });
+    return response.json();
+  },
+
+  async deleteAITeamTask(taskId: string) {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/ai-team/tasks/${taskId}`, {
+      method: 'DELETE',
+      headers,
+    });
+    return response.json();
+  },
+
+  async getAITeamChat(memberId: string) {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/ai-team/chat/${memberId}`, { headers });
+    return response.json();
+  },
+
+  async sendAITeamChat(memberId: string, text: string) {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/ai-team/chat/${memberId}`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ text }),
+    });
+    return response.json();
+  },
+
+  // SSE streaming version — returns raw Response for manual stream reading
+  async streamAITeamChat(memberId: string, text: string): Promise<Response> {
+    const headers = await getPublicHeaders();
+    return fetch(`${API_BASE}/ai-team/chat/${memberId}/stream`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ text }),
+    });
+  },
+
+  async getAITeamStats() {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/ai-team/stats`, { headers });
+    return response.json();
+  },
+
+  // ── Autopilot ─────────────────────────────────────────────────────
+
+  // ── Editorial Department (Эфирный Отдел) ─────────────────────────
+
+  async getEditorialSessions() {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/editorial/sessions`, { headers });
+    return response.json();
+  },
+
+  async getEditorialSession(id: string) {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/editorial/sessions/${id}`, { headers });
+    return response.json();
+  },
+
+  async runEditorialSession(type: string, topic?: string) {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/editorial/run-session`, {
+      method: 'POST', headers,
+      body: JSON.stringify({ type, topic }),
+    }, 1, 0, 45000);
+    return response.json();
+  },
+
+  async approveEditorialSession(id: string, feedback?: string) {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/editorial/sessions/${id}/approve`, {
+      method: 'POST', headers,
+      body: JSON.stringify({ feedback }),
+    });
+    return response.json();
+  },
+
+  async rejectEditorialSession(id: string, feedback?: string) {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/editorial/sessions/${id}/reject`, {
+      method: 'POST', headers,
+      body: JSON.stringify({ feedback }),
+    });
+    return response.json();
+  },
+
+  async deleteEditorialSession(id: string) {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/editorial/sessions/${id}`, {
+      method: 'DELETE', headers,
+    });
+    return response.json();
+  },
+
+  async getEditorialDeliverables() {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/editorial/deliverables`, { headers });
+    return response.json();
+  },
+
+  async approveDeliverable(id: string, feedback?: string) {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/editorial/deliverables/${id}/approve`, {
+      method: 'POST', headers,
+      body: JSON.stringify({ feedback }),
+    });
+    return response.json();
+  },
+
+  async rejectDeliverable(id: string, feedback?: string) {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/editorial/deliverables/${id}/reject`, {
+      method: 'POST', headers,
+      body: JSON.stringify({ feedback }),
+    });
+    return response.json();
+  },
+
+  async getEditorialStats() {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/editorial/stats`, { headers });
+    return response.json();
+  },
+
+  async clearAllEditorial() {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/editorial/clear-all`, {
+      method: 'POST', headers,
+    });
+    return response.json();
+  },
+
+  // ── Autopilot ─────────────────────────────────────────────────────
+
+  async getAutopilot() {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/editorial/autopilot`, { headers });
+    return response.json();
+  },
+
+  async saveAutopilot(config: any) {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/editorial/autopilot`, {
+      method: 'POST', headers,
+      body: JSON.stringify(config),
+    });
+    return response.json();
+  },
+
+  async autopilotTick() {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/editorial/autopilot/tick`, {
+      method: 'POST', headers,
+    }, 1, 0, 45000);
+    return response.json();
+  },
+
+  // ── Implementation Tasks ──────────────────────────────────────────
+
+  async sendToAssistant(sessionId: string) {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/editorial/sessions/${sessionId}/send-to-assistant`, {
+      method: 'POST', headers,
+    }, 1, 0, 45000);
+    return response.json();
+  },
+
+  async getEditorialTasks() {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/editorial/tasks`, { headers });
+    return response.json();
+  },
+
+  async updateTaskStatus(taskId: string, body: any) {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/editorial/tasks/${taskId}/status`, {
+      method: 'POST', headers,
+      body: JSON.stringify(body),
+    });
+    return response.json();
+  },
+
+  async deleteTask(taskId: string) {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/editorial/tasks/${taskId}`, {
+      method: 'DELETE', headers,
+    });
+    return response.json();
+  },
+
+  // ── Telegram Integration ──────────────────────────────────────────
+
+  async getTelegramConfig() {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/editorial/telegram`, { headers });
+    return response.json();
+  },
+
+  async saveTelegramConfig(config: any) {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/editorial/telegram`, {
+      method: 'POST', headers,
+      body: JSON.stringify(config),
+    });
+    return response.json();
+  },
+
+  async testTelegram() {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/editorial/telegram/test`, {
+      method: 'POST', headers,
+    }, 1, 0, 15000);
+    return response.json();
+  },
+
+  async sendSessionToTelegram(sessionId: string) {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/editorial/sessions/${sessionId}/telegram`, {
+      method: 'POST', headers,
+    }, 1, 0, 15000);
+    return response.json();
+  },
+
+  // ── AI Providers CRUD ──────────────────────────────────────────────
+
+  async getAIProviders() {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/editorial/ai-providers`, { headers });
+    return response.json();
+  },
+
+  async getAgentAIConfig(agentId: string) {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/editorial/ai-providers/${agentId}`, { headers });
+    return response.json();
+  },
+
+  async updateAgentAIConfig(agentId: string, config: any) {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/editorial/ai-providers/${agentId}`, {
+      method: 'PUT', headers,
+      body: JSON.stringify(config),
+    });
+    return response.json();
+  },
+
+  async resetAgentAIConfig(agentId: string) {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/editorial/ai-providers/${agentId}`, {
+      method: 'DELETE', headers,
+    });
+    return response.json();
+  },
+
+  async resetAllAIConfigs() {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/editorial/ai-providers/reset-all`, {
+      method: 'POST', headers,
+    });
+    return response.json();
+  },
+
+  async testAgentAI(agentId: string) {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/editorial/ai-providers/${agentId}/test`, {
+      method: 'POST', headers,
+    }, 1, 0, 90000); // Extended timeout: thinking models + fallback chain
+    return response.json();
+  },
+
+  // ── Individual Agent Chats ─────────────────────────────────────────
+
+  async sendAgentChat(agentId: string, message: string) {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/editorial/agent-chat`, {
+      method: 'POST', headers,
+      body: JSON.stringify({ agentId, message }),
+    }, 1, 0, 90000); // Extended timeout: Gemini 2.5 Pro thinking + potential fallback chain
+    return response.json();
+  },
+
+  async getAgentChatHistory(agentId: string) {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/editorial/agent-chat/${agentId}`, { headers });
+    return response.json();
+  },
+
+  async clearAgentChats() {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/editorial/agent-chats`, {
+      method: 'DELETE', headers,
+    });
+    return response.json();
+  },
+
+  // ── Compiled Analysis ─────────────────────────────────────────────
+
+  async compileAnalysis() {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/editorial/compile-analysis`, {
+      method: 'POST', headers,
+    }, 1, 0, 120000);
+    return response.json();
+  },
+
+  async getLatestAnalysis() {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/editorial/latest-analysis`, { headers });
     return response.json();
   },
 };

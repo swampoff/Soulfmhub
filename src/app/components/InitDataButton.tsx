@@ -63,7 +63,11 @@ export function InitDataButton() {
 
       // Create sample schedule
       for (const schedule of sampleSchedule) {
-        await api.createSchedule(schedule);
+        await api.createSchedule({
+          ...schedule,
+          utcOffsetMinutes: new Date().getTimezoneOffset(),
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        });
       }
       toast.success(`Created ${sampleSchedule.length} schedule entries`);
 

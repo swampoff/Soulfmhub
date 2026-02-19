@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { Button } from '../../components/ui/button';
 import { Card } from '../../components/ui/card';
-import { projectId } from '/utils/supabase/info';
+import { projectId } from '../../../../utils/supabase/info';
 import { getAuthHeaders } from '../../../lib/api';
 import { toast } from 'sonner';
 import { AdminLayout } from '../../components/admin/AdminLayout';

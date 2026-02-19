@@ -1,24 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AdminLayout } from '../../components/admin/AdminLayout';
 import { Card } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Textarea } from '../../components/ui/textarea';
-import { Badge } from '../../components/ui/badge';
 import {
   Palette,
   Type,
-  Image,
   Eye,
   Save,
   Radio,
   RefreshCw,
-  CheckCircle,
   Globe,
   Loader2,
 } from 'lucide-react';
-import { motion } from 'motion/react';
 import { toast } from 'sonner';
+import { api } from '../../../lib/api';
 import soulFmLogo from 'figma:asset/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png';
 
 interface BrandSettings {
@@ -54,7 +51,26 @@ const FONT_OPTIONS = ['Righteous', 'Space Grotesk', 'Outfit', 'Montserrat', 'Beb
 export function BrandingPage() {
   const [settings, setSettings] = useState<BrandSettings>(DEFAULT_SETTINGS);
   const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [hasChanges, setHasChanges] = useState(false);
+
+  useEffect(() => {
+    loadSettings();
+  }, []);
+
+  const loadSettings = async () => {
+    setLoading(true);
+    try {
+      const result = await api.getBrandingSettings();
+      if (result.settings) {
+        setSettings({ ...DEFAULT_SETTINGS, ...result.settings });
+      }
+    } catch (error) {
+      console.error('[Branding] Error loading settings:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const updateField = (field: keyof BrandSettings, value: string) => {
     setSettings((prev) => ({ ...prev, [field]: value }));
@@ -63,17 +79,36 @@ export function BrandingPage() {
 
   const handleSave = async () => {
     setSaving(true);
-    await new Promise((r) => setTimeout(r, 1500));
-    setSaving(false);
-    setHasChanges(false);
-    toast.success('Branding settings saved!');
+    try {
+      await api.updateBrandingSettings(settings);
+      setHasChanges(false);
+      toast.success('Branding settings saved!');
+    } catch (error) {
+      console.error('[Branding] Save error:', error);
+      toast.error('Failed to save settings');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleReset = () => {
     setSettings(DEFAULT_SETTINGS);
-    setHasChanges(false);
-    toast.info('Settings reset to defaults');
+    setHasChanges(true);
+    toast.info('Settings reset to defaults — click Save to apply');
   };
+
+  if (loading) {
+    return (
+      <AdminLayout>
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <div className="text-center">
+            <Loader2 className="size-10 animate-spin text-[#00d9ff] mx-auto mb-4" />
+            <p className="text-white/60 text-sm">Loading branding settings...</p>
+          </div>
+        </div>
+      </AdminLayout>
+    );
+  }
 
   return (
     <AdminLayout>
@@ -253,14 +288,12 @@ export function BrandingPage() {
 
           {/* Preview Sidebar */}
           <div className="space-y-6">
-            {/* Live Preview */}
             <Card className="bg-white/5 border-white/10 p-6 sticky top-24">
               <h3 className="text-sm font-bold text-white/50 uppercase tracking-wider mb-4 flex items-center gap-2">
                 <Eye className="w-4 h-4" />
                 Live Preview
               </h3>
 
-              {/* Mini Preview Card */}
               <div
                 className="rounded-xl p-4 border border-white/10 mb-4"
                 style={{ backgroundColor: settings.bgDark }}
@@ -286,7 +319,6 @@ export function BrandingPage() {
                 </p>
               </div>
 
-              {/* Color Swatches */}
               <div className="flex gap-2">
                 {[settings.primaryColor, settings.secondaryColor, settings.accentColor, settings.bgDark].map((c, i) => (
                   <div

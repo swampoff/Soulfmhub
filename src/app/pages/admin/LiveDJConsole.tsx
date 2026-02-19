@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Button } from '../../components/ui/button';
 import { Card } from '../../components/ui/card';
 import { Radio, Square, Music, Users, PhoneCall, Clock, Activity } from 'lucide-react';
-import { projectId } from '/utils/supabase/info';
+import { projectId } from '../../../../utils/supabase/info';
 import { getAuthHeaders } from '../../../lib/api';
 import { toast } from 'sonner';
 import { AdminLayout } from '../../components/admin/AdminLayout';

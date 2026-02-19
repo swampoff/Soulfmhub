@@ -13,7 +13,7 @@ import {
   Copy, Filter, Square
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { projectId, publicAnonKey } from '/utils/supabase/info';
+import { projectId, publicAnonKey } from '../../../../utils/supabase/info';
 import { getAuthHeaders, getPublicHeaders } from '../../../lib/api';
 
 // ─── Types ───────────────────────────────────────────────────────────────
