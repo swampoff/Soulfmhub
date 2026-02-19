@@ -6,7 +6,7 @@ import { Play } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { api } from '../../lib/api';
 import { motion } from 'motion/react';
-import soulFmLogo from 'figma:asset/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png';
+import soulFmLogo from '@/assets/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png';
 import { FloatingParticles } from '../components/FloatingParticles';
 import { AnimatedBeach } from '../components/AnimatedBeach';
 import { AnimatedWaves } from '../components/AnimatedWaves';
