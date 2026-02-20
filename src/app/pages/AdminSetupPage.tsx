@@ -2,7 +2,7 @@ import React from 'react';
 import { AdminSetup } from '../components/AdminSetup';
 import { FloatingParticles } from '../components/FloatingParticles';
 import { AnimatedWaves } from '../components/AnimatedWaves';
-import soulFmLogo from 'figma:asset/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png';
+const soulFmLogo = '/favicon.ico'; // Automatically fixed figma asset import
 
 export function AdminSetupPage() {
   return (
