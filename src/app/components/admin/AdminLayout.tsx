@@ -26,15 +26,10 @@ import {
   Tv,
   Upload,
   Users,
-  FileText,
-  Archive,
-  Palette,
-  MessageSquare,
-  Bot,
-  Clapperboard,
+  Antenna,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-const soulFmLogo = '/favicon.ico'; // Automatically fixed figma asset import
+import soulFmLogo from 'figma:asset/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png';
 
 // ── All admin navigation items, organized by group ──────────────────
 
@@ -53,7 +48,8 @@ interface NavGroup {
 
 const PRIMARY_TABS: NavItem[] = [
   { id: 'home',      label: 'Home',      icon: Home,     path: '/admin' },
-  { id: 'media',     label: 'Media',     icon: Music,    path: '/admin/media' },
+  { id: 'broadcast', label: 'Эфир',      icon: Antenna,  path: '/admin/broadcast' },
+  { id: 'media',     label: 'Треки',     icon: Music,    path: '/admin/tracks' },
   { id: 'playlists', label: 'Playlists', icon: ListMusic, path: '/admin/playlists' },
   { id: 'schedule',  label: 'Schedule',  icon: Calendar, path: '/admin/schedule' },
   { id: 'shows',     label: 'Shows',     icon: Tv,       path: '/admin/shows' },
@@ -87,17 +83,10 @@ const MORE_GROUPS: NavGroup[] = [
     id: 'system',
     label: 'System',
     items: [
-      { id: 'analytics',   label: 'Analytics',    icon: BarChart3,      path: '/admin/analytics' },
-      { id: 'users',       label: 'Users',        icon: Users,          path: '/admin/users' },
-      { id: 'logs',        label: 'Logs & Audit', icon: FileText,       path: '/admin/logs' },
-      { id: 'backup',      label: 'Backup & Export', icon: Archive,     path: '/admin/backup' },
-      { id: 'branding',    label: 'Branding',     icon: Palette,        path: '/admin/branding' },
-      { id: 'feedback',    label: 'Feedback',     icon: MessageSquare,  path: '/admin/feedback' },
-      { id: 'ai-team',     label: 'AI Dev Team',  icon: Bot,            path: '/admin/ai-team' },
-      { id: 'broadcast-team', label: 'Broadcast Team', icon: Radio,     path: '/admin/broadcast-team' },
-      { id: 'editorial',    label: 'Editorial Dept', icon: Clapperboard,  path: '/admin/editorial' },
-      { id: 'system-test', label: 'System Test',  icon: TestTube,       path: '/admin/system-test' },
-      { id: 'upload-test', label: 'Upload Test',  icon: FileAudio,      path: '/admin/upload-test' },
+      { id: 'analytics',   label: 'Analytics',    icon: BarChart3, path: '/admin/analytics' },
+      { id: 'users',       label: 'Users',        icon: Users,     path: '/admin/users' },
+      { id: 'system-test', label: 'System Test',  icon: TestTube,  path: '/admin/system-test' },
+      { id: 'upload-test', label: 'Upload Test',  icon: FileAudio, path: '/admin/upload-test' },
     ],
   },
 ];
