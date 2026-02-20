@@ -1,1055 +1,440 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Music, Plus, Search, Upload, Edit2, Trash2, Play, Pause, X, Filter, Download, Tag, CheckSquare, Square } from 'lucide-react';
+import { Music, Search, Trash2, Play, Pause, ListPlus, Check, Plus, X, RefreshCw, Upload } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Card } from '../../components/ui/card';
 import { Input } from '../../components/ui/input';
-import { Label } from '../../components/ui/label';
-import { api } from '../../../lib/api';
-import { toast } from 'sonner';
-import { useNavigate } from 'react-router';
 import { AdminLayout } from '../../components/admin/AdminLayout';
+import { toast } from 'sonner';
+import { API_BASE } from '../../../lib/supabase';
+import { getAuthHeaders } from '../../../lib/api';
 
-interface Track {
-  id: string;
-  title: string;
-  artist: string;
-  album?: string;
-  genre: string;
-  duration: number;
-  fileUrl: string;
-  coverUrl?: string;
-  year?: number;
-  bpm?: number;
-  tags?: string[];
-  uploadedAt: string;
-  uploadedBy: string;
+const AZURA_BASE = 'http://187.77.85.42';
+
+interface UploadingFile {
+  name: string;
+  progress: number; // 0-100, -1 = error
+  done: boolean;
+  error?: string;
 }
 
+// ── Types ──────────────────────────────────────────────────────────────
+interface AzuraTrack {
+  id: number;
+  unique_id: string;
+  title: string;
+  artist: string;
+  album: string;
+  genre: string;
+  length: number;
+  length_text: string;
+  art: string;
+  path: string;
+  playlists: { id: number; name: string }[];
+}
+
+interface AzuraPlaylist {
+  id: number;
+  name: string;
+  short_name: string;
+  is_enabled: boolean;
+  num_songs: number;
+}
+
+// ── API helpers ────────────────────────────────────────────────────────
+async function azFetch(path: string, init?: RequestInit) {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${API_BASE}/azuracast${path}`, {
+    ...init,
+    headers: { ...headers, ...(init?.headers || {}) },
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || err.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+// ── Main Component ─────────────────────────────────────────────────────
 export function TracksManagement() {
-  const navigate = useNavigate();
-  const [tracks, setTracks] = useState<Track[]>([]);
+  const [tracks, setTracks] = useState<AzuraTrack[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedGenre, setSelectedGenre] = useState<string>('all');
-  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
-  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-  const [selectedTrack, setSelectedTrack] = useState<Track | null>(null);
-  const [playingTrackId, setPlayingTrackId] = useState<string | null>(null);
-  const [selectedTrackIds, setSelectedTrackIds] = useState<Set<string>>(new Set());
-  const [isBulkEditModalOpen, setIsBulkEditModalOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [playingId, setPlayingId] = useState<number | null>(null);
+  const [addToPlaylistTrack, setAddToPlaylistTrack] = useState<AzuraTrack | null>(null);
+  const [uploading, setUploading] = useState<UploadingFile[]>([]);
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const genres = ['all', 'soul', 'funk', 'jazz', 'disco', 'reggae', 'blues', 'r&b', 'afrobeat'];
-
-  useEffect(() => {
-    loadTracks();
-  }, []);
-
-  const loadTracks = async () => {
+  const loadTracks = useCallback(async () => {
+    setLoading(true);
     try {
-      setLoading(true);
-      const response = await api.getTracks();
-      setTracks(response.tracks || []);
-    } catch (error) {
-      console.error('Error loading tracks:', error);
-      toast.error('Failed to load tracks');
+      const data = await azFetch('/tracks');
+      setTracks(data.rows || []);
+    } catch (e: any) {
+      toast.error('Ошибка загрузки: ' + e.message);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const handleDeleteTrack = async (trackId: string) => {
-    if (!confirm('Are you sure you want to delete this track?')) return;
+  useEffect(() => { loadTracks(); }, [loadTracks]);
 
+  const handleDelete = async (track: AzuraTrack) => {
+    if (!confirm(`Удалить "${track.artist} — ${track.title}" из AzuraCast?`)) return;
     try {
-      await api.deleteTrack(trackId);
-      setTracks(tracks.filter(t => t.id !== trackId));
-      toast.success('Track deleted successfully');
-    } catch (error) {
-      console.error('Error deleting track:', error);
-      toast.error('Failed to delete track');
+      await azFetch(`/tracks/${track.id}`, { method: 'DELETE' });
+      setTracks(t => t.filter(x => x.id !== track.id));
+      toast.success('Трек удалён');
+    } catch (e: any) {
+      toast.error('Ошибка: ' + e.message);
     }
   };
 
-  const handleEditTrack = (track: Track) => {
-    navigate(`/admin/tracks/${track.id}/edit`);
+  const uploadFiles = async (files: File[]) => {
+    const audioFiles = files.filter(f => f.type.startsWith('audio/') || /\.(mp3|flac|aac|ogg|wav|m4a)$/i.test(f.name));
+    if (!audioFiles.length) { toast.error('Только аудио файлы'); return; }
+
+    const authHeaders = await getAuthHeaders();
+    const newItems: UploadingFile[] = audioFiles.map(f => ({ name: f.name, progress: 0, done: false }));
+    setUploading(prev => [...prev, ...newItems]);
+
+    await Promise.all(audioFiles.map(async (file, i) => {
+      const idx = (uploading.length) + i; // position in state - we use name as key instead
+      const update = (patch: Partial<UploadingFile>) =>
+        setUploading(prev => prev.map(u => u.name === file.name ? { ...u, ...patch } : u));
+
+      try {
+        update({ progress: 10 });
+        const fd = new FormData();
+        fd.append('file', file, file.name);
+
+        const res = await fetch(`${API_BASE}/azuracast/upload`, {
+          method: 'POST',
+          headers: authHeaders,
+          body: fd,
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || `HTTP ${res.status}`);
+        }
+        update({ progress: 100, done: true });
+        toast.success(`Загружен: ${file.name}`);
+      } catch (e: any) {
+        update({ progress: -1, error: e.message });
+        toast.error(`Ошибка: ${file.name} — ${e.message}`);
+      }
+    }));
+
+    // Refresh track list after uploads
+    await loadTracks();
+    // Clear completed after 3s
+    setTimeout(() => setUploading(prev => prev.filter(u => !u.done)), 3000);
   };
 
-  const toggleTrackSelection = (trackId: string) => {
-    const newSelected = new Set(selectedTrackIds);
-    if (newSelected.has(trackId)) {
-      newSelected.delete(trackId);
-    } else {
-      newSelected.add(trackId);
-    }
-    setSelectedTrackIds(newSelected);
+  const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files?.length) uploadFiles(Array.from(e.target.files));
+    e.target.value = '';
   };
 
-  const toggleSelectAll = () => {
-    if (selectedTrackIds.size === filteredTracks.length) {
-      setSelectedTrackIds(new Set());
-    } else {
-      setSelectedTrackIds(new Set(filteredTracks.map(t => t.id)));
-    }
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    uploadFiles(Array.from(e.dataTransfer.files));
   };
 
-  const handleBulkEditTags = () => {
-    if (selectedTrackIds.size === 0) {
-      toast.error('Please select at least one track');
-      return;
-    }
-    setIsBulkEditModalOpen(true);
-  };
-
-  const filteredTracks = tracks.filter(track => {
-    const matchesSearch = track.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         track.artist.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         track.album?.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesGenre = selectedGenre === 'all' || track.genre.toLowerCase() === selectedGenre;
-    return matchesSearch && matchesGenre;
+  const filtered = tracks.filter(t => {
+    const q = search.toLowerCase();
+    return !q || t.title?.toLowerCase().includes(q) || t.artist?.toLowerCase().includes(q) || t.album?.toLowerCase().includes(q);
   });
-
-  const formatDuration = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  if (loading) {
-    return (
-      <AdminLayout>
-        <div className="flex items-center justify-center min-h-[60vh]">
-          <div className="text-white">Loading tracks...</div>
-        </div>
-      </AdminLayout>
-    );
-  }
 
   return (
     <AdminLayout>
       <div className="space-y-6">
         {/* Header */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="flex items-center justify-between"
-        >
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
+          className="flex items-center justify-between flex-wrap gap-3">
           <div>
-            <h1 className="text-3xl font-righteous text-white mb-2">Track Management</h1>
-            <p className="text-white/70">Manage your music library • {tracks.length} tracks total</p>
-            {selectedTrackIds.size > 0 && (
-              <p className="text-[#00ffaa] text-sm mt-1">
-                {selectedTrackIds.size} track{selectedTrackIds.size > 1 ? 's' : ''} selected
-              </p>
-            )}
+            <h1 className="text-3xl font-righteous text-white mb-1">Треки</h1>
+            <p className="text-white/50 text-sm">AzuraCast · {tracks.length} треков</p>
           </div>
-          <div className="flex gap-2">
-            {selectedTrackIds.size > 0 && (
-              <Button
-                onClick={handleBulkEditTags}
-                className="bg-[#00ffaa] text-[#0a1628] hover:bg-[#00dd88]"
-              >
-                <Tag className="w-4 h-4 mr-2" />
-                Edit Tags ({selectedTrackIds.size})
-              </Button>
-            )}
-            <Button
-              onClick={() => setIsUploadModalOpen(true)}
-              className="bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] hover:from-[#00b8dd] hover:to-[#00dd88] text-[#0a1628]"
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              Upload Track
+          <div className="flex gap-2 flex-wrap">
+            <Button onClick={loadTracks} variant="outline"
+              className="bg-white/5 border-white/20 text-white hover:bg-white/10">
+              <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+              Обновить
             </Button>
+            <Button onClick={() => fileInputRef.current?.click()}
+              className="bg-[#00d9ff]/10 border border-[#00d9ff]/30 text-[#00d9ff] hover:bg-[#00d9ff]/20">
+              <Upload className="w-4 h-4 mr-2" />
+              Загрузить треки
+            </Button>
+            <input ref={fileInputRef} type="file" accept="audio/*,.mp3,.flac,.aac,.ogg,.wav,.m4a"
+              multiple className="hidden" onChange={handleFileInput} />
           </div>
         </motion.div>
 
-        {/* Search and Filter Bar */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-        >
-          <Card className="bg-white/10 backdrop-blur-sm border-white/20 p-4">
-            <div className="flex flex-col md:flex-row gap-4">
-              {/* Search */}
-              <div className="flex-1 relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/50" />
-                <Input
-                  type="text"
-                  placeholder="Search tracks, artists, albums..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10 bg-white/5 border-white/20 text-white placeholder:text-white/50"
-                />
-              </div>
-
-              {/* Genre Filter */}
-              <div className="flex gap-2 overflow-x-auto">
-                {genres.map((genre) => (
-                  <Button
-                    key={genre}
-                    onClick={() => setSelectedGenre(genre)}
-                    variant={selectedGenre === genre ? 'default' : 'outline'}
-                    size="sm"
-                    className={selectedGenre === genre 
-                      ? 'bg-[#00d9ff] text-[#0a1628] hover:bg-[#00b8dd]' 
-                      : 'bg-white/5 text-white border-white/20 hover:bg-white/10'
-                    }
-                  >
-                    {genre.charAt(0).toUpperCase() + genre.slice(1)}
-                  </Button>
-                ))}
-              </div>
-            </div>
-
-            {/* Stats */}
-            <div className="flex gap-6 mt-4 pt-4 border-t border-white/10 text-sm">
-              <div className="text-white/70">
-                Showing: <span className="text-white font-semibold">{filteredTracks.length}</span> tracks
-              </div>
-              <div className="text-white/70">
-                Total duration: <span className="text-white font-semibold">
-                  {Math.floor(tracks.reduce((acc, t) => acc + t.duration, 0) / 3600)}h {Math.floor((tracks.reduce((acc, t) => acc + t.duration, 0) % 3600) / 60)}m
-                </span>
-              </div>
-            </div>
-          </Card>
+        {/* Search */}
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}>
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40" />
+            <Input value={search} onChange={e => setSearch(e.target.value)}
+              placeholder="Поиск..."
+              className="pl-10 bg-white/5 border-white/20 text-white placeholder:text-white/40" />
+          </div>
         </motion.div>
 
-        {/* Tracks Table */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-        >
-          <Card className="bg-white/10 backdrop-blur-sm border-white/20 overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-white/5 border-b border-white/10">
-                  <tr>
-                    <th className="text-left text-white/70 text-sm font-semibold p-4 w-12">
-                      <button
-                        onClick={toggleSelectAll}
-                        className="text-[#00d9ff] hover:text-[#00ffaa] transition-colors"
-                      >
-                        {selectedTrackIds.size === filteredTracks.length && filteredTracks.length > 0 ? (
-                          <CheckSquare className="w-5 h-5" />
-                        ) : (
-                          <Square className="w-5 h-5" />
-                        )}
-                      </button>
-                    </th>
-                    <th className="text-left text-white/70 text-sm font-semibold p-4 w-12">#</th>
-                    <th className="text-left text-white/70 text-sm font-semibold p-4">Title</th>
-                    <th className="text-left text-white/70 text-sm font-semibold p-4">Artist</th>
-                    <th className="text-left text-white/70 text-sm font-semibold p-4">Album</th>
-                    <th className="text-left text-white/70 text-sm font-semibold p-4">Genre</th>
-                    <th className="text-left text-white/70 text-sm font-semibold p-4">Tags</th>
-                    <th className="text-left text-white/70 text-sm font-semibold p-4">Duration</th>
-                    <th className="text-left text-white/70 text-sm font-semibold p-4 w-32">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredTracks.length === 0 ? (
+        {/* Upload progress */}
+        <AnimatePresence>
+          {uploading.length > 0 && (
+            <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}
+              className="space-y-2">
+              {uploading.map((u) => (
+                <div key={u.name} className="bg-white/5 border border-white/10 rounded-lg px-4 py-2.5 flex items-center gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="text-white/80 text-sm truncate mb-1">{u.name}</div>
+                    {u.progress >= 0 ? (
+                      <div className="h-1 rounded-full bg-white/10 overflow-hidden">
+                        <div className="h-full rounded-full bg-[#00d9ff] transition-all duration-300"
+                          style={{ width: `${u.progress}%` }} />
+                      </div>
+                    ) : (
+                      <div className="text-red-400 text-xs">{u.error}</div>
+                    )}
+                  </div>
+                  <div className="shrink-0 text-xs text-white/40">
+                    {u.done ? <Check className="w-4 h-4 text-[#00ffaa]" /> : u.progress < 0 ? <X className="w-4 h-4 text-red-400" /> : `${u.progress}%`}
+                  </div>
+                </div>
+              ))}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Table */}
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
+          <Card
+            className={`bg-white/10 backdrop-blur-sm border-white/20 overflow-hidden transition-colors ${dragOver ? 'border-[#00d9ff]/60 bg-[#00d9ff]/5' : ''}`}
+            onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={handleDrop}>
+            {loading ? (
+              <div className="flex items-center justify-center py-20 text-white/50">
+                <RefreshCw className="w-6 h-6 animate-spin mr-3" />
+                Загрузка из AzuraCast...
+              </div>
+            ) : filtered.length === 0 ? (
+              <div className="text-center py-16 text-white/40">
+                <Music className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                <p>{search ? 'Ничего не найдено' : 'Нет треков'}</p>
+                {!search && (
+                  <Button onClick={() => fileInputRef.current?.click()}
+                    className="mt-4 bg-[#00d9ff]/10 border border-[#00d9ff]/30 text-[#00d9ff]">
+                    <Upload className="w-4 h-4 mr-2" /> Загрузить треки
+                  </Button>
+                )}
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-white/5 border-b border-white/10">
                     <tr>
-                      <td colSpan={9} className="text-center py-12 text-white/50">
-                        <Music className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                        <p>No tracks found</p>
-                        <p className="text-sm mt-2">Try adjusting your search or filters</p>
-                      </td>
+                      <th className="text-left text-white/50 text-xs font-semibold p-4 w-10">#</th>
+                      <th className="text-left text-white/50 text-xs font-semibold p-4">Трек</th>
+                      <th className="text-left text-white/50 text-xs font-semibold p-4 hidden md:table-cell">Альбом</th>
+                      <th className="text-left text-white/50 text-xs font-semibold p-4 hidden lg:table-cell">Плейлисты</th>
+                      <th className="text-left text-white/50 text-xs font-semibold p-4 w-16">Дл.</th>
+                      <th className="text-white/50 text-xs font-semibold p-4 w-28"></th>
                     </tr>
-                  ) : (
-                    filteredTracks.map((track, index) => (
-                      <motion.tr
-                        key={track.id}
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        transition={{ delay: index * 0.02 }}
-                        className="border-b border-white/5 hover:bg-white/5 transition-colors group"
-                      >
+                  </thead>
+                  <tbody>
+                    {filtered.map((track, idx) => (
+                      <motion.tr key={track.id}
+                        initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: idx * 0.008 }}
+                        className="border-b border-white/5 hover:bg-white/5 transition-colors group">
+                        <td className="p-4 text-white/30 text-sm">{idx + 1}</td>
                         <td className="p-4">
-                          <button
-                            onClick={() => toggleTrackSelection(track.id)}
-                            className="text-[#00d9ff] hover:text-[#00ffaa] transition-colors"
-                          >
-                            {selectedTrackIds.has(track.id) ? (
-                              <CheckSquare className="w-5 h-5" />
+                          <div className="flex items-center gap-3 min-w-0">
+                            {track.art ? (
+                              <img src={track.art} alt="" className="w-10 h-10 rounded object-cover shrink-0" />
                             ) : (
-                              <Square className="w-5 h-5" />
-                            )}
-                          </button>
-                        </td>
-                        <td className="p-4">
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="w-8 h-8 text-[#00d9ff] hover:bg-[#00d9ff]/10"
-                            onClick={() => setPlayingTrackId(playingTrackId === track.id ? null : track.id)}
-                          >
-                            {playingTrackId === track.id ? (
-                              <Pause className="w-4 h-4" />
-                            ) : (
-                              <Play className="w-4 h-4" />
-                            )}
-                          </Button>
-                        </td>
-                        <td className="p-4">
-                          <div className="flex items-center gap-3">
-                            {track.coverUrl ? (
-                              <img
-                                src={track.coverUrl}
-                                alt={track.title}
-                                className="w-10 h-10 rounded object-cover"
-                              />
-                            ) : (
-                              <div className="w-10 h-10 rounded bg-gradient-to-br from-[#00d9ff]/20 to-[#00ffaa]/20 flex items-center justify-center">
+                              <div className="w-10 h-10 rounded bg-gradient-to-br from-[#00d9ff]/20 to-[#00ffaa]/20 flex items-center justify-center shrink-0">
                                 <Music className="w-5 h-5 text-[#00d9ff]" />
                               </div>
                             )}
                             <div className="min-w-0">
-                              <div className="text-white font-semibold truncate">{track.title}</div>
-                              {track.year && (
-                                <div className="text-white/50 text-xs">{track.year}</div>
-                              )}
+                              <div className="text-white font-semibold text-sm truncate">{track.title || track.path}</div>
+                              <div className="text-white/50 text-xs truncate">{track.artist}</div>
                             </div>
                           </div>
                         </td>
-                        <td className="p-4 text-white/80">{track.artist}</td>
-                        <td className="p-4 text-white/70">{track.album || '-'}</td>
-                        <td className="p-4">
-                          <span className="px-2 py-1 rounded text-xs font-semibold bg-[#00d9ff]/20 text-[#00d9ff]">
-                            {track.genre}
-                          </span>
+                        <td className="p-4 text-white/50 text-sm hidden md:table-cell truncate max-w-[140px]">
+                          {track.album || '—'}
                         </td>
-                        <td className="p-4">
-                          {track.tags && track.tags.length > 0 ? (
-                            <div className="flex flex-wrap gap-1">
-                              {track.tags.slice(0, 2).map((tag) => (
-                                <span key={tag} className="px-2 py-0.5 rounded text-xs bg-[#00ffaa]/20 text-[#00ffaa]">
-                                  {tag}
+                        <td className="p-4 hidden lg:table-cell">
+                          <div className="flex flex-wrap gap-1">
+                            {track.playlists?.filter(p => p.name !== 'default').length > 0
+                              ? track.playlists.filter(p => p.name !== 'default').map(pl => (
+                                <span key={pl.id} className="px-2 py-0.5 rounded text-xs bg-[#00d9ff]/20 text-[#00d9ff]">
+                                  {pl.name}
                                 </span>
-                              ))}
-                              {track.tags.length > 2 && (
-                                <span className="px-2 py-0.5 rounded text-xs bg-white/10 text-white/50">
-                                  +{track.tags.length - 2}
-                                </span>
-                              )}
-                            </div>
-                          ) : (
-                            <span className="text-white/30 text-xs">-</span>
-                          )}
+                              ))
+                              : <span className="text-white/20 text-xs">—</span>
+                            }
+                          </div>
                         </td>
-                        <td className="p-4 text-white/70 font-mono text-sm">
-                          {formatDuration(track.duration)}
-                        </td>
+                        <td className="p-4 text-white/50 font-mono text-sm">{track.length_text}</td>
                         <td className="p-4">
                           <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              className="w-8 h-8 text-blue-400 hover:bg-blue-400/10"
-                              onClick={() => handleEditTrack(track)}
-                            >
-                              <Edit2 className="w-3.5 h-3.5" />
+                            <Button size="icon" variant="ghost"
+                              className="w-8 h-8 text-[#00d9ff] hover:bg-[#00d9ff]/10"
+                              onClick={() => setPlayingId(playingId === track.id ? null : track.id)}>
+                              {playingId === track.id ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
                             </Button>
-                            <Button
-                              size="icon"
-                              variant="ghost"
+                            <Button size="icon" variant="ghost" title="Добавить в плейлист"
+                              className="w-8 h-8 text-[#00ffaa] hover:bg-[#00ffaa]/10"
+                              onClick={() => setAddToPlaylistTrack(track)}>
+                              <ListPlus className="w-3.5 h-3.5" />
+                            </Button>
+                            <Button size="icon" variant="ghost"
                               className="w-8 h-8 text-red-400 hover:bg-red-400/10"
-                              onClick={() => handleDeleteTrack(track.id)}
-                            >
+                              onClick={() => handleDelete(track)}>
                               <Trash2 className="w-3.5 h-3.5" />
                             </Button>
                           </div>
                         </td>
                       </motion.tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </Card>
         </motion.div>
 
-        {/* Upload Modal */}
-        <UploadTrackModal
-          isOpen={isUploadModalOpen}
-          onClose={() => setIsUploadModalOpen(false)}
-          onSuccess={() => {
-            loadTracks();
-            setIsUploadModalOpen(false);
-          }}
-        />
-
-        {/* Edit Modal */}
-        {selectedTrack && (
-          <EditTrackModal
-            isOpen={isEditModalOpen}
-            track={selectedTrack}
-            onClose={() => {
-              setIsEditModalOpen(false);
-              setSelectedTrack(null);
-            }}
-            onSuccess={() => {
-              loadTracks();
-              setIsEditModalOpen(false);
-              setSelectedTrack(null);
-            }}
+        {/* Hidden audio player */}
+        {playingId !== null && (
+          <audio key={playingId} autoPlay
+            src={`${AZURA_BASE}/api/station/1/file/${playingId}/play`}
+            onEnded={() => setPlayingId(null)}
           />
         )}
 
-        {/* Bulk Edit Tags Modal */}
-        <BulkEditTagsModal
-          isOpen={isBulkEditModalOpen}
-          selectedTrackIds={selectedTrackIds}
-          tracks={tracks}
-          onClose={() => setIsBulkEditModalOpen(false)}
-          onSuccess={() => {
-            loadTracks();
-            setIsBulkEditModalOpen(false);
-            setSelectedTrackIds(new Set());
-          }}
-        />
+        {/* Add to playlist modal */}
+        {addToPlaylistTrack && (
+          <AddToPlaylistModal
+            track={addToPlaylistTrack}
+            onClose={() => { setAddToPlaylistTrack(null); loadTracks(); }}
+          />
+        )}
       </div>
     </AdminLayout>
   );
 }
 
-// Upload Modal Component
-function UploadTrackModal({ isOpen, onClose, onSuccess }: { isOpen: boolean; onClose: () => void; onSuccess: () => void }) {
-  const [uploading, setUploading] = useState(false);
-  const [formData, setFormData] = useState({
-    title: '',
-    artist: '',
-    album: '',
-    genre: 'soul',
-    year: '',
-    bpm: '',
-  });
+// ── Add to Playlist Modal ──────────────────────────────────────────────
+function AddToPlaylistModal({ track, onClose }: { track: AzuraTrack; onClose: () => void }) {
+  const [playlists, setPlaylists] = useState<AzuraPlaylist[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState<number | null>(null);
+  const [done, setDone] = useState<Set<number>>(new Set());
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setUploading(true);
+  useEffect(() => {
+    azFetch('/playlists')
+      .then(data => setPlaylists(Array.isArray(data) ? data : []))
+      .catch(e => toast.error(e.message))
+      .finally(() => setLoading(false));
+  }, []);
 
+  const alreadyIn = new Set(track.playlists?.map(p => p.id) || []);
+
+  const handleAdd = async (pl: AzuraPlaylist) => {
+    if (done.has(pl.id) || alreadyIn.has(pl.id)) return;
+    setSaving(pl.id);
     try {
-      await api.createTrack({
-        ...formData,
-        year: formData.year ? parseInt(formData.year) : undefined,
-        bpm: formData.bpm ? parseInt(formData.bpm) : undefined,
-        duration: 0, // TODO: Get from file
-        fileUrl: '', // TODO: Upload file
+      const headers = await getAuthHeaders();
+      // Get current file IDs in the playlist, add this track
+      const plData = await fetch(`${API_BASE}/azuracast/playlists`, { headers }).then(r => r.json());
+      const fullPl = (Array.isArray(plData) ? plData : []).find((p: any) => p.id === pl.id);
+      // AzuraCast: assign files to playlist via PUT /playlist/:id/files
+      // We just add this file ID to the playlist
+      const r = await fetch(`${API_BASE}/azuracast/playlists/${pl.id}/tracks`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({ trackIds: [track.id] }),
       });
-
-      toast.success('Track uploaded successfully');
-      onSuccess();
-    } catch (error) {
-      console.error('Error uploading track:', error);
-      toast.error('Failed to upload track');
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  return (
-    <AnimatePresence>
-      {isOpen && (
-        <>
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50"
-            onClick={onClose}
-          />
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.9, y: 20 }}
-            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-2xl bg-[#0a1628] rounded-xl border border-[#00d9ff]/30 shadow-2xl z-50 max-h-[90vh] overflow-y-auto"
-          >
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-bold text-white">Upload New Track</h2>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  onClick={onClose}
-                  className="text-white/70 hover:text-white"
-                >
-                  <X className="w-5 h-5" />
-                </Button>
-              </div>
-
-              <form onSubmit={handleSubmit} className="space-y-4">
-                {/* File Upload */}
-                <div className="border-2 border-dashed border-white/20 rounded-lg p-8 text-center hover:border-[#00d9ff]/50 transition-colors cursor-pointer">
-                  <Upload className="w-12 h-12 mx-auto mb-4 text-[#00d9ff]" />
-                  <p className="text-white mb-2">Drop audio file here or click to browse</p>
-                  <p className="text-white/50 text-sm">Supports MP3, WAV, FLAC up to 50MB</p>
-                  <input type="file" accept="audio/*" className="hidden" />
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label htmlFor="title" className="text-white">Title *</Label>
-                    <Input
-                      id="title"
-                      required
-                      value={formData.title}
-                      onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                      className="bg-white/5 border-white/20 text-white"
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="artist" className="text-white">Artist *</Label>
-                    <Input
-                      id="artist"
-                      required
-                      value={formData.artist}
-                      onChange={(e) => setFormData({ ...formData, artist: e.target.value })}
-                      className="bg-white/5 border-white/20 text-white"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label htmlFor="album" className="text-white">Album</Label>
-                    <Input
-                      id="album"
-                      value={formData.album}
-                      onChange={(e) => setFormData({ ...formData, album: e.target.value })}
-                      className="bg-white/5 border-white/20 text-white"
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="genre" className="text-white">Genre *</Label>
-                    <select
-                      id="genre"
-                      required
-                      value={formData.genre}
-                      onChange={(e) => setFormData({ ...formData, genre: e.target.value })}
-                      className="w-full h-10 px-3 rounded-md bg-white/5 border border-white/20 text-white"
-                    >
-                      <option value="soul">Soul</option>
-                      <option value="funk">Funk</option>
-                      <option value="jazz">Jazz</option>
-                      <option value="disco">Disco</option>
-                      <option value="reggae">Reggae</option>
-                      <option value="blues">Blues</option>
-                      <option value="r&b">R&B</option>
-                      <option value="afrobeat">Afrobeat</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label htmlFor="year" className="text-white">Year</Label>
-                    <Input
-                      id="year"
-                      type="number"
-                      value={formData.year}
-                      onChange={(e) => setFormData({ ...formData, year: e.target.value })}
-                      className="bg-white/5 border-white/20 text-white"
-                      placeholder="1970"
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="bpm" className="text-white">BPM</Label>
-                    <Input
-                      id="bpm"
-                      type="number"
-                      value={formData.bpm}
-                      onChange={(e) => setFormData({ ...formData, bpm: e.target.value })}
-                      className="bg-white/5 border-white/20 text-white"
-                      placeholder="120"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex gap-3 pt-4">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={onClose}
-                    className="flex-1 bg-white/5 text-white border-white/20 hover:bg-white/10"
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    type="submit"
-                    disabled={uploading}
-                    className="flex-1 bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] hover:from-[#00b8dd] hover:to-[#00dd88] text-[#0a1628]"
-                  >
-                    {uploading ? 'Uploading...' : 'Upload Track'}
-                  </Button>
-                </div>
-              </form>
-            </div>
-          </motion.div>
-        </>
-      )}
-    </AnimatePresence>
-  );
-}
-
-// Edit Modal Component
-function EditTrackModal({ isOpen, track, onClose, onSuccess }: { isOpen: boolean; track: Track; onClose: () => void; onSuccess: () => void }) {
-  const [saving, setSaving] = useState(false);
-  const [formData, setFormData] = useState({
-    title: track.title,
-    artist: track.artist,
-    album: track.album || '',
-    genre: track.genre,
-    year: track.year?.toString() || '',
-    bpm: track.bpm?.toString() || '',
-  });
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSaving(true);
-
-    try {
-      await api.updateTrack(track.id, {
-        ...formData,
-        year: formData.year ? parseInt(formData.year) : undefined,
-        bpm: formData.bpm ? parseInt(formData.bpm) : undefined,
-      });
-
-      toast.success('Track updated successfully');
-      onSuccess();
-    } catch (error) {
-      console.error('Error updating track:', error);
-      toast.error('Failed to update track');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <AnimatePresence>
-      {isOpen && (
-        <>
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50"
-            onClick={onClose}
-          />
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.9, y: 20 }}
-            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-2xl bg-[#0a1628] rounded-xl border border-[#00d9ff]/30 shadow-2xl z-50"
-          >
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-bold text-white">Edit Track</h2>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  onClick={onClose}
-                  className="text-white/70 hover:text-white"
-                >
-                  <X className="w-5 h-5" />
-                </Button>
-              </div>
-
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label htmlFor="edit-title" className="text-white">Title *</Label>
-                    <Input
-                      id="edit-title"
-                      required
-                      value={formData.title}
-                      onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                      className="bg-white/5 border-white/20 text-white"
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="edit-artist" className="text-white">Artist *</Label>
-                    <Input
-                      id="edit-artist"
-                      required
-                      value={formData.artist}
-                      onChange={(e) => setFormData({ ...formData, artist: e.target.value })}
-                      className="bg-white/5 border-white/20 text-white"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label htmlFor="edit-album" className="text-white">Album</Label>
-                    <Input
-                      id="edit-album"
-                      value={formData.album}
-                      onChange={(e) => setFormData({ ...formData, album: e.target.value })}
-                      className="bg-white/5 border-white/20 text-white"
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="edit-genre" className="text-white">Genre *</Label>
-                    <select
-                      id="edit-genre"
-                      required
-                      value={formData.genre}
-                      onChange={(e) => setFormData({ ...formData, genre: e.target.value })}
-                      className="w-full h-10 px-3 rounded-md bg-white/5 border border-white/20 text-white"
-                    >
-                      <option value="soul">Soul</option>
-                      <option value="funk">Funk</option>
-                      <option value="jazz">Jazz</option>
-                      <option value="disco">Disco</option>
-                      <option value="reggae">Reggae</option>
-                      <option value="blues">Blues</option>
-                      <option value="r&b">R&B</option>
-                      <option value="afrobeat">Afrobeat</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label htmlFor="edit-year" className="text-white">Year</Label>
-                    <Input
-                      id="edit-year"
-                      type="number"
-                      value={formData.year}
-                      onChange={(e) => setFormData({ ...formData, year: e.target.value })}
-                      className="bg-white/5 border-white/20 text-white"
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="edit-bpm" className="text-white">BPM</Label>
-                    <Input
-                      id="edit-bpm"
-                      type="number"
-                      value={formData.bpm}
-                      onChange={(e) => setFormData({ ...formData, bpm: e.target.value })}
-                      className="bg-white/5 border-white/20 text-white"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex gap-3 pt-4">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={onClose}
-                    className="flex-1 bg-white/5 text-white border-white/20 hover:bg-white/10"
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    type="submit"
-                    disabled={saving}
-                    className="flex-1 bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] hover:from-[#00b8dd] hover:to-[#00dd88] text-[#0a1628]"
-                  >
-                    {saving ? 'Saving...' : 'Save Changes'}
-                  </Button>
-                </div>
-              </form>
-            </div>
-          </motion.div>
-        </>
-      )}
-    </AnimatePresence>
-  );
-}
-
-// Bulk Edit Tags Modal Component
-function BulkEditTagsModal({ isOpen, selectedTrackIds, tracks, onClose, onSuccess }: { isOpen: boolean; selectedTrackIds: Set<string>; tracks: Track[]; onClose: () => void; onSuccess: () => void }) {
-  const [saving, setSaving] = useState(false);
-  const [newTag, setNewTag] = useState('');
-  const [tagsToAdd, setTagsToAdd] = useState<string[]>([]);
-  const [tagsToRemove, setTagsToRemove] = useState<string[]>([]);
-  const [mode, setMode] = useState<'add' | 'remove' | 'replace'>('add');
-
-  const selectedTracks = tracks.filter(t => selectedTrackIds.has(t.id));
-  
-  // Get all existing tags from selected tracks
-  const existingTags = new Set<string>();
-  selectedTracks.forEach(track => {
-    track.tags?.forEach(tag => existingTags.add(tag));
-  });
-
-  const handleAddTag = () => {
-    if (newTag.trim()) {
-      const tagUpper = newTag.trim().toUpperCase();
-      if (mode === 'add' && !tagsToAdd.includes(tagUpper)) {
-        setTagsToAdd([...tagsToAdd, tagUpper]);
-      } else if (mode === 'remove' && !tagsToRemove.includes(tagUpper)) {
-        setTagsToRemove([...tagsToRemove, tagUpper]);
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${r.status}`);
       }
-      setNewTag('');
-    }
-  };
-
-  const handleRemoveTagFromList = (tag: string, fromAdd: boolean) => {
-    if (fromAdd) {
-      setTagsToAdd(tagsToAdd.filter(t => t !== tag));
-    } else {
-      setTagsToRemove(tagsToRemove.filter(t => t !== tag));
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSaving(true);
-
-    try {
-      const trackIdsArray = Array.from(selectedTrackIds);
-      
-      if (mode === 'add') {
-        await api.bulkUpdateTags(trackIdsArray, {
-          action: 'add',
-          tags: tagsToAdd
-        });
-        toast.success(`Added tags to ${trackIdsArray.length} track(s)`);
-      } else if (mode === 'remove') {
-        await api.bulkUpdateTags(trackIdsArray, {
-          action: 'remove',
-          tags: tagsToRemove
-        });
-        toast.success(`Removed tags from ${trackIdsArray.length} track(s)`);
-      } else if (mode === 'replace') {
-        await api.bulkUpdateTags(trackIdsArray, {
-          action: 'replace',
-          tags: tagsToAdd
-        });
-        toast.success(`Replaced tags on ${trackIdsArray.length} track(s)`);
-      }
-
-      onSuccess();
-    } catch (error) {
-      console.error('Error updating tags:', error);
-      toast.error('Failed to update tags');
+      setDone(s => new Set(s).add(pl.id));
+      toast.success(`Добавлено в «${pl.name}»`);
+    } catch (e: any) {
+      toast.error(e.message);
     } finally {
-      setSaving(false);
+      setSaving(null);
     }
   };
 
   return (
     <AnimatePresence>
-      {isOpen && (
-        <>
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50"
-            onClick={onClose}
-          />
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.9, y: 20 }}
-            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-2xl bg-[#0a1628] rounded-xl border border-[#00d9ff]/30 shadow-2xl z-50 max-h-[90vh] overflow-y-auto"
-          >
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <h2 className="text-2xl font-bold text-white">Bulk Edit Tags</h2>
-                  <p className="text-white/70 text-sm mt-1">
-                    Editing tags for {selectedTrackIds.size} track(s)
-                  </p>
-                </div>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  onClick={onClose}
-                  className="text-white/70 hover:text-white"
-                >
-                  <X className="w-5 h-5" />
-                </Button>
-              </div>
-
-              <form onSubmit={handleSubmit} className="space-y-6">
-                {/* Mode Selection */}
-                <div>
-                  <Label className="text-white mb-3 block">Action</Label>
-                  <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      onClick={() => setMode('add')}
-                      className={mode === 'add' 
-                        ? 'bg-[#00d9ff] text-[#0a1628] hover:bg-[#00b8dd]' 
-                        : 'bg-white/5 text-white border border-white/20 hover:bg-white/10'
-                      }
-                    >
-                      Add Tags
-                    </Button>
-                    <Button
-                      type="button"
-                      onClick={() => setMode('remove')}
-                      className={mode === 'remove' 
-                        ? 'bg-[#00d9ff] text-[#0a1628] hover:bg-[#00b8dd]' 
-                        : 'bg-white/5 text-white border border-white/20 hover:bg-white/10'
-                      }
-                    >
-                      Remove Tags
-                    </Button>
-                    <Button
-                      type="button"
-                      onClick={() => setMode('replace')}
-                      className={mode === 'replace' 
-                        ? 'bg-[#00d9ff] text-[#0a1628] hover:bg-[#00b8dd]' 
-                        : 'bg-white/5 text-white border border-white/20 hover:bg-white/10'
-                      }
-                    >
-                      Replace All
-                    </Button>
-                  </div>
-                </div>
-
-                {/* Add/Remove Tags Input */}
-                <div>
-                  <Label className="text-white mb-2 block">
-                    {mode === 'add' ? 'Add Tags' : mode === 'remove' ? 'Remove Tags' : 'New Tags'}
-                  </Label>
-                  <div className="flex gap-2">
-                    <Input
-                      value={newTag}
-                      onChange={(e) => setNewTag(e.target.value)}
-                      onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddTag())}
-                      placeholder={mode === 'add' ? 'Add tag (e.g., NEWFUNK)' : mode === 'remove' ? 'Tag to remove' : 'New tag'}
-                      className="bg-white/5 border-white/20 text-white"
-                    />
-                    <Button
-                      type="button"
-                      onClick={handleAddTag}
-                      className="bg-[#00d9ff] text-[#0a1628] hover:bg-[#00b8dd]"
-                    >
-                      <Plus className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </div>
-
-                {/* Tags to Add */}
-                {mode === 'add' || mode === 'replace' ? (
-                  <div>
-                    <Label className="text-white mb-2 block">
-                      Tags to {mode === 'add' ? 'Add' : 'Set'} ({tagsToAdd.length})
-                    </Label>
-                    <div className="bg-white/5 border border-white/20 rounded-lg p-4 min-h-[80px]">
-                      {tagsToAdd.length === 0 ? (
-                        <p className="text-white/50 text-sm text-center py-4">
-                          No tags selected. Add tags above.
-                        </p>
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50" onClick={onClose} />
+      <motion.div
+        initial={{ opacity: 0, scale: 0.9, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.9, y: 20 }}
+        className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-[#0a1628] rounded-xl border border-[#00ffaa]/30 shadow-2xl z-50 max-h-[80vh] flex flex-col">
+        <div className="p-5 border-b border-white/10 flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-bold text-white flex items-center gap-2">
+              <ListPlus className="w-5 h-5 text-[#00ffaa]" /> Добавить в плейлист
+            </h2>
+            <p className="text-white/40 text-sm truncate mt-1">{track.artist} — {track.title}</p>
+          </div>
+          <Button size="icon" variant="ghost" onClick={onClose} className="text-white/50 hover:text-white">
+            <X className="w-5 h-5" />
+          </Button>
+        </div>
+        <div className="overflow-y-auto flex-1 p-3">
+          {loading ? (
+            <div className="text-center py-8 text-white/40">
+              <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2" />
+              Загрузка...
+            </div>
+          ) : playlists.filter(p => p.name !== 'default').length === 0 ? (
+            <div className="text-center py-8 text-white/40">Нет плейлистов</div>
+          ) : (
+            <div className="space-y-1.5">
+              {playlists.filter(p => p.name !== 'default').map(pl => {
+                const isIn = alreadyIn.has(pl.id) || done.has(pl.id);
+                const isLoading = saving === pl.id;
+                return (
+                  <button key={pl.id} onClick={() => handleAdd(pl)}
+                    disabled={isLoading || isIn}
+                    className={`w-full flex items-center justify-between p-3 rounded-lg border text-left transition-all
+                      ${isIn ? 'bg-[#00ffaa]/10 border-[#00ffaa]/30 cursor-default' : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'}`}>
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className={`w-2 h-2 rounded-full shrink-0 ${pl.is_enabled ? 'bg-green-400' : 'bg-white/20'}`} />
+                      <span className="text-white text-sm font-medium truncate">{pl.name}</span>
+                      <span className="text-white/30 text-xs shrink-0">{pl.num_songs} тр.</span>
+                    </div>
+                    <div className="shrink-0 ml-2">
+                      {isLoading ? (
+                        <div className="w-4 h-4 border-2 border-[#00ffaa]/40 border-t-[#00ffaa] rounded-full animate-spin" />
+                      ) : isIn ? (
+                        <Check className="w-4 h-4 text-[#00ffaa]" />
                       ) : (
-                        <div className="flex flex-wrap gap-2">
-                          {tagsToAdd.map((tag) => (
-                            <motion.div
-                              key={tag}
-                              initial={{ scale: 0.8, opacity: 0 }}
-                              animate={{ scale: 1, opacity: 1 }}
-                              className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#00ffaa]/20 border border-[#00ffaa]/30"
-                            >
-                              <Tag className="w-3.5 h-3.5 text-[#00ffaa]" />
-                              <span className="text-white text-sm font-semibold">{tag}</span>
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveTagFromList(tag, true)}
-                                className="text-white/70 hover:text-white transition-colors"
-                              >
-                                <X className="w-3.5 h-3.5" />
-                              </button>
-                            </motion.div>
-                          ))}
-                        </div>
+                        <Plus className="w-4 h-4 text-white/40" />
                       )}
                     </div>
-                  </div>
-                ) : null}
-
-                {/* Tags to Remove */}
-                {mode === 'remove' && (
-                  <div>
-                    <Label className="text-white mb-2 block">
-                      Tags to Remove ({tagsToRemove.length})
-                    </Label>
-                    <div className="bg-white/5 border border-white/20 rounded-lg p-4 min-h-[80px]">
-                      {tagsToRemove.length === 0 ? (
-                        <p className="text-white/50 text-sm text-center py-4">
-                          No tags selected. Add tags to remove above.
-                        </p>
-                      ) : (
-                        <div className="flex flex-wrap gap-2">
-                          {tagsToRemove.map((tag) => (
-                            <motion.div
-                              key={tag}
-                              initial={{ scale: 0.8, opacity: 0 }}
-                              animate={{ scale: 1, opacity: 1 }}
-                              className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-500/20 border border-red-500/30"
-                            >
-                              <Tag className="w-3.5 h-3.5 text-red-400" />
-                              <span className="text-white text-sm font-semibold">{tag}</span>
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveTagFromList(tag, false)}
-                                className="text-white/70 hover:text-white transition-colors"
-                              >
-                                <X className="w-3.5 h-3.5" />
-                              </button>
-                            </motion.div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {/* Existing Tags in Selected Tracks */}
-                {existingTags.size > 0 && mode === 'remove' && (
-                  <div>
-                    <Label className="text-white mb-2 block">
-                      Existing Tags in Selected Tracks (click to remove)
-                    </Label>
-                    <div className="flex flex-wrap gap-2">
-                      {Array.from(existingTags).map((tag) => (
-                        <button
-                          key={tag}
-                          type="button"
-                          onClick={() => {
-                            if (!tagsToRemove.includes(tag)) {
-                              setTagsToRemove([...tagsToRemove, tag]);
-                            }
-                          }}
-                          className="px-3 py-1.5 rounded-full bg-white/10 border border-white/20 text-white/70 text-sm hover:bg-red-500/20 hover:border-red-500/30 hover:text-white transition-all"
-                        >
-                          {tag}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <div className="flex gap-3 pt-4">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={onClose}
-                    className="flex-1 bg-white/5 text-white border-white/20 hover:bg-white/10"
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    type="submit"
-                    disabled={saving || (mode === 'add' && tagsToAdd.length === 0) || (mode === 'remove' && tagsToRemove.length === 0) || (mode === 'replace' && tagsToAdd.length === 0)}
-                    className="flex-1 bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] hover:from-[#00b8dd] hover:to-[#00dd88] text-[#0a1628]"
-                  >
-                    {saving ? 'Saving...' : 'Apply Changes'}
-                  </Button>
-                </div>
-              </form>
+                  </button>
+                );
+              })}
             </div>
-          </motion.div>
-        </>
-      )}
+          )}
+        </div>
+      </motion.div>
     </AnimatePresence>
   );
 }
