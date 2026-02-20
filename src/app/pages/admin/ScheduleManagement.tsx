@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { DndProvider, useDrag, useDrop } from 'react-dnd';
+import { HTML5Backend } from 'react-dnd-html5-backend';
 import { Card } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
@@ -34,19 +36,17 @@ import {
   Square,
   CheckSquare,
   Layers,
-  CalendarDays,
-  CalendarCheck2,
-  Radio,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { api, getAccessToken } from '../../../lib/api';
+import { api, getAccessToken, getAuthHeaders } from '../../../lib/api';
 import { AdminLayout } from '../../components/admin/AdminLayout';
 import { toast } from 'sonner';
 import { useNavigate, useSearchParams } from 'react-router';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../components/ui/dialog';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
-import { projectId } from '../../../../utils/supabase/info';
+import { projectId } from '/utils/supabase/info';
+import { API_BASE } from '../../../lib/supabase';
 
 // ==================== TYPES ====================
 
@@ -69,8 +69,6 @@ interface ScheduleSlot {
   title: string;
   isActive: boolean;
   repeatWeekly: boolean;
-  scheduleMode?: 'recurring' | 'one-time';
-  scheduledDate?: string | null; // ISO date "2026-02-18" for one-time slots
   jingleConfig?: JingleConfig | null;
   createdAt?: string;
 }
@@ -100,6 +98,11 @@ const JINGLE_CATEGORIES = [
   'show_outro', 'commercial', 'sweeper', 'bumper', 'liner', 'other'
 ];
 
+interface BlockMoveItem {
+  type: 'schedule-block-move';
+  block: ScheduleSlot;
+}
+
 interface PendingBulkDelete {
   slots: ScheduleSlot[];
   timerId: ReturnType<typeof setTimeout>;
@@ -114,57 +117,10 @@ const TIME_SLOTS = Array.from({ length: 24 }, (_, i) => `${i.toString().padStart
 const CELL_HEIGHT = 56;
 const UNDO_TIMEOUT_MS = 10000; // 10 seconds to undo
 
-// ==================== POINTER-BASED DRAG SYSTEM ====================
-// Replaces HTML5 DnD entirely — no effectAllowed/dropEffect/dataTransfer quirks.
-// _startPointerDrag is set by the active ScheduleManagement instance so
-// child components (DraggablePlaylist, ScheduleBlock) can initiate drags.
-type DragPayload =
-  | { type: 'playlist'; playlist: Playlist }
-  | { type: 'block-move'; blockId: string };
-
-let _startPointerDrag: ((payload: DragPayload, x: number, y: number) => void) | null = null;
-
-/**
- * Finds which schedule cell (day, hour) is under the pointer.
- * First tries data attributes on DOM elements; falls back to coordinate math.
- */
-function findCellAtPoint(
-  x: number,
-  y: number,
-  gridContainer: HTMLElement | null
-): { day: number; hour: number } | null {
-  // Strategy 1 — walk up from element under cursor
-  const el = document.elementFromPoint(x, y);
-  if (el) {
-    const cellEl = (el as Element).closest('[data-cell-day]');
-    if (cellEl) {
-      const day = parseInt(cellEl.getAttribute('data-cell-day') ?? '-1', 10);
-      const hour = parseInt(cellEl.getAttribute('data-cell-hour') ?? '-1', 10);
-      if (day >= 0 && hour >= 0) return { day, hour };
-    }
-  }
-
-  // Strategy 2 — compute from scroll container + CELL_HEIGHT
-  if (!gridContainer) return null;
-  const tbody = gridContainer.querySelector('tbody');
-  if (!tbody) return null;
-  const tbodyRect = tbody.getBoundingClientRect();
-  if (x < tbodyRect.left || x > tbodyRect.right || y < tbodyRect.top || y > tbodyRect.bottom) return null;
-
-  const relY = y - tbodyRect.top + gridContainer.scrollTop;
-  const hour = Math.floor(relY / CELL_HEIGHT);
-  if (hour < 0 || hour > 23) return null;
-
-  const firstRow = tbody.querySelector('tr');
-  if (!firstRow) return null;
-  const tds = firstRow.querySelectorAll('td');
-  // td[0] = time label; td[1..7] = day columns
-  for (let i = 1; i < tds.length && i <= 7; i++) {
-    const rect = tds[i].getBoundingClientRect();
-    if (x >= rect.left && x <= rect.right) return { day: i - 1, hour };
-  }
-  return null;
-}
+const DND_TYPES = {
+  PLAYLIST: 'playlist-to-schedule',
+  BLOCK_MOVE: 'schedule-block-move',
+};
 
 // ==================== UTILITIES ====================
 
@@ -226,67 +182,21 @@ function findNearestFreeSlot(
   return null;
 }
 
-// ==================== SCHEDULE MODE UTILITIES ====================
-
-type ScheduleViewMode = 'all' | 'recurring' | 'this-week';
-
-function getDateForDayInCurrentWeek(dayIndex: number): string {
-  const now = new Date();
-  const diff = dayIndex - now.getDay();
-  const target = new Date(now);
-  target.setDate(now.getDate() + diff);
-  return target.toISOString().split('T')[0]; // "2026-02-18"
-}
-
-function getWeekBounds(): { start: Date; end: Date; label: string } {
-  const now = new Date();
-  const start = new Date(now);
-  start.setDate(now.getDate() - now.getDay()); // Sunday
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(start);
-  end.setDate(start.getDate() + 6); // Saturday
-  end.setHours(23, 59, 59, 999);
-  const fmt = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  return { start, end, label: `${fmt(start)} – ${fmt(end)}` };
-}
-
-function isDateInCurrentWeek(dateStr: string | null | undefined): boolean {
-  if (!dateStr) return false;
-  const date = new Date(dateStr + 'T12:00:00');
-  const { start, end } = getWeekBounds();
-  return date >= start && date <= end;
-}
-
-function isOneTimeExpired(slot: ScheduleSlot): boolean {
-  if ((slot.scheduleMode || 'recurring') !== 'one-time') return false;
-  if (!slot.scheduledDate) return true;
-  const today = new Date().toISOString().split('T')[0];
-  return slot.scheduledDate < today;
-}
-
-function getEffectiveMode(slot: ScheduleSlot): 'recurring' | 'one-time' {
-  return slot.scheduleMode || 'recurring';
-}
-
 // ==================== DRAGGABLE PLAYLIST (SIDEBAR) ====================
 
 function DraggablePlaylist({ playlist }: { playlist: Playlist }) {
-  const [isDragging, setIsDragging] = useState(false);
+  const [{ isDragging }, drag] = useDrag(() => ({
+    type: DND_TYPES.PLAYLIST,
+    item: playlist,
+    collect: (monitor) => ({ isDragging: monitor.isDragging() }),
+  }));
   const color = playlist.color || '#00d9ff';
 
-  const handlePointerDown = (e: React.PointerEvent) => {
-    if (e.button !== 0) return;
-    e.preventDefault();
-    setIsDragging(true);
-    _startPointerDrag?.({ type: 'playlist', playlist }, e.clientX, e.clientY);
-    const onUp = () => { setIsDragging(false); window.removeEventListener('pointerup', onUp); };
-    window.addEventListener('pointerup', onUp);
-  };
-
   return (
-    <div
-      onPointerDown={handlePointerDown}
-      className={`p-3 rounded-lg cursor-grab active:cursor-grabbing transition-all hover:scale-[1.02] select-none touch-none ${isDragging ? 'opacity-40 scale-95' : ''}`}
+    <motion.div
+      ref={drag}
+      whileHover={{ scale: 1.02 }}
+      className={`p-3 rounded-lg cursor-move transition-all ${isDragging ? 'opacity-40 scale-95' : ''}`}
       style={{ backgroundColor: `${color}15`, borderLeft: `3px solid ${color}` }}
     >
       <div className="flex items-center gap-2">
@@ -302,7 +212,7 @@ function DraggablePlaylist({ playlist }: { playlist: Playlist }) {
           </p>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }
 
@@ -336,7 +246,6 @@ function ScheduleBlock({
 
   const [resizeEndH, setResizeEndH] = useState<number | null>(null);
   const [resizeConflict, setResizeConflict] = useState<ScheduleSlot | null>(null);
-  const [isDragging, setIsDragging] = useState(false);
   const isResizing = useRef(false);
   const startY = useRef(0);
   const origEndH = useRef(endH);
@@ -344,15 +253,11 @@ function ScheduleBlock({
   const effectiveEndH = resizeEndH ?? endH;
   const duration = effectiveEndH - startH;
 
-  const handleBlockPointerDown = (e: React.PointerEvent) => {
-    if (e.button !== 0) return;
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragging(true);
-    _startPointerDrag?.({ type: 'block-move', blockId: block.id }, e.clientX, e.clientY);
-    const onUp = () => { setIsDragging(false); window.removeEventListener('pointerup', onUp); };
-    window.addEventListener('pointerup', onUp);
-  };
+  const [{ isDragging }, drag, preview] = useDrag(() => ({
+    type: DND_TYPES.BLOCK_MOVE,
+    item: { type: DND_TYPES.BLOCK_MOVE, block } as BlockMoveItem,
+    collect: (monitor) => ({ isDragging: monitor.isDragging() }),
+  }), [block]);
 
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -394,8 +299,11 @@ function ScheduleBlock({
   }, [block, schedules, startH, endH, onResizeCommit]);
 
   return (
-    <div
-      className={`absolute inset-x-0 top-0 mx-0.5 mt-0.5 rounded-md overflow-visible group transition-opacity duration-200 ${
+    <motion.div
+      ref={preview}
+      initial={{ opacity: 0, scale: 0.9 }}
+      animate={{ opacity: isDragging ? 0.3 : 1, scale: 1 }}
+      className={`absolute inset-x-0 top-0 mx-0.5 mt-0.5 rounded-md overflow-visible group ${
         !block.isActive ? 'opacity-50' : ''
       } ${isHighlighted ? 'ring-2 ring-[#00ffaa] ring-offset-1 ring-offset-transparent' : ''}
       ${resizeConflict ? 'ring-2 ring-red-500/60' : ''}`}
@@ -404,7 +312,6 @@ function ScheduleBlock({
         backgroundColor: resizeConflict ? 'rgba(239,68,68,0.15)' : isHighlighted ? `${color}35` : `${color}20`,
         borderLeft: `3px solid ${resizeConflict ? '#ef4444' : color}`,
         zIndex: isDragging ? 30 : 10,
-        opacity: isDragging ? 0.3 : undefined,
       }}
     >
       <div className="p-1.5 h-full flex flex-col relative">
@@ -418,11 +325,7 @@ function ScheduleBlock({
 
         <div className="flex items-start justify-between gap-1">
           <div className="flex items-start gap-1 flex-1 min-w-0">
-            <div
-              onPointerDown={handleBlockPointerDown}
-              className="mt-0.5 cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 select-none touch-none"
-              title="Drag to move"
-            >
+            <div ref={drag} className="mt-0.5 cursor-move opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" title="Drag to move">
               <Move className="size-2.5 text-white/40" />
             </div>
             <div className="flex-1 min-w-0 cursor-pointer" onClick={() => onClickBlock(block.playlistId)} title={`Open "${block.playlistName}" playlist`}>
@@ -463,23 +366,10 @@ function ScheduleBlock({
 
         {duration >= 2 && !resizeConflict && (
           <div className="mt-auto flex items-center gap-1 flex-wrap pb-2">
-            {/* Schedule mode badge */}
-            {getEffectiveMode(block) === 'one-time' ? (
-              <span className={`inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] ${
-                isOneTimeExpired(block)
-                  ? 'bg-red-500/15 text-red-400/60 line-through'
-                  : 'bg-amber-500/15 text-amber-400/80'
-              }`} title={block.scheduledDate ? `Scheduled for ${block.scheduledDate}` : 'One-time'}>
-                <CalendarCheck2 className="size-2" /> {block.scheduledDate ? new Date(block.scheduledDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'One-time'}
+            {block.repeatWeekly && (
+              <span className="inline-flex items-center gap-0.5 px-1 py-0.5 bg-white/10 rounded text-[9px] text-white/50">
+                <Repeat className="size-2" /> Weekly
               </span>
-            ) : (
-              <>
-                {block.repeatWeekly && (
-                  <span className="inline-flex items-center gap-0.5 px-1 py-0.5 bg-white/10 rounded text-[9px] text-white/50">
-                    <Repeat className="size-2" /> Weekly
-                  </span>
-                )}
-              </>
             )}
             {block.dayOfWeek === null && (
               <span className="inline-flex items-center gap-0.5 px-1 py-0.5 bg-[#00ffaa]/15 rounded text-[9px] text-[#00ffaa]/70">
@@ -545,7 +435,7 @@ function ScheduleBlock({
           <ChevronsUpDown className="size-2.5 text-white/60" />
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }
 
@@ -555,8 +445,8 @@ function ScheduleCell({
   day,
   hour,
   schedules,
-  hiddenScheduleIds,
-  isOver,
+  onDropPlaylist,
+  onMoveBlock,
   onDelete,
   onToggleActive,
   onClickBlock,
@@ -568,8 +458,8 @@ function ScheduleCell({
   day: number;
   hour: number;
   schedules: ScheduleSlot[];
-  hiddenScheduleIds: Set<string>;
-  isOver: boolean;
+  onDropPlaylist: (playlist: Playlist, day: number, hour: number) => void;
+  onMoveBlock: (blockId: string, newDay: number, newHour: number) => void;
   onDelete: (id: string) => void;
   onToggleActive: (slot: ScheduleSlot) => void;
   onClickBlock: (playlistId: string) => void;
@@ -578,8 +468,26 @@ function ScheduleCell({
   onResizeCommit: (id: string, newEndTime: string) => void;
   onCopyBlock: (slot: ScheduleSlot) => void;
 }) {
+  const [{ isOver, canDrop }, drop] = useDrop(() => ({
+    accept: [DND_TYPES.PLAYLIST, DND_TYPES.BLOCK_MOVE],
+    drop: (item: any, monitor) => {
+      const itemType = monitor.getItemType();
+      if (itemType === DND_TYPES.PLAYLIST) {
+        onDropPlaylist(item as Playlist, day, hour);
+      } else if (itemType === DND_TYPES.BLOCK_MOVE) {
+        const moveItem = item as BlockMoveItem;
+        onMoveBlock(moveItem.block.id, day, hour);
+      }
+    },
+    // Always allow drop — snap-to-grid handles conflicts in the handler
+    canDrop: () => true,
+    collect: (monitor) => ({
+      isOver: monitor.isOver(),
+      canDrop: monitor.canDrop(),
+    }),
+  }), [schedules, day, hour]);
+
   const cellBlocks = schedules.filter(block => {
-    if (hiddenScheduleIds.has(block.id)) return false;
     const matchesDay = block.dayOfWeek === day || block.dayOfWeek === null;
     return matchesDay && parseInt(block.startTime.split(':')[0]) === hour;
   });
@@ -594,9 +502,8 @@ function ScheduleCell({
 
   return (
     <div
-      data-cell-day={day}
-      data-cell-hour={hour}
-      className={`relative h-full min-h-[56px] transition-colors border-b border-r border-white/5 ${
+      ref={drop}
+      className={`relative min-h-[56px] transition-colors border-b border-r border-white/5 ${
         isOver ? 'bg-[#00d9ff]/10 ring-1 ring-inset ring-[#00d9ff]/20' : isOccupied ? 'bg-white/[0.02]' : 'hover:bg-white/[0.02]'
       }`}
     >
@@ -1070,8 +977,6 @@ function EditScheduleDialog({
     startTime: slot.startTime,
     endTime: slot.endTime,
     repeatWeekly: slot.repeatWeekly,
-    scheduleMode: (slot.scheduleMode || 'recurring') as 'recurring' | 'one-time',
-    scheduledDate: slot.scheduledDate || (slot.dayOfWeek !== null ? getDateForDayInCurrentWeek(slot.dayOfWeek) : null),
   });
 
   const defaultJingleConfig: JingleConfig = {
@@ -1125,7 +1030,7 @@ function EditScheduleDialog({
   useEffect(() => { return () => stopPreview(); }, [stopPreview]);
 
   useEffect(() => {
-    setForm({ title: slot.title, playlistId: slot.playlistId, dayOfWeek: slot.dayOfWeek, startTime: slot.startTime, endTime: slot.endTime, repeatWeekly: slot.repeatWeekly, scheduleMode: (slot.scheduleMode || 'recurring') as 'recurring' | 'one-time', scheduledDate: slot.scheduledDate || (slot.dayOfWeek !== null ? getDateForDayInCurrentWeek(slot.dayOfWeek) : null) });
+    setForm({ title: slot.title, playlistId: slot.playlistId, dayOfWeek: slot.dayOfWeek, startTime: slot.startTime, endTime: slot.endTime, repeatWeekly: slot.repeatWeekly });
     setJingleConfig(slot.jingleConfig || defaultJingleConfig);
     setShowJingleSection(!!(slot.jingleConfig?.introJingleId || slot.jingleConfig?.outroJingleId || slot.jingleConfig?.disableJingles || slot.jingleConfig?.jingleFrequencyOverride || slot.jingleConfig?.jingleCategoryFilter?.length));
     stopPreview();
@@ -1136,14 +1041,7 @@ function EditScheduleDialog({
 
   const handleSave = () => {
     stopPreview();
-    const updates: any = {
-      ...form,
-      jingleConfig: showJingleSection ? jingleConfig : defaultJingleConfig,
-      scheduleMode: form.scheduleMode,
-      scheduledDate: form.scheduleMode === 'one-time' ? form.scheduledDate : null,
-      // If switching to one-time, ensure repeatWeekly is false
-      repeatWeekly: form.scheduleMode === 'one-time' ? false : form.repeatWeekly,
-    };
+    const updates: any = { ...form, jingleConfig: showJingleSection ? jingleConfig : defaultJingleConfig };
     onSave(slot.id, updates);
     onOpenChange(false);
   };
@@ -1190,77 +1088,10 @@ function EditScheduleDialog({
               {DAYS_OF_WEEK.map((d, i) => <option key={i} value={i}>{d}</option>)}
             </select>
           </div>
-          {/* ═══════════ SCHEDULE MODE ═══════════ */}
-          <div>
-            <Label className="text-white/80 mb-2 block">Schedule Mode</Label>
-            <div className="flex rounded-lg overflow-hidden border border-white/10">
-              <button
-                type="button"
-                onClick={() => setForm({ ...form, scheduleMode: 'recurring', repeatWeekly: true })}
-                className={`flex-1 flex items-center justify-center gap-2 px-3 py-2.5 text-sm font-medium transition-all ${
-                  form.scheduleMode === 'recurring'
-                    ? 'bg-gradient-to-r from-[#00d9ff]/20 to-[#00ffaa]/20 text-[#00d9ff] border-r border-[#00d9ff]/30'
-                    : 'bg-[#0a1628] text-white/40 hover:text-white/60 border-r border-white/10'
-                }`}
-              >
-                <Repeat className="size-4" /> Recurring
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const date = form.dayOfWeek !== null ? getDateForDayInCurrentWeek(form.dayOfWeek) : getDateForDayInCurrentWeek(new Date().getDay());
-                  setForm({ ...form, scheduleMode: 'one-time', repeatWeekly: false, scheduledDate: date });
-                }}
-                className={`flex-1 flex items-center justify-center gap-2 px-3 py-2.5 text-sm font-medium transition-all ${
-                  form.scheduleMode === 'one-time'
-                    ? 'bg-gradient-to-r from-amber-500/20 to-orange-500/20 text-amber-400'
-                    : 'bg-[#0a1628] text-white/40 hover:text-white/60'
-                }`}
-              >
-                <CalendarCheck2 className="size-4" /> This Week Only
-              </button>
-            </div>
-          </div>
-
-          {/* One-time: date picker */}
-          <AnimatePresence>
-            {form.scheduleMode === 'one-time' && (
-              <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
-                <div>
-                  <Label className="text-amber-400/80 text-xs flex items-center gap-1.5 mb-1">
-                    <CalendarCheck2 className="size-3" /> Scheduled Date
-                  </Label>
-                  <Input
-                    type="date"
-                    value={form.scheduledDate || ''}
-                    onChange={e => {
-                      const date = e.target.value;
-                      // Sync dayOfWeek from chosen date
-                      const dayOfWeek = date ? new Date(date + 'T12:00:00').getDay() : form.dayOfWeek;
-                      setForm({ ...form, scheduledDate: date, dayOfWeek });
-                    }}
-                    className="bg-[#0a1628] border-amber-500/20 text-white"
-                  />
-                  {form.scheduledDate && (
-                    <p className="text-[10px] text-amber-400/50 mt-1">
-                      {new Date(form.scheduledDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
-                      {isOneTimeExpired({ ...slot, scheduledDate: form.scheduledDate, scheduleMode: 'one-time' }) && (
-                        <span className="text-red-400 ml-2">(expired — date is in the past)</span>
-                      )}
-                    </p>
-                  )}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* Repeat weekly (only for recurring) */}
-          {form.scheduleMode === 'recurring' && (
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={form.repeatWeekly} onChange={e => setForm({ ...form, repeatWeekly: e.target.checked })} className="rounded bg-[#0a1628] border-white/20" />
-              <span className="text-sm text-white/70">Repeat weekly</span>
-            </label>
-          )}
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" checked={form.repeatWeekly} onChange={e => setForm({ ...form, repeatWeekly: e.target.checked })} className="rounded bg-[#0a1628] border-white/20" />
+            <span className="text-sm text-white/70">Repeat weekly</span>
+          </label>
 
           {/* ═══════════ JINGLE INTEGRATION SECTION ═══════════ */}
           <div className="border-t border-white/10 pt-3">
@@ -1406,94 +1237,37 @@ export function ScheduleManagement() {
   const [schedules, setSchedules] = useState<ScheduleSlot[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [jingles, setJingles] = useState<Jingle[]>([]);
-  const gridScrollRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
-
-  // ── Live ON AIR status (auto-refreshes every 30s) ──
-  const [liveStatus, setLiveStatus] = useState<any>(null);
-  const [isLiveRefreshing, setIsLiveRefreshing] = useState(false);
-  const liveStatusIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  // ── Pointer-drag state ──
-  const [dragInfo, setDragInfo] = useState<{ payload: DragPayload; ghostX: number; ghostY: number } | null>(null);
-  const [dragOverCell, setDragOverCell] = useState<{ day: number; hour: number } | null>(null);
-  // Stable refs so the permanent pointer-event handlers always see current values
-  const dragInfoRef = useRef<typeof dragInfo>(null);
-  const dragOverCellRef = useRef<{ day: number; hour: number } | null>(null);
-  const dropPlaylistRef = useRef<(pl: Playlist, day: number, hour: number) => void>(() => {});
-  const moveBlockRef = useRef<(id: string, day: number, hour: number) => void>(() => {});
   const [showSidebar, setShowSidebar] = useState(true);
   const [editingSlot, setEditingSlot] = useState<ScheduleSlot | null>(null);
   const [copyingSlot, setCopyingSlot] = useState<ScheduleSlot | null>(null);
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [bulkDeleteMode, setBulkDeleteMode] = useState<'playlist' | 'all'>('all');
   const [batchJingleOpen, setBatchJingleOpen] = useState(false);
-  const [scheduleViewMode, setScheduleViewMode] = useState<ScheduleViewMode>('all');
 
   // Undo system
   const pendingDeleteRef = useRef<PendingBulkDelete | null>(null);
 
   const highlightPlaylistId = searchParams.get('highlight');
 
-  // Compute hidden schedule IDs based on active tab
-  const hiddenScheduleIds = useMemo(() => {
-    if (scheduleViewMode === 'all') return new Set<string>();
-    if (scheduleViewMode === 'recurring') {
-      return new Set(schedules.filter(s => getEffectiveMode(s) !== 'recurring').map(s => s.id));
-    }
-    if (scheduleViewMode === 'this-week') {
-      return new Set(schedules.filter(s => {
-        if (getEffectiveMode(s) === 'one-time') {
-          return !isDateInCurrentWeek(s.scheduledDate);
-        }
-        return true; // hide recurring in "this week" view
-      }).map(s => s.id));
-    }
-    return new Set<string>();
-  }, [schedules, scheduleViewMode]);
-
-  // Tab counts
-  const tabCounts = useMemo(() => {
-    const recurringCount = schedules.filter(s => getEffectiveMode(s) === 'recurring').length;
-    const thisWeekCount = schedules.filter(s => getEffectiveMode(s) === 'one-time' && isDateInCurrentWeek(s.scheduledDate)).length;
-    return { all: schedules.length, recurring: recurringCount, thisWeek: thisWeekCount };
-  }, [schedules]);
-
-  const weekLabel = useMemo(() => getWeekBounds().label, []);
-
   useEffect(() => { loadData(); }, []);
 
-  // ── Live ON AIR: initial fetch + 30s auto-refresh ──
-  useEffect(() => {
-    const fetchLiveStatus = async () => {
-      setIsLiveRefreshing(true);
-      try {
-        const data = await api.getRadioScheduleStatus();
-        setLiveStatus(data);
-      } catch (e: any) {
-        console.error('[Schedule] live status error:', e);
-      } finally {
-        setIsLiveRefreshing(false);
-      }
-    };
-
-    fetchLiveStatus();
-    liveStatusIntervalRef.current = setInterval(fetchLiveStatus, 30_000);
-
-    return () => {
-      if (liveStatusIntervalRef.current) {
-        clearInterval(liveStatusIntervalRef.current);
-      }
-    };
-  }, []);
-
-  // Scroll grid to current hour once data is loaded
-  useEffect(() => {
-    if (!loading && gridScrollRef.current) {
-      const scrollTop = Math.max(0, (nowHour - 1) * CELL_HEIGHT);
-      gridScrollRef.current.scrollTop = scrollTop;
-    }
-  }, [loading]);
+  // Sync schedule slots for one playlist to AzuraCast (fire-and-forget)
+  const syncToAzura = async (playlistId: string, updatedSchedules: ScheduleSlot[]) => {
+    const playlist = playlists.find(p => p.id === playlistId);
+    if (!playlist) return;
+    const slots = updatedSchedules.filter(s => s.playlistId === playlistId && s.isActive && s.dayOfWeek !== null);
+    const schedule_items = slots.map(s => {
+      const [startH = 0, startM = 0] = s.startTime.split(':').map(Number);
+      const [endH = 0, endM = 0] = s.endTime.split(':').map(Number);
+      return { id: 0, start_time: startH * 60 + startM, end_time: endH * 60 + endM, start_date: '', end_date: '', days: [s.dayOfWeek === 0 ? 7 : s.dayOfWeek!] };
+    });
+    const headers = await getAuthHeaders();
+    fetch(`${API_BASE}/azuracast/playlists/${playlistId}`, {
+      method: 'PUT', headers,
+      body: JSON.stringify({ name: playlist.name, type: schedule_items.length > 0 ? 'scheduled' : 'default', source: 'songs', order: 'shuffle', schedule_items }),
+    }).catch(e => console.error('AzuraCast sync error:', e));
+  };
 
   // Cleanup pending delete timer on unmount
   useEffect(() => {
@@ -1504,91 +1278,25 @@ export function ScheduleManagement() {
     };
   }, []);
 
-  // ── Pointer-drag: keep refs current every render ──
-  dragInfoRef.current = dragInfo;
-  dragOverCellRef.current = dragOverCell;
-
-  // ── Pointer-drag: permanent effect (runs once, uses refs to avoid stale closures) ──
-  useEffect(() => {
-    // Let child components start a drag
-    _startPointerDrag = (payload, x, y) => {
-      setDragInfo({ payload, ghostX: x, ghostY: y });
-    };
-
-    const onPointerMove = (e: PointerEvent) => {
-      if (!dragInfoRef.current) return;
-      setDragInfo(prev => prev ? { ...prev, ghostX: e.clientX, ghostY: e.clientY } : null);
-      const cell = findCellAtPoint(e.clientX, e.clientY, gridScrollRef.current);
-      setDragOverCell(cell);
-      dragOverCellRef.current = cell;
-    };
-
-    const onPointerUp = () => {
-      if (!dragInfoRef.current) return;
-      const payload = dragInfoRef.current.payload;
-      const cell = dragOverCellRef.current;
-      if (payload && cell) {
-        if (payload.type === 'playlist') dropPlaylistRef.current(payload.playlist, cell.day, cell.hour);
-        else if (payload.type === 'block-move') moveBlockRef.current(payload.blockId, cell.day, cell.hour);
-      }
-      setDragInfo(null);
-      setDragOverCell(null);
-      dragOverCellRef.current = null;
-    };
-
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && dragInfoRef.current) {
-        setDragInfo(null);
-        setDragOverCell(null);
-        dragOverCellRef.current = null;
-      }
-    };
-
-    window.addEventListener('pointermove', onPointerMove);
-    window.addEventListener('pointerup', onPointerUp);
-    window.addEventListener('keydown', onKeyDown);
-    return () => {
-      _startPointerDrag = null;
-      window.removeEventListener('pointermove', onPointerMove);
-      window.removeEventListener('pointerup', onPointerUp);
-      window.removeEventListener('keydown', onKeyDown);
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
   const loadData = async () => {
     setLoading(true);
     try {
-      const [schedRes, plRes, jingleRes] = await Promise.all([
+      const headers = await getAuthHeaders();
+      const [schedRes, azuraPlaylists, jingleRes] = await Promise.all([
         api.getAllSchedules(),
-        api.getAllPlaylists(),
+        fetch(`${API_BASE}/azuracast/playlists`, { headers }).then(r => r.json()),
         api.getAllJingles().catch(() => ({ jingles: [] })),
       ]);
-
-      // Guard: if the schedule response is an error, do NOT clear the list
-      if (schedRes.error) {
-        console.error('[Schedule] ❌ Server error loading schedules:', schedRes.error);
-        toast.error(`Schedule load error: ${schedRes.error}`);
-        // Still update playlists/jingles but keep existing schedules
-        setPlaylists(plRes.playlists || []);
-        setJingles(jingleRes.jingles || []);
-        setLoading(false);
-        return;
-      }
-
-      const loadedSchedules = schedRes.schedules || [];
-      console.log(`[Schedule] ✅ loadData: ${loadedSchedules.length} schedules, ${(plRes.playlists || []).length} playlists`);
-      if (loadedSchedules.length > 0) {
-        console.log('[Schedule] Schedule IDs:', loadedSchedules.map((s: any) => `${s.id} (${s.title})`).join(', '));
-      } else {
-        console.warn('[Schedule] ⚠️ Server returned 0 schedules — all slots may have been lost or never persisted');
-      }
-      setSchedules(loadedSchedules);
-      setPlaylists(plRes.playlists || []);
+      setSchedules(schedRes.schedules || []);
+      // Map AzuraCast playlists (numeric ids) to the expected format
+      const mapped = (Array.isArray(azuraPlaylists) ? azuraPlaylists : [])
+        .filter((p: any) => p.name !== 'default')
+        .map((p: any) => ({ id: String(p.id), name: p.name, color: undefined, description: undefined, genre: undefined }));
+      setPlaylists(mapped);
       setJingles(jingleRes.jingles || []);
     } catch (error) {
-      console.error('[Schedule] ❌ Network error loading schedule data:', error);
-      toast.error('Failed to load schedule data — keeping existing view');
-      // Do NOT clear schedules on network error — keep stale data visible
+      console.error('Error loading schedule data:', error);
+      toast.error('Failed to load schedule data');
     } finally {
       setLoading(false);
     }
@@ -1618,60 +1326,25 @@ export function ScheduleManagement() {
     const endTime = formatHour(freeHour + 1);
     const snapped = freeHour !== hour;
 
-    // Determine schedule mode based on active tab
-    const isOneTime = scheduleViewMode === 'this-week';
-    const scheduleMode = isOneTime ? 'one-time' : 'recurring';
-    const scheduledDate = isOneTime ? getDateForDayInCurrentWeek(day) : null;
-
     try {
-      console.log('[Schedule] Creating slot:', { playlistId: playlist.id, dayOfWeek: day, startTime, endTime, scheduleMode, scheduledDate, localTime: new Date().toTimeString().slice(0,8), localDay: new Date().getDay(), tz: Intl.DateTimeFormat().resolvedOptions().timeZone });
       const res = await api.createSchedule({
         playlistId: playlist.id, dayOfWeek: day, startTime, endTime,
-        title: playlist.name, isActive: true,
-        repeatWeekly: !isOneTime,
-        scheduleMode,
-        scheduledDate,
-        utcOffsetMinutes: new Date().getTimezoneOffset(),
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        title: playlist.name, isActive: true, repeatWeekly: true,
       });
-      console.log('[Schedule] Create response:', res);
-      if (res.error) {
-        console.error('[Schedule] Server returned error:', res.error);
-        toast.error(`Failed to create: ${res.error}`);
-        return;
-      }
       const newSlot: ScheduleSlot = { ...(res.schedule || {}), playlistName: playlist.name, playlistColor: playlist.color || '#00d9ff' };
-      if (!newSlot.id) {
-        console.error('[Schedule] ❌ Server returned schedule without id!', res);
-        toast.error('Schedule created but server returned no ID — data may be lost');
-        return;
-      }
-      console.log('[Schedule] ✅ New slot added to state:', newSlot.id, newSlot.title);
-      setSchedules(prev => [...prev, newSlot]);
-
-      // Verify: immediately re-read the schedule back from KV to confirm persistence
-      try {
-        const verifyRes = await api.getAllSchedules();
-        const found = (verifyRes.schedules || []).find((s: any) => s.id === newSlot.id);
-        if (!found) {
-          console.error(`[Schedule] ❌ POST-CREATE VERIFY FAILED: slot ${newSlot.id} not found in GET /schedule!`);
-          toast.error('⚠️ Schedule slot was created but not found on re-read — possible KV issue');
-        } else {
-          console.log(`[Schedule] ✅ Post-create verification passed: ${newSlot.id} found in KV`);
-        }
-      } catch (verifyErr) {
-        console.warn('[Schedule] Post-create verify fetch failed:', verifyErr);
-      }
-
-      const modeLabel = isOneTime ? ' (this week only)' : '';
+      setSchedules(prev => {
+        const updated = [...prev, newSlot];
+        syncToAzura(playlist.id, updated);
+        return updated;
+      });
       toast.success(
         snapped
-          ? `"${playlist.name}" → ${DAYS_SHORT[day]} ${startTime}${modeLabel} (snapped from ${formatHour(hour)})`
-          : `"${playlist.name}" → ${DAYS_SHORT[day]} ${startTime}${modeLabel}`
+          ? `"${playlist.name}" → ${DAYS_SHORT[day]} ${startTime} (snapped from ${formatHour(hour)})`
+          : `"${playlist.name}" → ${DAYS_SHORT[day]} ${startTime}`
       );
     } catch (error: any) {
-      console.error('[Schedule] Error creating schedule:', error);
-      toast.error(`Failed to create schedule slot: ${error.message || 'Unknown error'}`);
+      console.error('Error creating schedule:', error);
+      toast.error('Failed to create schedule slot');
     }
   };
 
@@ -1692,19 +1365,13 @@ export function ScheduleManagement() {
     const newStartTime = formatHour(freeHour);
     const newEndTime = formatHour(freeHour + blockDuration);
 
-    // If one-time, update scheduledDate to match the new day
-    const updates: any = {
-      dayOfWeek: newDay, startTime: newStartTime, endTime: newEndTime,
-      utcOffsetMinutes: new Date().getTimezoneOffset(),
-      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    };
-    if (getEffectiveMode(block) === 'one-time') {
-      updates.scheduledDate = getDateForDayInCurrentWeek(newDay);
-    }
-
     try {
-      await api.updateSchedule(blockId, updates);
-      setSchedules(prev => prev.map(s => s.id === blockId ? { ...s, ...updates } : s));
+      await api.updateSchedule(blockId, { dayOfWeek: newDay, startTime: newStartTime, endTime: newEndTime });
+      setSchedules(prev => {
+        const updated = prev.map(s => s.id === blockId ? { ...s, dayOfWeek: newDay, startTime: newStartTime, endTime: newEndTime } : s);
+        syncToAzura(block.playlistId, updated);
+        return updated;
+      });
       toast.success(
         snapped
           ? `Moved to ${DAYS_SHORT[newDay]} ${newStartTime}–${newEndTime} (snapped from ${formatHour(newHour)})`
@@ -1717,15 +1384,16 @@ export function ScheduleManagement() {
     }
   };
 
-  // Keep refs current so the permanent pointer-event useEffect always calls latest versions
-  dropPlaylistRef.current = handleDropPlaylist;
-  moveBlockRef.current = handleMoveBlock;
-
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this schedule slot?')) return;
     try {
+      const slot = schedules.find(s => s.id === id);
       await api.deleteSchedule(id);
-      setSchedules(prev => prev.filter(s => s.id !== id));
+      setSchedules(prev => {
+        const updated = prev.filter(s => s.id !== id);
+        if (slot) syncToAzura(slot.playlistId, updated);
+        return updated;
+      });
       toast.success('Slot deleted');
     } catch (error) {
       console.error('Error deleting schedule:', error);
@@ -1736,7 +1404,11 @@ export function ScheduleManagement() {
   const handleToggleActive = async (slot: ScheduleSlot) => {
     try {
       await api.updateSchedule(slot.id, { isActive: !slot.isActive });
-      setSchedules(prev => prev.map(s => s.id === slot.id ? { ...s, isActive: !s.isActive } : s));
+      setSchedules(prev => {
+        const updated = prev.map(s => s.id === slot.id ? { ...s, isActive: !s.isActive } : s);
+        syncToAzura(slot.playlistId, updated);
+        return updated;
+      });
       toast.success(slot.isActive ? 'Deactivated' : 'Activated');
     } catch (error) {
       console.error('Error toggling schedule:', error);
@@ -1748,7 +1420,12 @@ export function ScheduleManagement() {
     try {
       await api.updateSchedule(id, updates);
       const pl = playlists.find(p => p.id === updates.playlistId);
-      setSchedules(prev => prev.map(s => s.id === id ? { ...s, ...updates, playlistName: pl?.name || s.playlistName, playlistColor: pl?.color || s.playlistColor } : s));
+      const targetPlaylistId = updates.playlistId || schedules.find(s => s.id === id)?.playlistId;
+      setSchedules(prev => {
+        const updated = prev.map(s => s.id === id ? { ...s, ...updates, playlistName: pl?.name || s.playlistName, playlistColor: pl?.color || s.playlistColor } : s);
+        if (targetPlaylistId) syncToAzura(targetPlaylistId, updated);
+        return updated;
+      });
       toast.success('Schedule updated');
     } catch (error) {
       console.error('Error updating schedule:', error);
@@ -1758,8 +1435,13 @@ export function ScheduleManagement() {
 
   const handleResizeCommit = async (id: string, newEndTime: string) => {
     try {
+      const slot = schedules.find(s => s.id === id);
       await api.updateSchedule(id, { endTime: newEndTime });
-      setSchedules(prev => prev.map(s => s.id === id ? { ...s, endTime: newEndTime } : s));
+      setSchedules(prev => {
+        const updated = prev.map(s => s.id === id ? { ...s, endTime: newEndTime } : s);
+        if (slot) syncToAzura(slot.playlistId, updated);
+        return updated;
+      });
       toast.success('Duration updated');
     } catch (error) {
       console.error('Error resizing:', error);
@@ -1790,7 +1472,6 @@ export function ScheduleManagement() {
       if (freeHour !== startH) snapped++;
 
       try {
-        const mode = getEffectiveMode(slot);
         const res = await api.createSchedule({
           playlistId: slot.playlistId,
           dayOfWeek: day,
@@ -1798,12 +1479,8 @@ export function ScheduleManagement() {
           endTime: formatHour(freeHour + duration),
           title: slot.title || slot.playlistName || '',
           isActive: slot.isActive,
-          repeatWeekly: mode === 'recurring' ? slot.repeatWeekly : false,
-          scheduleMode: mode,
-          scheduledDate: mode === 'one-time' ? getDateForDayInCurrentWeek(day) : null,
+          repeatWeekly: slot.repeatWeekly,
           jingleConfig: slot.jingleConfig || undefined,
-          utcOffsetMinutes: new Date().getTimezoneOffset(),
-          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         });
         const newSlot: ScheduleSlot = {
           ...(res.schedule || {}),
@@ -1822,6 +1499,8 @@ export function ScheduleManagement() {
         ? `Copied to ${created} day${created !== 1 ? 's' : ''} (${snapped} snapped to free slots)`
         : `Copied to ${created} day${created !== 1 ? 's' : ''}`;
       toast.success(msg);
+      // Sync after all copies
+      setSchedules(prev => { syncToAzura(slot.playlistId, prev); return prev; });
     }
   };
 
@@ -1925,7 +1604,8 @@ export function ScheduleManagement() {
 
   return (
     <AdminLayout maxWidth="wide">
-      <div className="w-full max-w-full overflow-x-hidden">
+      <DndProvider backend={HTML5Backend}>
+        <div className="w-full max-w-full overflow-x-hidden">
           {/* Header */}
           <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="mb-4 sm:mb-6 w-full">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 mb-4 sm:mb-6">
@@ -1967,20 +1647,6 @@ export function ScheduleManagement() {
                 </Button>
                 <Button onClick={() => navigate('/admin/playlists')} variant="outline" size="sm" className="border-white/20 text-white hover:bg-white/10 text-xs sm:text-sm">
                   <ExternalLink className="size-3.5 mr-1.5" /><span className="hidden sm:inline">Manage Playlists</span>
-                </Button>
-                <Button
-                  onClick={() => {
-                    if (gridScrollRef.current) {
-                      const scrollTop = Math.max(0, (nowHour - 1) * CELL_HEIGHT);
-                      gridScrollRef.current.scrollTo({ top: scrollTop, behavior: 'smooth' });
-                    }
-                  }}
-                  variant="outline" size="sm"
-                  className="border-[#00d9ff]/30 text-[#00d9ff] hover:bg-[#00d9ff]/10 text-xs gap-1.5"
-                  title="Scroll to current hour"
-                >
-                  <Clock className="size-3.5" />
-                  <span className="hidden sm:inline">Now</span>
                 </Button>
                 <Button onClick={loadData} variant="outline" size="sm" className="border-white/20 text-white hover:bg-white/10">
                   <RefreshCw className="size-3.5" />
@@ -2030,110 +1696,6 @@ export function ScheduleManagement() {
                   </div>
                 </div>
               </Card>
-            </div>
-
-            {/* ═══════════ LIVE ON AIR BANNER ═══════════ */}
-            <AnimatePresence>
-              {liveStatus && (liveStatus.isOnline || liveStatus.currentSchedule) && (
-                <motion.div
-                  initial={{ opacity: 0, y: -6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -6 }}
-                  className="mb-4"
-                >
-                  <div className={`p-3 rounded-xl border backdrop-blur-sm flex items-center gap-3 ${
-                    liveStatus.currentSchedule
-                      ? 'border-[#00ffaa]/30 bg-[#00ffaa]/5'
-                      : 'border-[#00d9ff]/20 bg-[#00d9ff]/5'
-                  }`}>
-                    <div className={`p-1.5 rounded-lg flex-shrink-0 ${
-                      liveStatus.currentSchedule ? 'bg-[#00ffaa]/15' : 'bg-[#00d9ff]/15'
-                    }`}>
-                      <Radio className={`size-4 ${
-                        liveStatus.currentSchedule ? 'text-[#00ffaa] animate-pulse' : 'text-[#00d9ff]'
-                      }`} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      {liveStatus.currentSchedule ? (
-                        <>
-                          <div className="flex items-center gap-2 mb-0.5">
-                            <span className="text-xs font-bold text-white">NOW ON AIR</span>
-                            <Badge className="bg-[#00ffaa]/15 text-[#00ffaa] border-[#00ffaa]/30 text-[9px] px-1.5 py-0">
-                              SCHEDULE
-                            </Badge>
-                          </div>
-                          <p className="text-sm text-white/80 font-semibold truncate">
-                            {liveStatus.currentSchedule.title}
-                          </p>
-                          <p className="text-[10px] text-white/40 truncate">
-                            {liveStatus.currentSchedule.playlistName || liveStatus.currentSchedule.playlistId}
-                            {' · '}
-                            {DAYS_SHORT[liveStatus.currentSchedule.dayOfWeek ?? new Date().getDay()]}{' '}
-                            {liveStatus.currentSchedule.startTime}–{liveStatus.currentSchedule.endTime}
-                          </p>
-                        </>
-                      ) : (
-                        <>
-                          <span className="text-xs font-bold text-white">ON AIR</span>
-                          <p className="text-[10px] text-white/50">
-                            Auto DJ is broadcasting from the Live Stream playlist (no schedule slot active)
-                          </p>
-                        </>
-                      )}
-                    </div>
-                    <RefreshCw className={`size-3 text-white/15 flex-shrink-0 ${isLiveRefreshing ? 'animate-spin text-[#00d9ff]/40' : ''}`} />
-                    <span className="text-[8px] text-white/15 flex-shrink-0">30s</span>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            {/* ═══════════ SCHEDULE MODE TABS ═══════════ */}
-            <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-              <div className="flex bg-[#0a1628]/80 rounded-xl p-1 border border-white/10">
-                {([
-                  { id: 'all' as ScheduleViewMode, label: 'All', icon: Calendar, count: tabCounts.all },
-                  { id: 'recurring' as ScheduleViewMode, label: 'Recurring', icon: Repeat, count: tabCounts.recurring },
-                  { id: 'this-week' as ScheduleViewMode, label: 'This Week', icon: CalendarDays, count: tabCounts.thisWeek },
-                ]).map(tab => (
-                  <button
-                    key={tab.id}
-                    onClick={() => setScheduleViewMode(tab.id)}
-                    className={`px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all flex items-center gap-1.5 ${
-                      scheduleViewMode === tab.id
-                        ? tab.id === 'this-week'
-                          ? 'bg-gradient-to-r from-amber-500/20 to-orange-500/20 text-amber-300 shadow-lg shadow-amber-500/10'
-                          : 'bg-gradient-to-r from-[#00d9ff]/20 to-[#00ffaa]/20 text-[#00d9ff] shadow-lg shadow-[#00d9ff]/10'
-                        : 'text-white/40 hover:text-white/60 hover:bg-white/5'
-                    }`}
-                  >
-                    <tab.icon className="size-3.5" />
-                    <span className="hidden sm:inline">{tab.label}</span>
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
-                      scheduleViewMode === tab.id
-                        ? tab.id === 'this-week' ? 'bg-amber-500/20 text-amber-300' : 'bg-[#00d9ff]/20 text-[#00d9ff]'
-                        : 'bg-white/5 text-white/30'
-                    }`}>{tab.count}</span>
-                  </button>
-                ))}
-              </div>
-
-              {scheduleViewMode === 'this-week' && (
-                <div className="flex items-center gap-2">
-                  <span className="text-white/30 text-xs">{weekLabel}</span>
-                  <span className="inline-flex items-center gap-1 px-2 py-1 bg-amber-500/10 rounded-lg text-[10px] text-amber-400/70 border border-amber-500/15">
-                    <CalendarCheck2 className="size-3" />
-                    Drop playlists here to schedule for this week only
-                  </span>
-                </div>
-              )}
-
-              {scheduleViewMode === 'recurring' && (
-                <span className="inline-flex items-center gap-1 px-2 py-1 bg-[#00d9ff]/10 rounded-lg text-[10px] text-[#00d9ff]/70 border border-[#00d9ff]/15">
-                  <Repeat className="size-3" />
-                  Permanent weekly schedule
-                </span>
-              )}
             </div>
           </motion.div>
 
@@ -2200,7 +1762,7 @@ export function ScheduleManagement() {
             </AnimatePresence>
 
             {/* Schedule Grid */}
-            <Card className="bg-[#0f1c2e]/90 border-white/10 overflow-hidden w-full flex flex-col">
+            <Card className="bg-[#0f1c2e]/90 border-white/10 overflow-hidden w-full">
               {loading ? (
                 <div className="flex items-center justify-center h-[500px]">
                   <div className="text-center">
@@ -2209,11 +1771,7 @@ export function ScheduleManagement() {
                   </div>
                 </div>
               ) : (
-                <div
-                  ref={gridScrollRef}
-                  className="overflow-auto w-full"
-                  style={{ maxHeight: 'calc(100vh - 340px)', minHeight: '400px' }}
-                >
+                <div className="overflow-auto w-full">
                   <div className="min-w-[850px]">
                     <table className="w-full border-collapse">
                       <thead className="sticky top-0 z-20">
@@ -2239,7 +1797,7 @@ export function ScheduleManagement() {
                         {TIME_SLOTS.map((time, hourIndex) => {
                           const isNowRow = hourIndex === nowHour;
                           return (
-                            <tr key={time} style={{ height: `${CELL_HEIGHT}px` }}>
+                            <tr key={time}>
                               <td className={`p-2 text-xs font-mono border-b border-r border-white/5 bg-[#0a1628]/30 w-[70px] ${isNowRow ? 'text-[#00d9ff] font-semibold' : 'text-white/30'}`}>
                                 {time}
                               </td>
@@ -2249,8 +1807,8 @@ export function ScheduleManagement() {
                                     day={dayIndex}
                                     hour={hourIndex}
                                     schedules={schedules}
-                                    hiddenScheduleIds={hiddenScheduleIds}
-                                    isOver={!!(dragOverCell && dragOverCell.day === dayIndex && dragOverCell.hour === hourIndex)}
+                                    onDropPlaylist={handleDropPlaylist}
+                                    onMoveBlock={handleMoveBlock}
                                     onDelete={handleDelete}
                                     onToggleActive={handleToggleActive}
                                     onClickBlock={handleClickBlock}
@@ -2272,6 +1830,7 @@ export function ScheduleManagement() {
             </Card>
           </div>
         </div>
+      </DndProvider>
 
       {/* Edit Dialog */}
       {editingSlot && (
@@ -2300,32 +1859,6 @@ export function ScheduleManagement() {
         onOpenChange={setBatchJingleOpen}
         onBatchApply={handleBatchJingleApply}
       />
-
-      {/* Drag ghost — follows pointer, pointer-events:none so it doesn't block elementFromPoint */}
-      {dragInfo && (
-        <div
-          style={{
-            position: 'fixed',
-            left: dragInfo.ghostX + 14,
-            top: dragInfo.ghostY - 18,
-            pointerEvents: 'none',
-            zIndex: 9999,
-            transform: 'rotate(-2deg)',
-          }}
-          className="flex items-center gap-2 bg-[#0f1c2e] border border-[#00d9ff]/50 rounded-lg px-3 py-2 shadow-2xl shadow-[#00d9ff]/20 text-sm text-white select-none"
-        >
-          <GripVertical className="size-3.5 text-[#00d9ff] flex-shrink-0" />
-          <span className="font-medium max-w-[160px] truncate">
-            {dragInfo.payload.type === 'playlist'
-              ? dragInfo.payload.playlist.name
-              : 'Move Block'}
-          </span>
-          {dragOverCell
-            ? <span className="text-[#00ffaa] text-xs opacity-80">{DAYS_SHORT[dragOverCell.day]} {TIME_SLOTS[dragOverCell.hour]}</span>
-            : <span className="text-white/30 text-xs">drop on grid</span>
-          }
-        </div>
-      )}
     </AdminLayout>
   );
 }
