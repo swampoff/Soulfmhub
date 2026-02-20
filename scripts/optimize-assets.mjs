@@ -45,7 +45,7 @@ const MEMBER_COLORS = {
 // 1. Remove any Figma hash-named assets from src/assets/
 if (existsSync(SRC_ASSETS)) {
   const files = readdirSync(SRC_ASSETS);
-  const hashPattern = /^[0-9a-f]{20,}\.(?:png|jpg|svg)$/;
+  const hashPattern = /^[0-9a-f]{32,40}\.(?:png|jpg|svg)$/;
   let removed = 0;
   for (const file of files) {
     if (hashPattern.test(file)) {
@@ -55,7 +55,9 @@ if (existsSync(SRC_ASSETS)) {
         unlinkSync(filePath);
         removed++;
         console.log(`  Removed Figma asset: ${file} (${(stats.size / 1024 / 1024).toFixed(1)}MB)`);
-      } catch { /* ignore */ }
+      } catch (err) {
+        console.warn(`  Warning: failed to remove ${file}: ${err.message}`);
+      }
     }
   }
   if (removed > 0) {
