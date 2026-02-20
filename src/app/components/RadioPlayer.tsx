@@ -4,10 +4,29 @@ import { Button } from './ui/button';
 import { Slider } from './ui/slider';
 import { useApp } from '../../context/AppContext';
 import { motion, AnimatePresence } from 'motion/react';
-const soulFmLogo = '/assets/soulfm-logo.png';
+import soulFmLogo from 'figma:asset/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png';
 import { RealtimeIndicator } from './RealtimeIndicator';
 import { api } from '../../lib/api';
 import { supabase } from '../../lib/supabase';
+
+// =====================================================================
+//  INTERNAL AUTO DJ STREAM PLAYER  —  Crossfade Engine
+// =====================================================================
+//
+//  Architecture:
+//    Deck A ──► GainNode A ──┐
+//                            ├──► AudioContext.destination
+//    Deck B ──► GainNode B ──┘
+//
+//  - Two Audio elements ("decks") alternate.
+//  - 5 s before current deck ends, the next deck starts playing
+//    and we ramp gains (current 1→0, next 0→1) using
+//    linearRampToValueAtTime for sample-accurate crossfade.
+//  - The analyser is connected to the destination so the visualizer
+//    always reflects the mixed output.
+// =====================================================================
+
+const CROSSFADE_SECONDS = 5;
 
 interface TrackMeta {
   id: string;
@@ -17,32 +36,63 @@ interface TrackMeta {
   duration: number;
   coverUrl?: string | null;
   isJingle?: boolean;
+  audioUrl?: string;
 }
 
 interface StreamState {
   playing: boolean;
   track: TrackMeta | null;
+  audioUrl: string | null;
+  seekPosition: number;
+  remainingSeconds: number;
+  startedAt: string | null;
+  jingleUrl: string | null;
   nextTrack: TrackMeta | null;
+  crossfadeDuration: number;
   listeners: number;
-  seekPosition: number; // Server-reported seconds elapsed
+  error?: string;
 }
 
-const STREAM_URL = 'https://stream.soul-fm.com/listen/soul_fm_/radio.mp3';
+// ─── Deck abstraction ────────────────────────────────────────────────
+interface Deck {
+  audio: HTMLAudioElement;
+  gain: GainNode | null;
+  source: MediaElementAudioSourceNode | null;
+  trackId: string | null;
+}
 
+function createDeck(): Deck {
+  const audio = new Audio();
+  audio.crossOrigin = 'anonymous';
+  audio.preload = 'auto';
+  return { audio, gain: null, source: null, trackId: null };
+}
+
+// ─── Component ───────────────────────────────────────────────────────
 export function RadioPlayer() {
   const { nowPlaying, isPlaying, setIsPlaying, volume, setVolume } = useApp();
 
-  // Audio elements & Web Audio API graph
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const audioCtxRef = useRef<AudioContext | null>(null);
+  // Audio engine refs (survive re-renders)
+  const ctxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
-  const mediaSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const deckARef = useRef<Deck | null>(null);
+  const deckBRef = useRef<Deck | null>(null);
+  const activeDeckRef = useRef<'A' | 'B'>('A');
+  const crossfadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const preloadedNextRef = useRef<TrackMeta | null>(null);
+  const crossfadingRef = useRef(false);
 
-  // Canvas / Animation
+  // Canvas / animation
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animFrameRef = useRef<number | null>(null);
 
-  // UI State
+  // Current track id (fast access without state re-render)
+  const currentTrackIdRef = useRef<string | null>(null);
+
+  // Stable ref for hardLoadNext (breaks circular dep with startPlayback)
+  const hardLoadNextRef = useRef<() => Promise<void>>(async () => {});
+
+  // UI state
   const [isMuted, setIsMuted] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [isLiked, setIsLiked] = useState(false);
@@ -50,177 +100,410 @@ export function RadioPlayer() {
   const [connectionStatus, setConnectionStatus] = useState<
     'connected' | 'connecting' | 'error' | 'offline'
   >('offline');
-
-  // Metadata State from API (Supabase)
   const [streamState, setStreamState] = useState<StreamState | null>(null);
-  const [simulatedElapsed, setSimulatedElapsed] = useState(0);
+  const [trackProgress, setTrackProgress] = useState(0);
+  const [elapsed, setElapsed] = useState(0);
+  const [crossfadeActive, setCrossfadeActive] = useState(false);
 
+  // ─── Helpers ─────────────────────────────────────────────────────
+  const getCtx = useCallback((): AudioContext => {
+    if (!ctxRef.current) {
+      ctxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      analyserRef.current = ctxRef.current.createAnalyser();
+      analyserRef.current.fftSize = 128;
+      analyserRef.current.connect(ctxRef.current.destination);
+    }
+    if (ctxRef.current.state === 'suspended') ctxRef.current.resume();
+    return ctxRef.current;
+  }, []);
 
+  const ensureDecks = useCallback(() => {
+    if (!deckARef.current) deckARef.current = createDeck();
+    if (!deckBRef.current) deckBRef.current = createDeck();
+  }, []);
 
-  // ── AzuraCast NowPlaying polling ──
-  const [azuraTrack, setAzuraTrack] = useState<{ title: string; artist: string; art: string | null } | null>(null);
+  /** Wire a deck's audio into the AudioContext graph if not already. */
+  const wireDeck = useCallback(
+    (deck: Deck) => {
+      const ctx = getCtx();
+      if (!deck.source) {
+        try {
+          deck.source = ctx.createMediaElementSource(deck.audio);
+          deck.gain = ctx.createGain();
+          deck.gain.gain.value = 0;
+          deck.source.connect(deck.gain);
+          deck.gain.connect(analyserRef.current!);
+        } catch {
+          // already connected — ignore (happens on HMR)
+        }
+      }
+    },
+    [getCtx],
+  );
+
+  const activeDeck = useCallback(
+    (): Deck => (activeDeckRef.current === 'A' ? deckARef.current! : deckBRef.current!),
+    [],
+  );
+  const inactiveDeck = useCallback(
+    (): Deck => (activeDeckRef.current === 'A' ? deckBRef.current! : deckARef.current!),
+    [],
+  );
+  const swapDecks = useCallback(() => {
+    activeDeckRef.current = activeDeckRef.current === 'A' ? 'B' : 'A';
+  }, []);
+
+  // ─── Volume management ──────────────────────────────────────────
+  const masterVolume = useRef(0.7);
+  masterVolume.current = isMuted ? 0 : volume;
+
+  // Apply master volume to the active deck's gain (unless mid-crossfade)
+  const applyVolume = useCallback(() => {
+    if (!ctxRef.current) return;
+    const deck = deckARef.current && deckBRef.current ? activeDeck() : null;
+    if (deck?.gain && !crossfadingRef.current) {
+      deck.gain.gain.cancelScheduledValues(ctxRef.current.currentTime);
+      deck.gain.gain.setValueAtTime(masterVolume.current, ctxRef.current.currentTime);
+    }
+  }, [activeDeck]);
 
   useEffect(() => {
-    if (!isPlaying) return;
-    let cancelled = false;
+    applyVolume();
+  }, [volume, isMuted, applyVolume]);
 
-    const poll = async () => {
+  // ─── Fetch stream info ──────────────────────────────────────────
+  const fetchCurrentStream = useCallback(async (): Promise<StreamState | null> => {
+    try {
+      return (await api.getCurrentStream()) as StreamState;
+    } catch (err) {
+      console.error('[Player] fetch stream error:', err);
+      return null;
+    }
+  }, []);
+
+  // ─── Crossfade engine ──────────────────────────────────────────
+  /**
+   *  Start crossfade: fade out active deck, fade in inactive deck
+   *  which should already have its src loaded.
+   */
+  const executeCrossfade = useCallback(
+    async (nextAudioUrl: string, nextMeta: TrackMeta) => {
+      if (crossfadingRef.current) return;
+      crossfadingRef.current = true;
+      setCrossfadeActive(true);
+
+      ensureDecks();
+      const current = activeDeck();
+      const next = inactiveDeck();
+      const ctx = getCtx();
+      wireDeck(next);
+
+      // Prepare next deck
+      next.audio.src = nextAudioUrl;
+      next.trackId = nextMeta.id;
+
+      // Set initial gain
+      next.gain!.gain.cancelScheduledValues(ctx.currentTime);
+      next.gain!.gain.setValueAtTime(0, ctx.currentTime);
+
       try {
-        const res = await fetch("https://stream.soul-fm.com/api/nowplaying/1");
-        if (!res.ok) {
-          // fallback to direct IP
-          const res2 = await fetch("http://187.77.85.42/api/nowplaying/1");
-          if (res2.ok) {
-            const data = await res2.json();
-            if (!cancelled && data?.now_playing?.song) {
-              setAzuraTrack({
-                title: data.now_playing.song.title || "Unknown",
-                artist: data.now_playing.song.artist || "Soul FM",
-                art: data.now_playing.song.art || null,
-              });
-            }
-          }
+        await next.audio.play();
+      } catch (e: any) {
+        if (e.name !== 'AbortError') console.error('[Crossfade] next.play failed:', e);
+        crossfadingRef.current = false;
+        setCrossfadeActive(false);
+        return;
+      }
+
+      const now = ctx.currentTime;
+      const end = now + CROSSFADE_SECONDS;
+      const vol = masterVolume.current;
+
+      // Ramp current deck down
+      current.gain!.gain.cancelScheduledValues(now);
+      current.gain!.gain.setValueAtTime(vol, now);
+      current.gain!.gain.linearRampToValueAtTime(0, end);
+
+      // Ramp next deck up
+      next.gain!.gain.setValueAtTime(0, now);
+      next.gain!.gain.linearRampToValueAtTime(vol, end);
+
+      console.log(`[Crossfade] ${current.trackId} → ${next.trackId}  (${CROSSFADE_SECONDS}s)`);
+
+      // After crossfade completes, clean up old deck
+      crossfadeTimerRef.current = setTimeout(() => {
+        current.audio.pause();
+        current.audio.src = '';
+        current.trackId = null;
+
+        swapDecks();
+        currentTrackIdRef.current = nextMeta.id;
+
+        crossfadingRef.current = false;
+        setCrossfadeActive(false);
+        preloadedNextRef.current = null;
+
+        // Update display
+        setStreamState((prev) =>
+          prev ? { ...prev, track: nextMeta, audioUrl: nextAudioUrl, nextTrack: null } : prev,
+        );
+
+        // Schedule preload for the *new* next track
+        scheduleNextTrackPreload();
+      }, CROSSFADE_SECONDS * 1000 + 200);
+    },
+    [ensureDecks, activeDeck, inactiveDeck, getCtx, wireDeck, swapDecks],
+  );
+
+  // ─── Preload & schedule crossfade trigger ───────────────────────
+  const preloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const scheduleNextTrackPreload = useCallback(async () => {
+    // Clean previous timer
+    if (preloadTimerRef.current) {
+      clearTimeout(preloadTimerRef.current);
+      preloadTimerRef.current = null;
+    }
+
+    // Fetch stream to get nextTrack info
+    const stream = await fetchCurrentStream();
+    if (!stream?.playing || !stream.nextTrack?.audioUrl) return;
+
+    const remaining = stream.remainingSeconds;
+    const preloadAt = Math.max(remaining - CROSSFADE_SECONDS - 3, 0); // preload 3s before crossfade
+
+    if (preloadAt <= 0) {
+      // Already in crossfade zone — immediate
+      preloadedNextRef.current = stream.nextTrack;
+      return;
+    }
+
+    preloadedNextRef.current = stream.nextTrack;
+
+    console.log(`[Player] Next track "${stream.nextTrack.title}" will crossfade in ${preloadAt + 3}s`);
+  }, [fetchCurrentStream]);
+
+  // ─── Playback tick (progress + crossfade trigger) ───────────────
+  useEffect(() => {
+    if (!isPlaying) return;
+
+    const tick = () => {
+      const deck = deckARef.current && deckBRef.current ? activeDeck() : null;
+      if (!deck?.audio || deck.audio.paused || !deck.audio.duration) return;
+
+      const cur = deck.audio.currentTime;
+      const dur = deck.audio.duration;
+      setElapsed(Math.floor(cur));
+      setTrackProgress((cur / dur) * 100);
+
+      // ── Crossfade trigger ──
+      const remaining = dur - cur;
+      if (
+        remaining <= CROSSFADE_SECONDS &&
+        remaining > 0.5 &&
+        !crossfadingRef.current &&
+        preloadedNextRef.current?.audioUrl
+      ) {
+        const next = preloadedNextRef.current;
+        executeCrossfade(next.audioUrl!, next);
+      }
+    };
+
+    const interval = setInterval(tick, 250);
+    return () => clearInterval(interval);
+  }, [isPlaying, activeDeck, executeCrossfade]);
+
+  // ─── Main play action ──────────────────────────────────────────
+  const startPlayback = useCallback(
+    async (state: StreamState) => {
+      if (!state.audioUrl || !state.track) return;
+
+      // Same track already playing
+      if (currentTrackIdRef.current === state.track.id) {
+        const deck = activeDeck();
+        if (deck && !deck.audio.paused) return;
+      }
+
+      setIsBuffering(true);
+      setConnectionStatus('connecting');
+
+      ensureDecks();
+      const deck = activeDeck();
+      const ctx = getCtx();
+      wireDeck(deck);
+
+      // Stop inactive deck
+      const other = inactiveDeck();
+      other.audio.pause();
+      other.audio.src = '';
+      other.trackId = null;
+
+      // Clear any pending crossfade
+      if (crossfadeTimerRef.current) clearTimeout(crossfadeTimerRef.current);
+      crossfadingRef.current = false;
+      setCrossfadeActive(false);
+
+      // Handlers
+      const onCanPlay = () => {
+        setIsBuffering(false);
+        setConnectionStatus('connected');
+        // Seek to sync position
+        if (state.seekPosition > 2 && deck.audio.duration && state.seekPosition < deck.audio.duration) {
+          deck.audio.currentTime = state.seekPosition;
+        }
+      };
+      const onPlaying = () => {
+        setIsBuffering(false);
+        setConnectionStatus('connected');
+      };
+      const onWaiting = () => setIsBuffering(true);
+      const onError = () => {
+        setConnectionStatus('error');
+        setIsBuffering(false);
+      };
+      const onEnded = () => {
+        console.log('[Player] Track ended naturally');
+        currentTrackIdRef.current = null;
+        hardLoadNextRef.current();
+      };
+
+      // Reattach listeners
+      const a = deck.audio;
+      a.oncanplay = onCanPlay;
+      a.onplaying = onPlaying;
+      a.onwaiting = onWaiting;
+      a.onerror = onError;
+      a.onended = onEnded;
+
+      a.src = state.audioUrl;
+      deck.trackId = state.track.id;
+      currentTrackIdRef.current = state.track.id;
+
+      // Set gain to full
+      deck.gain!.gain.cancelScheduledValues(ctx.currentTime);
+      deck.gain!.gain.setValueAtTime(masterVolume.current, ctx.currentTime);
+
+      setStreamState(state);
+
+      try {
+        await a.play();
+      } catch (err: any) {
+        if (err.name !== 'AbortError') {
+          console.error('[Player] play() failed:', err);
+          setConnectionStatus('error');
+          setIsBuffering(false);
+        }
+        return;
+      }
+
+      // Store preloaded next if available
+      if (state.nextTrack?.audioUrl) {
+        preloadedNextRef.current = state.nextTrack;
+        console.log(`[Player] Next track preloaded: "${state.nextTrack.title}"`);
+      }
+
+      // Also start preload scheduling (will re-fetch when appropriate)
+      scheduleNextTrackPreload();
+    },
+    [ensureDecks, activeDeck, inactiveDeck, getCtx, wireDeck, scheduleNextTrackPreload],
+  );
+
+  // Hard-load next (no crossfade — used as fallback when track ends abruptly)
+  // Assigned to ref each render so startPlayback's onEnded closure always gets the latest version
+  hardLoadNextRef.current = async () => {
+    const stream = await fetchCurrentStream();
+    if (!stream?.playing || !stream.audioUrl) {
+      setConnectionStatus('offline');
+      setIsPlaying(false);
+      return;
+    }
+    await startPlayback(stream);
+  };
+
+  // ─── Play / Pause effect ────────────────────────────────────────
+  useEffect(() => {
+    if (isPlaying) {
+      (async () => {
+        const state = await fetchCurrentStream();
+        if (!state?.playing) {
+          setConnectionStatus('offline');
+          setStreamState(state);
           return;
         }
-        const data = await res.json();
-        if (!cancelled && data?.now_playing?.song) {
-          setAzuraTrack({
-            title: data.now_playing.song.title || "Unknown",
-            artist: data.now_playing.song.artist || "Soul FM",
-            art: data.now_playing.song.art || null,
-          });
-        }
-      } catch (e) {
-        // silent fail – metadata is optional
-      }
-    };
-
-    poll();
-    const interval = setInterval(poll, 10000);
-    return () => { cancelled = true; clearInterval(interval); };
-  }, [isPlaying]);
-
-  // Initialize Web Audio API for visualizer
-  const initAudioData = useCallback(() => {
-    if (!audioRef.current) return;
-    if (!audioCtxRef.current) {
-      audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-      analyserRef.current = audioCtxRef.current.createAnalyser();
-      analyserRef.current.fftSize = 128;
-
-      // We only want to create the media source once per audio element
-      if (!mediaSourceRef.current) {
-        mediaSourceRef.current = audioCtxRef.current.createMediaElementSource(audioRef.current);
-        mediaSourceRef.current.connect(analyserRef.current);
-        analyserRef.current.connect(audioCtxRef.current.destination);
-      }
+        await startPlayback(state);
+      })();
+    } else {
+      // Pause both decks
+      deckARef.current?.audio.pause();
+      deckBRef.current?.audio.pause();
+      if (crossfadeTimerRef.current) clearTimeout(crossfadeTimerRef.current);
+      if (preloadTimerRef.current) clearTimeout(preloadTimerRef.current);
+      crossfadingRef.current = false;
+      setCrossfadeActive(false);
+      setConnectionStatus(streamState?.playing ? 'connecting' : 'offline');
+      setIsBuffering(false);
     }
-    if (audioCtxRef.current.state === 'suspended') {
-      audioCtxRef.current.resume();
-    }
-  }, []);
+  }, [isPlaying]); // intentionally minimal deps — startPlayback is stable via refs
 
-  // Sync volume
-  useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.volume = isMuted ? 0 : volume;
-    }
-  }, [volume, isMuted]);
-
-  // Fetch current metadata from Supabase
-  const loadStreamMetadata = useCallback(async () => {
-    try {
-      const state = (await api.getCurrentStream()) as StreamState;
-      if (state) {
-        setStreamState(state);
-        // Resync local elapsed time to what the server reports
-        setSimulatedElapsed(state.seekPosition || 0);
-      }
-    } catch (err) {
-      console.error('[RadioPlayer] Failed to load metadata:', err);
-    }
-  }, []);
-
-  // Poll metadata & simulate progress bar
+  // ─── Realtime track-changed ─────────────────────────────────────
   useEffect(() => {
     if (!isPlaying) return;
 
-    // Tick every second to push progress bar forward
-    const progressTimer = setInterval(() => {
-      setSimulatedElapsed(prev => prev + 1);
-    }, 1000);
-
-    // Poll server every 10 seconds just in case we miss a Realtime event (fallback)
-    const pollTimer = setInterval(loadStreamMetadata, 10000);
-
-    return () => {
-      clearInterval(progressTimer);
-      clearInterval(pollTimer);
-    };
-  }, [isPlaying, loadStreamMetadata]);
-
-  // Listen to Supabase Realtime for instant track change notifications
-  useEffect(() => {
-    const channel = supabase.channel('radio-player-metadata', {
+    const channel = supabase.channel('radio-player-xfade', {
       config: { broadcast: { self: false } },
     });
 
-    channel.on('broadcast', { event: 'track-changed' }, () => {
-      console.log('[RadioPlayer] Realtime: Track changed! Reloading metadata...');
-      // Give the backend a tiny gap to write the new track
-      setTimeout(loadStreamMetadata, 1000);
+    channel.on('broadcast', { event: 'track-changed' }, async () => {
+      console.log('[Player] Realtime: track-changed');
+      await new Promise((r) => setTimeout(r, 600));
+      const stream = await fetchCurrentStream();
+      if (!stream?.playing || !stream.audioUrl) return;
+
+      if (stream.track && stream.track.id !== currentTrackIdRef.current && !crossfadingRef.current) {
+        // Backend advanced to a track different from our preloaded one
+        // → start crossfade if possible, otherwise hard-load
+        if (preloadedNextRef.current?.id === stream.track.id && preloadedNextRef.current.audioUrl) {
+          executeCrossfade(preloadedNextRef.current.audioUrl, preloadedNextRef.current);
+        } else {
+          await startPlayback(stream);
+        }
+      }
+
+      // Always update nextTrack info
+      if (stream.nextTrack) {
+        preloadedNextRef.current = stream.nextTrack;
+      }
     });
 
     channel.subscribe();
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [loadStreamMetadata]);
+  }, [isPlaying, fetchCurrentStream, executeCrossfade, startPlayback]);
 
-  // Main playback engine
+  // ─── Poll fallback (every 20 s) ─────────────────────────────────
   useEffect(() => {
-    if (!audioRef.current) return;
-
-    if (isPlaying) {
-      // Setup audio source if not already created
-      if (!audioRef.current.src) {
-        // Append timestamp to break browser cache and force live connection
-        audioRef.current.src = `${STREAM_URL}?t=${Date.now()}`;
-        audioRef.current.crossOrigin = 'anonymous';
-      }
-
-      setConnectionStatus('connecting');
-      setIsBuffering(true);
-
-      audioRef.current.play().then(() => {
-        initAudioData();
-        setConnectionStatus('connected');
-        setIsBuffering(false);
-        // Load metadata once playing starts
-        loadStreamMetadata();
-      }).catch((err) => {
-        if (err.name !== 'AbortError') {
-          console.error('[RadioPlayer] Playback failed:', err);
-          setConnectionStatus('error');
-          setIsBuffering(false);
-          setIsPlaying(false);
+    if (!isPlaying) return;
+    const id = setInterval(async () => {
+      try {
+        const stream = await fetchCurrentStream();
+        if (!stream?.playing) return;
+        if (stream.track && stream.track.id !== currentTrackIdRef.current && !crossfadingRef.current) {
+          console.log('[Player] Poll detected track change:', stream.track.title);
+          await startPlayback(stream);
         }
-      });
-    } else {
-      audioRef.current.pause();
-      // Remove source to completely disconnect the stream and save bandwidth
-      audioRef.current.removeAttribute('src');
-      audioRef.current.load();
-      setConnectionStatus('offline');
-      setIsBuffering(false);
-    }
-  }, [isPlaying, initAudioData, loadStreamMetadata, setIsPlaying]);
+        if (stream.nextTrack) preloadedNextRef.current = stream.nextTrack;
+      } catch { /* silent */ }
+    }, 20000);
+    return () => clearInterval(id);
+  }, [isPlaying, fetchCurrentStream, startPlayback]);
 
-  // Visualizer drawing
+  // ─── Visualizer ─────────────────────────────────────────────────
   useEffect(() => {
-    if (!isPlaying || !analyserRef.current || !canvasRef.current) return;
+    if (!isPlaying || !analyserRef.current) return;
 
     const canvas = canvasRef.current;
+    if (!canvas) return;
     const ctx2d = canvas.getContext('2d');
     if (!ctx2d) return;
 
@@ -236,9 +519,7 @@ export function RadioPlayer() {
       const barW = (canvas.width / bufLen) * 2;
       let x = 0;
       for (let i = 0; i < bufLen; i++) {
-        // Prevent flatlining when purely silent by adding tiny baseline
-        const val = data[i] > 0 ? data[i] : 2;
-        const h = (val / 255) * canvas.height * 0.8;
+        const h = (data[i] / 255) * canvas.height * 0.8;
         const g = ctx2d.createLinearGradient(0, canvas.height - h, 0, canvas.height);
         g.addColorStop(0, '#00ffaa');
         g.addColorStop(0.5, '#00d9ff');
@@ -253,9 +534,20 @@ export function RadioPlayer() {
     return () => {
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
     };
-  }, [isPlaying]);
+  }, [isPlaying, streamState?.track?.id, crossfadeActive]);
 
-  // Handlers
+  // ─── Cleanup ────────────────────────────────────────────────────
+  useEffect(() => {
+    return () => {
+      deckARef.current?.audio.pause();
+      deckBRef.current?.audio.pause();
+      if (crossfadeTimerRef.current) clearTimeout(crossfadeTimerRef.current);
+      if (preloadTimerRef.current) clearTimeout(preloadTimerRef.current);
+      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+    };
+  }, []);
+
+  // ─── Handlers ───────────────────────────────────────────────────
   const togglePlay = () => setIsPlaying(!isPlaying);
   const handleVolumeChange = (v: number[]) => { setVolume(v[0]); setIsMuted(false); };
   const toggleMute = () => setIsMuted(!isMuted);
@@ -264,28 +556,25 @@ export function RadioPlayer() {
   const handleShare = () => {
     const t = displayTrack?.title || 'Soul FM Hub';
     if (navigator.share) {
-      navigator.share({ title: 'Soul FM Hub', text: `Listening to ${t} on Soul FM!`, url: window.location.href }).catch(() => { });
+      navigator.share({ title: 'Soul FM Hub', text: `Listening to ${t} on Soul FM!`, url: window.location.href }).catch(() => {});
     } else {
       navigator.clipboard.writeText(window.location.href);
     }
   };
 
   const fmt = (s: number) => {
-    if (isNaN(s) || !isFinite(s)) return '0:00';
-    const m = Math.floor(Math.max(0, s) / 60);
-    const sec = Math.floor(Math.max(0, s) % 60);
+    const m = Math.floor(s / 60);
+    const sec = Math.floor(s % 60);
     return `${m}:${sec.toString().padStart(2, '0')}`;
   };
 
-  // Determine what to display
+  // Display
   const displayTrack = streamState?.track || nowPlaying?.track;
   const displayCover = streamState?.track?.coverUrl || nowPlaying?.track?.cover;
   const isJingle = streamState?.track?.isJingle || false;
   const trackDuration = streamState?.track?.duration || displayTrack?.duration || 0;
 
-  // Progress computation
-  const trackProgress = trackDuration > 0 ? Math.min(100, (simulatedElapsed / trackDuration) * 100) : 0;
-
+  // ─── Render ─────────────────────────────────────────────────────
   return (
     <motion.div
       initial={{ y: 80, opacity: 0 }}
@@ -293,33 +582,28 @@ export function RadioPlayer() {
       transition={{ type: 'spring', stiffness: 120, damping: 22, mass: 1 }}
       className="fixed bottom-0 left-0 right-0 z-50"
     >
-      {/* Invisible Single Audio Element */}
-      <audio
-        ref={audioRef}
-        onWaiting={() => setIsBuffering(true)}
-        onPlaying={() => setIsBuffering(false)}
-        onError={() => {
-          setConnectionStatus('error');
-          setIsBuffering(false);
-          setIsPlaying(false);
-        }}
-        preload="none"
-      />
-
       <div className="relative bg-gradient-to-r from-[#0a1628]/95 via-[#0d1a2d]/95 to-[#0a1628]/95 backdrop-blur-xl border-t border-[#00d9ff]/30 shadow-2xl">
         {/* Top glow */}
         <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#00d9ff]/50 to-transparent" />
 
-        {/* Pseudo-Progress bar for current track */}
+        {/* Progress bar */}
         {isPlaying && trackDuration > 0 && (
           <div className="absolute top-0 left-0 right-0 h-0.5">
             <div
               className="h-full bg-gradient-to-r from-[#00d9ff] to-[#00ffaa]"
               style={{
                 width: `${trackProgress}%`,
-                transition: 'width 1s linear',
+                transition: 'width 0.5s cubic-bezier(0.4, 0, 0.2, 1)',
               }}
             />
+            {/* Crossfade zone indicator */}
+            {crossfadeActive && (
+              <motion.div
+                className="absolute right-0 top-0 h-full w-1 bg-[#00ffaa]"
+                animate={{ opacity: [1, 0.4, 1] }}
+                transition={{ duration: 1.2, repeat: Infinity, ease: 'easeInOut' }}
+              />
+            )}
           </div>
         )}
 
@@ -355,10 +639,10 @@ export function RadioPlayer() {
                   animate={{
                     boxShadow: isPlaying
                       ? [
-                        '0 0 15px rgba(0,217,255,.3)',
-                        '0 0 25px rgba(0,255,170,.5)',
-                        '0 0 15px rgba(0,217,255,.3)',
-                      ]
+                          '0 0 15px rgba(0,217,255,.3)',
+                          '0 0 25px rgba(0,255,170,.5)',
+                          '0 0 15px rgba(0,217,255,.3)',
+                        ]
                       : '0 0 8px rgba(0,217,255,.15)',
                   }}
                   transition={{ duration: 3.5, repeat: Infinity, ease: 'easeInOut' }}
@@ -393,8 +677,8 @@ export function RadioPlayer() {
                   style={{
                     backgroundColor:
                       connectionStatus === 'connected' ? '#00ff88' :
-                        connectionStatus === 'error' ? '#ff4444' :
-                          connectionStatus === 'offline' ? '#666' : '#ffaa00',
+                      connectionStatus === 'error' ? '#ff4444' :
+                      connectionStatus === 'offline' ? '#666' : '#ffaa00',
                   }}
                   animate={{ scale: connectionStatus === 'connected' ? [1, 1.15, 1] : 1 }}
                   transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
@@ -407,20 +691,25 @@ export function RadioPlayer() {
                   <Radio className="w-3 h-3 text-[#00d9ff]" />
                   <span className="text-xs text-[#00d9ff] font-semibold uppercase tracking-wider">
                     {connectionStatus === 'offline' ? 'Offline' :
-                      connectionStatus === 'error' ? 'Error' :
-                        isJingle ? 'Jingle' : 'Live Broadcaster'}
+                     connectionStatus === 'error' ? 'Error' :
+                     isJingle ? 'Jingle' : 'Auto DJ'}
                   </span>
+                  {crossfadeActive && (
+                    <span className="text-[10px] text-[#00ffaa]/70 uppercase tracking-wider animate-pulse">
+                      crossfade
+                    </span>
+                  )}
                   {isPlaying && trackDuration > 0 && (
                     <span className="text-[10px] text-white/30 tabular-nums">
-                      {fmt(simulatedElapsed)} / {fmt(trackDuration)}
+                      {fmt(elapsed)} / {fmt(trackDuration)}
                     </span>
                   )}
                 </div>
                 <div className="text-base font-bold text-white truncate mb-0.5">
-                  {azuraTrack?.title || displayTrack?.title || 'Soul FM Live'}
+                  {displayTrack?.title || 'Soul FM Hub'}
                 </div>
                 <div className="text-sm text-gray-400 truncate">
-                  {azuraTrack?.artist || displayTrack?.artist || 'Press play to enter the stream'}
+                  {displayTrack?.artist || 'Press play to start listening'}
                 </div>
               </div>
 
@@ -494,7 +783,7 @@ export function RadioPlayer() {
                     <div className="bg-white/5 rounded-lg p-3 border border-white/10">
                       <div className="text-xs text-gray-400 mb-1">Current Show</div>
                       <div className="text-sm font-semibold text-[#00d9ff]">
-                        {nowPlaying?.show?.name || 'Auto DJ Live'}
+                        {nowPlaying?.show?.name || 'Auto DJ'}
                       </div>
                       {nowPlaying?.show?.host && (
                         <div className="text-xs text-gray-400 mt-1">with {nowPlaying.show.host}</div>
@@ -504,7 +793,7 @@ export function RadioPlayer() {
                     <div className="bg-white/5 rounded-lg p-3 border border-white/10">
                       <div className="text-xs text-gray-400 mb-1">Album</div>
                       <div className="text-sm font-semibold text-white">
-                        {displayTrack?.album || 'Soul FM Hub Exclusive'}
+                        {displayTrack?.album || 'Soul / Funk'}
                       </div>
                     </div>
 
@@ -521,31 +810,31 @@ export function RadioPlayer() {
                           </div>
                         </>
                       ) : (
-                        <div className="text-sm text-gray-500 italic">Curating next track...</div>
+                        <div className="text-sm text-gray-500 italic">Auto DJ decides...</div>
                       )}
                     </div>
 
                     {/* Stream info */}
                     <div className="bg-white/5 rounded-lg p-3 border border-white/10">
                       <div className="flex items-center justify-between mb-1">
-                        <div className="text-xs text-gray-400">Signal</div>
+                        <div className="text-xs text-gray-400">Stream</div>
                         <RealtimeIndicator size="sm" />
                       </div>
                       <div className="text-sm font-semibold text-[#00ffaa]">
-                        Icecast Native Stream &middot; {streamState?.listeners ?? 0} listeners
+                        Crossfade &middot; {streamState?.listeners ?? 0} listeners
                       </div>
                       <div className="text-xs text-gray-400 mt-1">
                         Status:{' '}
                         <span
                           className={
                             connectionStatus === 'connected' ? 'text-[#00ff88]' :
-                              connectionStatus === 'offline' ? 'text-white/30' :
-                                connectionStatus === 'error' ? 'text-red-400' : 'text-yellow-400'
+                            connectionStatus === 'offline' ? 'text-white/30' :
+                            connectionStatus === 'error' ? 'text-red-400' : 'text-yellow-400'
                           }
                         >
-                          {connectionStatus === 'connected' ? 'Direct Hub Connection' :
-                            connectionStatus === 'error' ? 'Stream Lost' :
-                              connectionStatus === 'offline' ? 'Offline' : 'Establishing Secure Link...'}
+                          {connectionStatus === 'connected' ? 'Connected' :
+                           connectionStatus === 'error' ? 'Error' :
+                           connectionStatus === 'offline' ? 'Offline' : 'Connecting...'}
                         </span>
                       </div>
                     </div>

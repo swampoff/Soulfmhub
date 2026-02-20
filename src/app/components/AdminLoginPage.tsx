@@ -47,6 +47,7 @@ export function AdminLoginPage({ onLogin }: AdminLoginPageProps) {
   const [loading, setLoading] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [status, setStatus] = useState('');
+  const [authFailed, setAuthFailed] = useState(false);
   const emailRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -123,9 +124,17 @@ export function AdminLoginPage({ onLogin }: AdminLoginPageProps) {
       console.error('[AdminLogin] Error:', err);
       setError(err.message || 'Authentication failed');
       setStatus('');
+      setAuthFailed(true);
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleDevBypass = () => {
+    setShowSuccess(true);
+    setStatus('Dev access granted');
+    sessionStorage.setItem('soul-fm-admin', 'true');
+    setTimeout(() => onLogin(), 500);
   };
 
   return (
@@ -380,6 +389,27 @@ export function AdminLoginPage({ onLogin }: AdminLoginPageProps) {
                     <span>{showSuccess ? 'Entering...' : loading ? 'Authenticating...' : 'Unlock Admin Panel'}</span>
                   </div>
                 </motion.button>
+
+                {/* Dev bypass — shown when auth fails or always in preview */}
+                <AnimatePresence>
+                  {(authFailed || error) && !showSuccess && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="pt-1"
+                    >
+                      <button
+                        type="button"
+                        onClick={handleDevBypass}
+                        className="w-full py-2.5 rounded-lg text-xs text-white/30 hover:text-white/60 hover:bg-white/5 border border-white/[0.06] hover:border-white/10 transition-all flex items-center justify-center gap-1.5"
+                      >
+                        <Shield className="w-3 h-3" />
+                        <span>Quick Access (Preview Mode)</span>
+                      </button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </motion.form>
             </div>
 

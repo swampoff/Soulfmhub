@@ -68,10 +68,10 @@ import { EditorialDepartmentPage } from './pages/admin/EditorialDepartmentPage';
 
 // ── Router ───────────────────────────────────────────────────────────
 export const router = createBrowserRouter([
+  // ═══════════════════ Public Site ═══════════════════
   {
     Component: RootLayout,
     children: [
-      // ═══════════════════ Public Routes ═══════════════════
       {
         Component: PublicLayout,
         children: [
@@ -110,69 +110,69 @@ export const router = createBrowserRouter([
       // ═══════════════════ Standalone Pages (no layout) ═══════════════════
       { path: 'play/:uniqueId', Component: PublicPlayer },
       { path: 'demo/beach-car', Component: BeachCarDemo },
+    ],
+  },
 
-      // ═══════════════════ Admin Routes ═══════════════════
-      {
-        path: 'admin',
-        Component: AdminAccessLayout,
-        children: [
-          // Home
-          { index: true, Component: AdminHomePage },
-          { path: 'home', Component: AdminHomePage },
+  // ═══════════════════ Admin Panel (separate top-level route) ═══════════════════
+  {
+    path: '/admin',
+    Component: AdminAccessLayout,
+    children: [
+      // Home
+      { index: true, Component: AdminHomePage },
+      { path: 'home', Component: AdminHomePage },
 
-          // Content Management
-          { path: 'tracks', Component: TracksManagement },
-          { path: 'tracks/:id/edit', Component: TrackEditPage },
-          { path: 'media', Component: MediaLibraryManagement },
-          { path: 'playlists', Component: PlaylistsManagement },
-          { path: 'schedule', Component: ScheduleManagement },
-          { path: 'shows', Component: ShowsPodcastsManagement },
-          { path: 'news', Component: NewsManagement },
+      // Content Management
+      { path: 'tracks', Component: TracksManagement },
+      { path: 'tracks/:id/edit', Component: TrackEditPage },
+      { path: 'media', Component: MediaLibraryManagement },
+      { path: 'playlists', Component: PlaylistsManagement },
+      { path: 'schedule', Component: ScheduleManagement },
+      { path: 'shows', Component: ShowsPodcastsManagement },
+      { path: 'news', Component: NewsManagement },
 
-          // Radio & DJ
-          { path: 'automation', Component: ContentAutomationDashboard },
-          { path: 'jingles', Component: ContentAutomationDashboard },
-          { path: 'stream-settings', Component: StreamSettings },
-          { path: 'news-injection', Component: NewsInjection },
-          { path: 'live-dj-console', Component: LiveDJConsole },
-          { path: 'track-upload', Component: TrackUpload },
-          { path: 'live-playlist', Component: LiveStreamPlaylist },
+      // Radio & DJ
+      { path: 'automation', Component: ContentAutomationDashboard },
+      { path: 'jingles', Component: ContentAutomationDashboard },
+      { path: 'stream-settings', Component: StreamSettings },
+      { path: 'news-injection', Component: NewsInjection },
+      { path: 'live-dj-console', Component: LiveDJConsole },
+      { path: 'track-upload', Component: TrackUpload },
+      { path: 'live-playlist', Component: LiveStreamPlaylist },
 
-          // Interactive
-          { path: 'song-requests', Component: SongRequestsManagement },
-          { path: 'shoutouts', Component: ShoutoutsManagement },
-          { path: 'call-queue', Component: CallQueueManagement },
-          { path: 'donations', Component: DonationsManagement },
+      // Interactive
+      { path: 'song-requests', Component: SongRequestsManagement },
+      { path: 'shoutouts', Component: ShoutoutsManagement },
+      { path: 'call-queue', Component: CallQueueManagement },
+      { path: 'donations', Component: DonationsManagement },
 
-          // System
-          { path: 'analytics', Component: AdminAnalyticsPage },
-          { path: 'system-test', Component: SystemTest },
-          { path: 'upload-test', Component: UploadTestPage },
-          { path: 'users', Component: UsersManagement },
+      // System
+      { path: 'analytics', Component: AdminAnalyticsPage },
+      { path: 'system-test', Component: SystemTest },
+      { path: 'upload-test', Component: UploadTestPage },
+      { path: 'users', Component: UsersManagement },
 
-          // New Admin Pages
-          { path: 'logs', Component: LogsAuditPage },
-          { path: 'backup', Component: BackupExportPage },
-          { path: 'branding', Component: BrandingPage },
-          { path: 'feedback', Component: FeedbackManagement },
+      // New Admin Pages
+      { path: 'logs', Component: LogsAuditPage },
+      { path: 'backup', Component: BackupExportPage },
+      { path: 'branding', Component: BrandingPage },
+      { path: 'feedback', Component: FeedbackManagement },
 
-          // AI Dev Team
-          { path: 'ai-team', Component: AIDevTeamPage },
+      // AI Dev Team
+      { path: 'ai-team', Component: AIDevTeamPage },
 
-          // Broadcast Team
-          { path: 'broadcast-team', Component: BroadcastTeamPage },
+      // Broadcast Team
+      { path: 'broadcast-team', Component: BroadcastTeamPage },
 
-          // Editorial Department (Эфирный Отдел)
-          { path: 'editorial', Component: EditorialDepartmentPage },
+      // Editorial Department (Эфирный Отдел)
+      { path: 'editorial', Component: EditorialDepartmentPage },
 
-          // Admin-side interactive views
-          { path: 'request-song', Component: RequestSongPage },
-          { path: 'send-shoutout', Component: SendShoutoutPage },
+      // Admin-side interactive views
+      { path: 'request-song', Component: RequestSongPage },
+      { path: 'send-shoutout', Component: SendShoutoutPage },
 
-          // Admin setup
-          { path: 'setup', Component: AdminSetupPage },
-        ],
-      },
+      // Admin setup
+      { path: 'setup', Component: AdminSetupPage },
     ],
   },
 ]);
