@@ -9,10 +9,10 @@ export default defineConfig({
     tailwindcss(),
   ],
   resolve: {
-    alias: {
-      "figma:asset": path.resolve(__dirname, "./public/assets/niko-avatar.png"),
-      "@": path.resolve(__dirname, "./src"),
-    },
+    alias: [
+      { find: /^figma:asset\/.*/, replacement: path.resolve(__dirname, "./public/assets/niko-avatar.png") },
+      { find: "@", replacement: path.resolve(__dirname, "./src") }
+    ]
   },
   assetsInclude: ["**/*.svg", "**/*.csv"],
 })
