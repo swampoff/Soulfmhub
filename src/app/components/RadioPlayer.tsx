@@ -27,7 +27,7 @@ interface StreamState {
   seekPosition: number; // Server-reported seconds elapsed
 }
 
-const STREAM_URL = 'https://stream.soul-fm.com/soulfm';
+const STREAM_URL = 'https://stream.soul-fm.com/listen/soul_fm_/radio.mp3';
 
 export function RadioPlayer() {
   const { nowPlaying, isPlaying, setIsPlaying, volume, setVolume } = useApp();
