@@ -6,7 +6,7 @@ import * as kv from "./kv_store.tsx";
 import * as profiles from "./profiles.ts";
 import * as podcasts from "./podcasts.ts";
 import { seedProfiles } from "./seed-profiles.ts";
-import { seedPodcasts, seedShows } from "./seed-podcasts.ts";
+import { seedPodcasts } from "./seed-podcasts.ts";
 import { seedNewsInjectionData, createSampleRules } from "./seed-news-injection.ts";
 import { parseBuffer } from "npm:music-metadata@10";
 import { setupJinglesRoutes } from "./jingles.ts";
@@ -15,21 +15,18 @@ import * as autoDJHelper from "./auto-dj-helper.ts";
 import * as newsIntegration from "./news-autodj-integration.ts";
 import * as podcastContestIntegration from "./podcast-contest-integration.ts";
 import * as interactive from "./interactive-features.ts";
-import { extractCompleteMetadata, getDefaultCoverUrl } from "./metadata-utils.ts";
+import { extractCompleteMetadata } from "./metadata-utils.ts";
 import { setupAutomationRoutes } from "./content-automation-routes.ts";
 import { newsInjectionRoutes } from "./news-injection-routes.ts";
 import { announcementsRoutes } from "./announcements-routes.ts";
 import { setupPodcastContestRoutes } from "./podcast-contest-routes.ts";
 import { setupInteractiveRoutes } from "./interactive-routes.ts";
-import { setupEditorialRoutes } from "./editorial-department.ts";
-import { setupAIProviderRoutes, deleteAgentAIConfig, getAgentAIConfig } from "./ai-providers.ts";
 
 const app = new Hono();
 
 // Create Supabase client
 const supabaseUrl = Deno.env.get('SUPABASE_URL');
 const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY');
 
 console.log('=== SUPABASE CONFIGURATION ===');
 console.log('SUPABASE_URL:', supabaseUrl ? 'SET' : 'NOT SET');
@@ -53,11 +50,9 @@ async function initializeStorageBuckets() {
   try {
     console.log('🗄️  Initializing storage buckets...');
     
-    // Buckets are PRIVATE — all audio/image access requires signed URLs.
-    // getAudioUrl() generates signed URLs (2h TTL) for playback.
     const bucketsToCreate = [
       { name: 'make-06086aa3-tracks', public: false, fileType: 'audio' as const },
-      { name: 'make-06086aa3-covers', public: false, fileType: 'image' as const },
+      { name: 'make-06086aa3-covers', public: true, fileType: 'image' as const },
       { name: 'make-06086aa3-jingles', public: false, fileType: 'audio' as const },
       { name: 'make-06086aa3-news-voiceovers', public: false, fileType: 'audio' as const },
       { name: 'make-06086aa3-announcements', public: false, fileType: 'audio' as const },
@@ -69,13 +64,7 @@ async function initializeStorageBuckets() {
       const bucketExists = buckets?.some(bucket => bucket.name === bucketConfig.name);
       
       if (bucketExists) {
-        // Ensure bucket visibility matches config (private)
-        const existingBucket = buckets?.find(b => b.name === bucketConfig.name);
-        if (existingBucket && existingBucket.public !== bucketConfig.public) {
-          console.log(`🔄 Updating bucket visibility: ${bucketConfig.name} → public: ${bucketConfig.public}`);
-          await supabase.storage.updateBucket(bucketConfig.name, { public: bucketConfig.public });
-        }
-        console.log(`✅ Bucket exists: ${bucketConfig.name} (private)`);
+        console.log(`✅ Bucket exists: ${bucketConfig.name}`);
         continue;
       }
       
@@ -120,49 +109,18 @@ app.use(
   }),
 );
 
-// Helper: check if a JWT is a Supabase anon key for OUR project
-function isProjectAnonKey(token: string): boolean {
-  try {
-    const parts = token.split('.');
-    if (parts.length !== 3) return false;
-    // Decode payload (base64url → JSON)
-    const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
-    if (payload.role !== 'anon' || payload.iss !== 'supabase') return false;
-    // Extract project ref from SUPABASE_URL (https://<ref>.supabase.co)
-    const urlMatch = supabaseUrl?.match(/https:\/\/([^.]+)\.supabase\.co/);
-    if (!urlMatch) return false;
-    return payload.ref === urlMatch[1];
-  } catch {
-    return false;
-  }
-}
-
-// Middleware to verify auth for protected routes
-// Accepts either a valid Supabase Auth JWT **or** the public anon key
-// (the admin panel uses PIN-based access and sends the anon key).
+// Middleware to verify auth for protected routes (Supabase Auth JWT)
 async function requireAuth(c: any, next: any) {
   const accessToken = c.req.header('Authorization')?.split(' ')[1];
   if (!accessToken) {
     return c.json({ error: 'Unauthorized: No token provided' }, 401);
   }
 
-  // If the token is the public anon key, allow as admin (PIN-gated on frontend)
-  // Check 1: exact string match against env var
-  // Check 2: decode JWT and verify it's an anon key for our project
-  //   (handles mismatch between info.tsx publicAnonKey and SUPABASE_ANON_KEY env var)
-  if ((supabaseAnonKey && accessToken === supabaseAnonKey) || isProjectAnonKey(accessToken)) {
-    c.set('userId', 'admin-pin');
-    c.set('user', { id: 'admin-pin', role: 'admin' });
-    await next();
-    return;
-  }
-
-  // Otherwise validate as a real Supabase Auth token
   const { data: { user }, error } = await supabase.auth.getUser(accessToken);
   if (error || !user) {
     return c.json({ error: 'Unauthorized: Invalid token' }, 401);
   }
-  
+
   c.set('userId', user.id);
   c.set('user', user);
   await next();
@@ -186,53 +144,12 @@ setupPodcastContestRoutes(app, requireAuth);
 // Setup Interactive Features routes (Live DJ, Requests, Shoutouts, Calls)
 setupInteractiveRoutes(app, requireAuth);
 
-// Setup Editorial Department routes (Эфирный Отдел)
-setupEditorialRoutes(app, requireAuth);
-
-// Setup AI Provider CRUD routes (Multi-provider system)
-setupAIProviderRoutes(app, requireAuth);
-
 // Seed endpoint for testing
 app.post('/make-server-06086aa3/seed-news-injection', async (c) => {
   try {
     const result = await seedNewsInjectionData();
     await createSampleRules();
     return c.json({ success: true, ...result });
-  } catch (error: any) {
-    return c.json({ success: false, error: error.message }, 500);
-  }
-});
-
-// Seed all content (shows, podcasts, profiles)
-app.post('/make-server-06086aa3/seed-all', async (c) => {
-  try {
-    console.log('🌱 Seeding all content...');
-    await seedProfiles();
-    await seedPodcasts();
-    await seedShows();
-    console.log('✅ All content seeded successfully');
-    return c.json({ success: true, message: 'Shows, podcasts, and profiles seeded' });
-  } catch (error: any) {
-    console.error('Seed all error:', error);
-    return c.json({ success: false, error: error.message }, 500);
-  }
-});
-
-// Seed shows only
-app.post('/make-server-06086aa3/seed-shows', async (c) => {
-  try {
-    await seedShows();
-    return c.json({ success: true, message: 'Shows seeded' });
-  } catch (error: any) {
-    return c.json({ success: false, error: error.message }, 500);
-  }
-});
-
-// Seed podcasts only
-app.post('/make-server-06086aa3/seed-podcasts', async (c) => {
-  try {
-    await seedPodcasts();
-    return c.json({ success: true, message: 'Podcasts seeded' });
   } catch (error: any) {
     return c.json({ success: false, error: error.message }, 500);
   }
@@ -360,7 +277,7 @@ app.put("/make-server-06086aa3/auth/profile", requireAuth, async (c) => {
 
 // ==================== AUTO DJ & LIVE RADIO STREAM ====================
 
-// Auto DJ State (in-memory cache; persisted to KV so it survives Edge Function cold-starts)
+// Auto DJ State
 let autoDJState = {
   isPlaying: false,
   currentTrackIndex: 0,
@@ -370,142 +287,12 @@ let autoDJState = {
   currentTrackStartTime: null as string | null,
   listeners: 0,
   autoAdvance: true,
-  pendingJingle: null as any,
-  isPlayingJingle: false,
+  pendingJingle: null as any, // Jingle waiting to be played
+  isPlayingJingle: false, // Currently playing a jingle
 };
-
-const AUTODJ_STATE_KEY = 'autodj:state';
-
-const _sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
-
-const _isTransientKvError = (e: any) => {
-  const msg: string = e?.message || String(e);
-  return msg.includes('connection') || msg.includes('reset') || msg.includes('SendRequest') || msg.includes('error sending request');
-};
-
-// ── LIGHT version — only scalar fields, NO playlist track fetching ──
-// Use this in read-only endpoints (status, current-stream) for speed.
-async function loadAutoDJStateLight(retries = 2): Promise<any> {
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      const saved = await kv.get(AUTODJ_STATE_KEY);
-      if (saved && typeof saved.isPlaying === 'boolean') {
-        autoDJState.isPlaying             = saved.isPlaying;
-        autoDJState.currentTrackIndex     = saved.currentTrackIndex ?? 0;
-        autoDJState.currentTrack          = saved.currentTrack ?? null;
-        autoDJState.startTime             = saved.startTime ?? null;
-        autoDJState.currentTrackStartTime = saved.currentTrackStartTime ?? null;
-        autoDJState.listeners             = saved.listeners ?? 0;
-        autoDJState.autoAdvance           = saved.autoAdvance ?? true;
-        autoDJState.isPlayingJingle       = saved.isPlayingJingle ?? false;
-        // Store track count from IDs without loading full objects
-        (autoDJState as any)._totalTrackCount = saved.playlistTrackIds?.length ?? autoDJState.playlistTracks.length;
-      }
-      return saved;
-    } catch (e: any) {
-      if (_isTransientKvError(e) && attempt < retries) {
-        console.warn(`[AutoDJ] KV light-load transient error (attempt ${attempt + 1}), retrying…`);
-        await _sleep(600);
-        continue;
-      }
-      console.error('[AutoDJ] KV light-load failed:', e?.message || e);
-      return null;
-    }
-  }
-  return null;
-}
-
-// ── FULL version — loads playlist tracks from IDs (expensive) ──
-// Use only in start/stop/skip/advance operations.
-async function loadAutoDJState(retries = 2) {
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      const saved = await kv.get(AUTODJ_STATE_KEY);
-      if (saved && typeof saved.isPlaying === 'boolean') {
-        // Restore scalar fields
-        autoDJState.isPlaying             = saved.isPlaying;
-        autoDJState.currentTrackIndex     = saved.currentTrackIndex ?? 0;
-        autoDJState.currentTrack          = saved.currentTrack ?? null;
-        autoDJState.startTime             = saved.startTime ?? null;
-        autoDJState.currentTrackStartTime = saved.currentTrackStartTime ?? null;
-        autoDJState.listeners             = saved.listeners ?? 0;
-        autoDJState.autoAdvance           = saved.autoAdvance ?? true;
-        autoDJState.isPlayingJingle       = saved.isPlayingJingle ?? false;
-
-        // Restore playlist from stored IDs (if in-memory list is empty)
-        if (autoDJState.playlistTracks.length === 0 && saved.playlistTrackIds?.length > 0) {
-          const tracks: any[] = [];
-          for (const id of saved.playlistTrackIds) {
-            try {
-              const t = await kv.get(`track:${id}`);
-              if (t) tracks.push(t);
-            } catch (_) { /* skip missing tracks */ }
-          }
-          autoDJState.playlistTracks = tracks;
-        }
-      }
-      return;
-    } catch (e: any) {
-      if (_isTransientKvError(e) && attempt < retries) {
-        console.warn(`[AutoDJ] KV load transient error (attempt ${attempt + 1}), retrying…`);
-        await _sleep(600);
-        continue;
-      }
-      console.error('[AutoDJ] KV load failed, using in-memory state:', e?.message || e);
-      return;
-    }
-  }
-}
-
-async function saveAutoDJState(retries = 2) {
-  // Store only lightweight scalar fields.
-  // playlistTracks (full objects) is intentionally excluded — it can be
-  // hundreds of track objects and blow the KV payload limit, causing silent failures.
-  const payload = {
-    isPlaying: autoDJState.isPlaying,
-    currentTrackIndex: autoDJState.currentTrackIndex,
-    // Only IDs — full track objects are reloaded on demand
-    playlistTrackIds: autoDJState.playlistTracks.map((t: any) => t.id).filter(Boolean),
-    // Trim current track to essential fields for the signed-URL route
-    currentTrack: autoDJState.currentTrack ? {
-      id:              autoDJState.currentTrack.id,
-      title:           autoDJState.currentTrack.title,
-      artist:          autoDJState.currentTrack.artist,
-      album:           autoDJState.currentTrack.album,
-      duration:        autoDJState.currentTrack.duration,
-      coverUrl:        autoDJState.currentTrack.coverUrl,
-      storageBucket:   autoDJState.currentTrack.storageBucket,
-      storageFilename: autoDJState.currentTrack.storageFilename,
-      coverBucket:     autoDJState.currentTrack.coverBucket,
-      coverFilename:   autoDJState.currentTrack.coverFilename,
-    } : null,
-    startTime:             autoDJState.startTime,
-    currentTrackStartTime: autoDJState.currentTrackStartTime,
-    listeners:             autoDJState.listeners,
-    autoAdvance:           autoDJState.autoAdvance,
-    isPlayingJingle:       autoDJState.isPlayingJingle,
-  };
-
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      await kv.set(AUTODJ_STATE_KEY, payload);
-      return;
-    } catch (e: any) {
-      if (_isTransientKvError(e) && attempt < retries) {
-        console.warn(`[AutoDJ] KV save transient error (attempt ${attempt + 1}), retrying…`);
-        await _sleep(600);
-        continue;
-      }
-      console.error('[AutoDJ] KV save failed (non-critical):', e?.message || e);
-      return;
-    }
-  }
-}
 
 // Auto-advance tracks
 async function checkAndAdvanceTrack() {
-  // Always reload from KV first — function may have cold-started
-  await loadAutoDJState();
   if (!autoDJState.isPlaying || !autoDJState.currentTrack || !autoDJState.currentTrackStartTime) {
     return;
   }
@@ -848,55 +635,26 @@ async function checkAndAdvanceTrack() {
           autoDJState.currentTrackIndex = 0;
         }
       }
-      // Keep active schedule reference in sync
-      (autoDJState as any).activeScheduleSlot = {
-        id: currentSchedule.id,
-        title: currentSchedule.title,
-        playlistId: currentSchedule.playlistId,
-        playlistName: currentSchedule.playlistName,
-        startTime: currentSchedule.startTime,
-        endTime: currentSchedule.endTime,
-        dayOfWeek: currentSchedule.dayOfWeek,
-      };
-    } else {
-      (autoDJState as any).activeScheduleSlot = null;
     }
     
-    if (autoDJState.playlistTracks.length === 0) {
-      console.error('[checkAndAdvanceTrack] playlistTracks is empty — cannot advance');
-      return;
-    }
     autoDJState.currentTrackIndex = (autoDJState.currentTrackIndex + 1) % autoDJState.playlistTracks.length;
     autoDJState.currentTrack = autoDJState.playlistTracks[autoDJState.currentTrackIndex];
     autoDJState.currentTrackStartTime = new Date().toISOString();
     
-    if (!autoDJState.currentTrack) {
-      console.error('[checkAndAdvanceTrack] currentTrack is null at index', autoDJState.currentTrackIndex);
-      return;
-    }
-
-    // Generate fresh signed cover URL (stored coverUrl may be expired — buckets are private)
-    const advTrack = autoDJState.currentTrack;
-    let advCoverUrl = advTrack.coverUrl || null;
-    if (advTrack.coverFilename && advTrack.coverBucket) {
-      const freshCover = await getAudioUrl(advTrack.coverBucket, advTrack.coverFilename);
-      if (freshCover) advCoverUrl = freshCover;
-    }
-    
     await kv.set('stream:nowplaying', {
       track: {
-        id: advTrack.id,
-        title: advTrack.title,
-        artist: advTrack.artist,
-        album: advTrack.album,
-        duration: advTrack.duration,
-        cover: advCoverUrl
+        id: autoDJState.currentTrack.id,
+        title: autoDJState.currentTrack.title,
+        artist: autoDJState.currentTrack.artist,
+        album: autoDJState.currentTrack.album,
+        duration: autoDJState.currentTrack.duration,
+        cover: autoDJState.currentTrack.coverUrl
       },
       startTime: autoDJState.currentTrackStartTime,
       updatedAt: new Date().toISOString()
     });
     
-    // Broadcast track change via Supabase Realtime — use fresh signed cover URL
+    // Broadcast track change via Supabase Realtime
     try {
       const channel = supabase.channel('radio-updates');
       await channel.send({
@@ -904,12 +662,12 @@ async function checkAndAdvanceTrack() {
         event: 'track-changed',
         payload: {
           track: {
-            id: advTrack.id,
-            title: advTrack.title,
-            artist: advTrack.artist,
-            album: advTrack.album,
-            duration: advTrack.duration,
-            cover: advCoverUrl
+            id: autoDJState.currentTrack.id,
+            title: autoDJState.currentTrack.title,
+            artist: autoDJState.currentTrack.artist,
+            album: autoDJState.currentTrack.album,
+            duration: autoDJState.currentTrack.duration,
+            cover: autoDJState.currentTrack.coverUrl
           },
           startTime: autoDJState.currentTrackStartTime,
           updatedAt: new Date().toISOString()
@@ -920,564 +678,95 @@ async function checkAndAdvanceTrack() {
       console.error('Broadcast error:', broadcastError);
     }
     
-    // Persist new track position to KV
-    await saveAutoDJState();
-
-    console.log(`✅ Now playing: "${advTrack.title}"`);
+    console.log(`✅ Now playing: "${autoDJState.currentTrack.title}"`);
   }
-}
-
-// Helper: get current UTC offset (in JS getTimezoneOffset() convention) for an IANA timezone
-// Returns minutes: positive = west of UTC, negative = east of UTC (e.g., -60 for Europe/Berlin in CET, -120 in CEST)
-function getTimezoneOffsetNow(timezone: string): number {
-  try {
-    const now = new Date();
-    const formatter = new Intl.DateTimeFormat('en-US', {
-      timeZone: timezone,
-      year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', second: '2-digit',
-      hour12: false,
-    });
-    const parts = formatter.formatToParts(now);
-    const get = (type: string) => parseInt(parts.find(p => p.type === type)?.value || '0');
-    // Construct a Date as if the local-time values were UTC
-    const localAsUTC = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour') === 24 ? 0 : get('hour'), get('minute'), get('second'));
-    // offset = actual UTC - local-as-UTC  → same sign convention as getTimezoneOffset()
-    return Math.round((now.getTime() - localAsUTC) / 60000);
-  } catch (e) {
-    console.error(`[getTimezoneOffsetNow] Invalid timezone "${timezone}":`, e);
-    return 0;
-  }
-}
-
-// Helper: resolve effective UTC offset for a schedule slot
-// If IANA timezone is stored, compute offset dynamically (DST-correct); otherwise fall back to stored fixed offset
-function resolveSlotOffset(schedule: any): number {
-  if (schedule.timezone) {
-    return getTimezoneOffsetNow(schedule.timezone);
-  }
-  return schedule.utcOffsetMinutes ?? 0;
-}
-
-// Helper: convert "HH:MM" local time + utcOffsetMinutes to { utcTime: "HH:MM", dayDelta: -1|0|+1 }
-// utcOffsetMinutes is JS getTimezoneOffset(): negative = east of UTC (e.g., -60 for UTC+1 Berlin)
-function localTimeToUTC(timeStr: string, utcOffsetMinutes: number): { time: string; dayDelta: number } {
-  const [h, m] = timeStr.split(':').map(Number);
-  let totalMinutes = h * 60 + m + utcOffsetMinutes; // offset IS the diff (UTC - local)
-  let dayDelta = 0;
-  if (totalMinutes < 0) { totalMinutes += 1440; dayDelta = -1; }
-  if (totalMinutes >= 1440) { totalMinutes -= 1440; dayDelta = 1; }
-  const uh = Math.floor(totalMinutes / 60);
-  const um = totalMinutes % 60;
-  return { time: `${String(uh).padStart(2, '0')}:${String(um).padStart(2, '0')}`, dayDelta };
 }
 
 async function getCurrentScheduledPlaylist() {
   try {
     const allSchedules = await kv.getByPrefix('schedule:');
     const now = new Date();
-    const currentDay = now.getUTCDay(); // 0=Sun..6=Sat in UTC
-    const currentMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
-    const currentTime = `${String(now.getUTCHours()).padStart(2,'0')}:${String(now.getUTCMinutes()).padStart(2,'0')}`; // HH:MM in UTC
-    const todayStr = now.toISOString().slice(0, 10); // 'YYYY-MM-DD'
-
-    console.log(`[getCurrentSchedule] Checking ${allSchedules.length} slots. Server UTC time: ${currentTime}, day: ${currentDay} (${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][currentDay]}), date: ${todayStr}`);
-
-    let recurringMatch: any = null;
-    let oneTimeMatch: any = null;
-
+    const currentDay = now.getDay();
+    const currentTime = now.toTimeString().slice(0, 5);
+    
     for (const schedule of allSchedules) {
-      if (!schedule.isActive) {
-        console.log(`  [skip] "${schedule.title}" — inactive`);
-        continue;
-      }
-
-      // Convert slot's local times to UTC — uses IANA timezone if available (DST-correct), else fixed offset
-      const offset = resolveSlotOffset(schedule);
-      const startUTC = localTimeToUTC(schedule.startTime, offset);
-      const endUTC = localTimeToUTC(schedule.endTime, offset);
-      
-      // Determine which UTC day(s) this slot covers
-      const slotDayOfWeek = schedule.dayOfWeek;
-      const utcStartDay = slotDayOfWeek !== null && slotDayOfWeek !== undefined
-        ? (slotDayOfWeek + startUTC.dayDelta + 7) % 7
-        : null; // null = daily
-      const utcEndDay = slotDayOfWeek !== null && slotDayOfWeek !== undefined
-        ? (slotDayOfWeek + endUTC.dayDelta + 7) % 7
-        : null;
-
-      // Time comparison in UTC
-      const inTimeRange = currentTime >= startUTC.time && currentTime < endUTC.time;
-      
-      if (offset !== 0) {
-        console.log(`  [tz] "${schedule.title}" local ${schedule.startTime}-${schedule.endTime} (offset ${offset}min) → UTC ${startUTC.time}-${endUTC.time} (day delta: ${startUTC.dayDelta})`);
-      }
-
-      if (!inTimeRange) {
-        console.log(`  [skip] "${schedule.title}" — UTC time ${startUTC.time}-${endUTC.time} doesn't cover UTC ${currentTime}`);
-        continue;
-      }
-
-      const mode = schedule.scheduleMode || 'recurring';
-
-      if (mode === 'one-time') {
-        // One-time slot: must match today's date; skip expired ones
-        if (!schedule.scheduledDate) continue;
-        const slotDate = schedule.scheduledDate.slice(0, 10);
-        if (slotDate !== todayStr) {
-          console.log(`  [skip] "${schedule.title}" — one-time date ${slotDate} ≠ today ${todayStr}`);
-          continue;
-        }
-        oneTimeMatch = schedule;
-        console.log(`  [MATCH] "${schedule.title}" — one-time match!`);
-        break; // one-time has highest priority, stop searching
-      } else {
-        // Recurring: match day of week (using UTC-converted day)
-        if (utcStartDay !== null && utcStartDay !== currentDay) {
-          console.log(`  [skip] "${schedule.title}" — UTC dayOfWeek ${utcStartDay} (local ${slotDayOfWeek}) ≠ UTC day ${currentDay}`);
-          continue;
-        }
-        if (!recurringMatch) {
-          recurringMatch = schedule;
-          console.log(`  [MATCH] "${schedule.title}" — recurring match (utcDay=${utcStartDay}, UTC time=${startUTC.time}-${endUTC.time})`);
-        }
+      if (!schedule.isActive) continue;
+      if (schedule.dayOfWeek !== null && schedule.dayOfWeek !== currentDay) continue;
+      if (currentTime >= schedule.startTime && currentTime < schedule.endTime) {
+        const playlist = await kv.get(`playlist:${schedule.playlistId}`);
+        return {
+          ...schedule,
+          playlistName: playlist?.name || 'Unknown',
+          // Include jingleConfig for schedule-aware jingle integration
+          jingleConfig: schedule.jingleConfig || null,
+        };
       }
     }
-
-    // One-time slots take priority over recurring
-    const matched = oneTimeMatch || recurringMatch;
-    if (!matched) {
-      console.log(`[getCurrentSchedule] No matching slot found`);
-      return null;
-    }
-
-    const playlist = await kv.get(`playlist:${matched.playlistId}`);
-    console.log(`[getCurrentSchedule] ✅ Matched: "${matched.title}" → playlist "${playlist?.name || 'Unknown'}"`);
-    return {
-      ...matched,
-      playlistName: playlist?.name || 'Unknown',
-      jingleConfig: matched.jingleConfig || null,
-    };
+    return null;
   } catch (error) {
     console.error('Error getting schedule:', error);
     return null;
   }
 }
 
-// ── Reusable audit-log helper ──────────────────────────────────────
-async function addAuditLog(opts: {
-  level?: 'info' | 'warning' | 'error' | 'success';
-  category?: string;
-  message: string;
-  details?: string;
-  userId?: string;
-}) {
-  try {
-    const logId = `log_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-    await kv.set(`auditlog:${logId}`, {
-      id: logId,
-      timestamp: new Date().toISOString(),
-      level: opts.level || 'info',
-      category: opts.category || 'System',
-      message: opts.message,
-      details: opts.details || null,
-      userId: opts.userId || null,
-    });
-  } catch (err: any) {
-    console.error('addAuditLog error (non-critical):', err?.message || err);
+setInterval(() => {
+  if (autoDJState.autoAdvance) {
+    checkAndAdvanceTrack().catch(error => console.error('Auto-advance error:', error));
   }
-}
-
-// NOTE: setInterval is unreliable in stateless Edge Functions (dies between invocations).
-// Auto-advance is driven entirely by the frontend (timer + audio.onended → POST /radio/next).
-// The previous best-effort setInterval was removed because it ran within a single invocation
-// context but died on cold starts, giving inconsistent behavior and masking real issues.
-
-// ── Helper: get audio URL via signed URL (buckets are PRIVATE — public URLs return 403) ──
-// Signed URLs have a 2-hour TTL; callers should generate fresh ones before playback.
-async function getAudioUrl(bucket: string, filename: string): Promise<string | null> {
-  if (!filename) return null;
-  try {
-    const { data, error } = await supabase.storage
-      .from(bucket)
-      .createSignedUrl(filename, 7200); // 2 hours
-    if (data?.signedUrl) return data.signedUrl;
-    console.warn(`[getAudioUrl] createSignedUrl failed for ${bucket}/${filename}:`, error?.message);
-  } catch (e: any) {
-    console.warn(`[getAudioUrl] createSignedUrl exception for ${bucket}/${filename}:`, e?.message);
-  }
-  // No public URL fallback — buckets are private, public URLs return 403.
-  console.error(`[getAudioUrl] Could not generate signed URL for ${bucket}/${filename}`);
-  return null;
-}
-
-// ── Debug endpoint — dumps raw KV state for Auto DJ troubleshooting ──
-app.get("/make-server-06086aa3/radio/debug", async (c) => {
-  try {
-    const [streamStatus, nowPlaying, autoDJSaved] = await Promise.all([
-      kv.get('stream:status').catch((e: any) => ({ _error: e?.message || String(e) })),
-      kv.get('stream:nowplaying').catch((e: any) => ({ _error: e?.message || String(e) })),
-      kv.get(AUTODJ_STATE_KEY).catch((e: any) => ({ _error: e?.message || String(e) })),
-    ]);
-
-    // Detailed playlists with track counts
-    let playlistCount = 0;
-    let trackCount = 0;
-    let playlistDetails: any[] = [];
-    let scheduleDetails: any[] = [];
-    let tracksWithAudio = 0;
-    let tracksWithoutAudio = 0;
-    try {
-      const playlists = await kv.getByPrefix('playlist:');
-      playlistCount = playlists?.length ?? 0;
-      playlistDetails = (playlists || []).map((p: any) => ({
-        id: p.id,
-        name: p.name || p.id,
-        trackCount: p.trackIds?.length ?? 0,
-        isLiveStream: p.id === 'livestream',
-      }));
-    } catch (_) {}
-    try {
-      const tracks = await kv.getByPrefix('track:');
-      trackCount = tracks?.length ?? 0;
-      tracksWithAudio = (tracks || []).filter((t: any) => !!t.storageFilename).length;
-      tracksWithoutAudio = trackCount - tracksWithAudio;
-    } catch (_) {}
-    try {
-      const schedules = await kv.getByPrefix('schedule:');
-      scheduleDetails = (schedules || []).map((s: any) => ({
-        id: s.id,
-        title: s.title,
-        playlistId: s.playlistId,
-        dayOfWeek: s.dayOfWeek,
-        startTime: s.startTime,
-        endTime: s.endTime,
-        isActive: s.isActive,
-        scheduleMode: s.scheduleMode || 'recurring',
-      }));
-    } catch (_) {}
-
-    // Check storage buckets
-    let storageBuckets: string[] = [];
-    try {
-      const { data: buckets } = await supabase.storage.listBuckets();
-      storageBuckets = (buckets || []).map((b: any) => b.name);
-    } catch (_) {}
-
-    // Current schedule check (real-time)
-    const currentSchedule = await getCurrentScheduledPlaylist().catch(() => null);
-
-    return c.json({
-      timestamp: new Date().toISOString(),
-      serverTime: `${String(new Date().getUTCHours()).padStart(2,'0')}:${String(new Date().getUTCMinutes()).padStart(2,'0')}:${String(new Date().getUTCSeconds()).padStart(2,'0')}`,
-      serverDay: new Date().getUTCDay(),
-      kvState: {
-        'stream:status': streamStatus,
-        'stream:nowplaying': nowPlaying,
-        'autodj:state': autoDJSaved ? {
-          isPlaying: autoDJSaved.isPlaying,
-          currentTrackIndex: autoDJSaved.currentTrackIndex,
-          playlistTrackIds: autoDJSaved.playlistTrackIds?.length ?? 0,
-          currentTrack: autoDJSaved.currentTrack ? {
-            id: autoDJSaved.currentTrack.id,
-            title: autoDJSaved.currentTrack.title,
-            storageFilename: autoDJSaved.currentTrack.storageFilename || 'MISSING',
-            storageBucket: autoDJSaved.currentTrack.storageBucket || 'MISSING',
-          } : null,
-          startTime: autoDJSaved.startTime,
-          currentTrackStartTime: autoDJSaved.currentTrackStartTime,
-          activeScheduleSlot: autoDJSaved.activeScheduleSlot || null,
-        } : null,
-      },
-      inMemory: {
-        isPlaying: autoDJState.isPlaying,
-        currentTrack: autoDJState.currentTrack?.title || null,
-        playlistLength: autoDJState.playlistTracks.length,
-      },
-      counts: {
-        playlists: playlistCount,
-        tracks: trackCount,
-        tracksWithAudio,
-        tracksWithoutAudio,
-        schedules: scheduleDetails.length,
-      },
-      playlists: playlistDetails,
-      schedules: scheduleDetails,
-      currentScheduleSlot: currentSchedule,
-      storageBuckets,
-    });
-  } catch (error: any) {
-    return c.json({ error: error.message }, 500);
-  }
-});
-
-// Raw KV dump — returns all schedule keys with their raw values for diagnostics
-app.get("/make-server-06086aa3/radio/kv-schedule-dump", async (c) => {
-  try {
-    // Query raw keys + values from KV
-    const scheduleEntries = await kv.getByPrefix('schedule:');
-    const playlistEntries = await kv.getByPrefix('playlist:');
-    
-    c.header('Cache-Control', 'no-store');
-    return c.json({
-      timestamp: new Date().toISOString(),
-      serverTimeUTC: `${String(new Date().getUTCHours()).padStart(2,'0')}:${String(new Date().getUTCMinutes()).padStart(2,'0')}:${String(new Date().getUTCSeconds()).padStart(2,'0')}`,
-      serverDayUTC: new Date().getUTCDay(),
-      scheduleCount: scheduleEntries.length,
-      scheduleEntries: scheduleEntries.map((e: any) => {
-        const storedOffset = e.utcOffsetMinutes ?? 0;
-        const liveOffset = resolveSlotOffset(e);
-        const startUTC = localTimeToUTC(e.startTime, liveOffset);
-        const endUTC = localTimeToUTC(e.endTime, liveOffset);
-        return {
-          id: e.id,
-          title: e.title,
-          playlistId: e.playlistId,
-          dayOfWeek: e.dayOfWeek,
-          startTime: e.startTime,
-          endTime: e.endTime,
-          utcOffsetMinutes: storedOffset,
-          liveOffsetMinutes: liveOffset,
-          timezone: e.timezone || null,
-          dstAware: !!e.timezone,
-          startTimeUTC: startUTC.time,
-          endTimeUTC: endUTC.time,
-          startDayDelta: startUTC.dayDelta,
-          isActive: e.isActive,
-          scheduleMode: e.scheduleMode,
-          scheduledDate: e.scheduledDate,
-          createdAt: e.createdAt,
-        };
-      }),
-      playlistCount: playlistEntries.length,
-      playlistIds: playlistEntries.map((p: any) => ({ id: p.id, name: p.name })),
-    });
-  } catch (error: any) {
-    return c.json({ error: error.message }, 500);
-  }
-});
-
-// Migrate old schedule slots to add IANA timezone (DST-correct matching)
-app.post("/make-server-06086aa3/radio/migrate-timezone", requireAuth, async (c) => {
-  try {
-    const body = await c.req.json();
-    const timezone = body.timezone; // e.g., "Europe/Berlin"
-    if (!timezone) {
-      return c.json({ error: 'Missing "timezone" field' }, 400);
-    }
-
-    // Validate timezone
-    try {
-      Intl.DateTimeFormat('en-US', { timeZone: timezone });
-    } catch {
-      return c.json({ error: `Invalid IANA timezone: "${timezone}"` }, 400);
-    }
-
-    const currentOffset = getTimezoneOffsetNow(timezone);
-    const allSchedules = await kv.getByPrefix('schedule:');
-    let migrated = 0;
-    let alreadyOk = 0;
-    const details: any[] = [];
-
-    for (const slot of allSchedules) {
-      const hadTimezone = !!slot.timezone;
-      const hadOffset = slot.utcOffsetMinutes != null && slot.utcOffsetMinutes !== 0;
-
-      if (hadTimezone && slot.timezone === timezone) {
-        alreadyOk++;
-        details.push({ id: slot.id, title: slot.title, action: 'skip', reason: 'already has correct timezone' });
-        continue;
-      }
-
-      // Patch the slot with IANA timezone + current offset snapshot
-      const updated = {
-        ...slot,
-        timezone,
-        utcOffsetMinutes: currentOffset,
-      };
-      await kv.set(`schedule:${slot.id}`, updated);
-      migrated++;
-      details.push({
-        id: slot.id,
-        title: slot.title,
-        action: 'migrated',
-        previousTimezone: slot.timezone || null,
-        previousOffset: slot.utcOffsetMinutes ?? 0,
-        newTimezone: timezone,
-        newOffset: currentOffset,
-      });
-    }
-
-    console.log(`[migrate-timezone] Migrated ${migrated}/${allSchedules.length} slots to ${timezone} (offset ${currentOffset}min)`);
-
-    return c.json({
-      success: true,
-      timezone,
-      currentOffset,
-      totalSlots: allSchedules.length,
-      migrated,
-      alreadyOk,
-      details,
-    });
-  } catch (error: any) {
-    console.error('[migrate-timezone] Error:', error);
-    return c.json({ error: error.message }, 500);
-  }
-});
+}, 10000);
 
 // Start Auto DJ
 app.post("/make-server-06086aa3/radio/start", requireAuth, async (c) => {
   try {
-    console.log('🚀 [radio/start] Starting Auto DJ...');
-
-    // ── 1. Current scheduled slot playlist (PRIORITY — schedule drives the station) ──
-    let tracks: any[] = [];
-    let sourceLabel = 'Schedule';
-    let activeScheduleSlot: any = null;
-
-    const scheduled = await getCurrentScheduledPlaylist();
-    console.log(`[radio/start] Scheduled slot: ${scheduled ? `"${scheduled.title}" (playlist: ${scheduled.playlistId})` : 'none active'}`);
-    if (scheduled?.playlistId) {
-      const schedPl = await kv.get(`playlist:${scheduled.playlistId}`);
-      if (schedPl?.trackIds?.length > 0) {
-        sourceLabel = `Schedule: ${scheduled.title}`;
-        activeScheduleSlot = scheduled;
-        for (const trackId of schedPl.trackIds) {
-          const t = await kv.get(`track:${trackId}`);
-          if (t) tracks.push(t);
-        }
-        console.log(`[radio/start] Loaded ${tracks.length} tracks from schedule "${scheduled.title}"`);
-      }
+    // Load Live Stream playlist
+    const livePlaylist = await kv.get('playlist:livestream');
+    
+    if (!livePlaylist || !livePlaylist.trackIds || livePlaylist.trackIds.length === 0) {
+      return c.json({ error: 'Live Stream playlist is empty. Please add tracks first.' }, 400);
     }
 
-    // ── 2. Fallback: Live Stream playlist (default when no schedule is active) ──
-    if (tracks.length === 0) {
-      const livePlaylist = await kv.get('playlist:livestream');
-      console.log(`[radio/start] Live Stream playlist: ${livePlaylist ? `${livePlaylist.trackIds?.length || 0} trackIds` : 'NOT FOUND'}`);
-      if (livePlaylist?.trackIds?.length > 0) {
-        sourceLabel = 'Live Stream playlist';
-        for (const trackId of livePlaylist.trackIds) {
-          const t = await kv.get(`track:${trackId}`);
-          if (t) tracks.push(t);
-        }
-        console.log(`[radio/start] Loaded ${tracks.length} tracks from Live Stream`);
-      }
-    }
-
-    // ── 3. Fallback: any playlist with tracks ────────────────────────
-    if (tracks.length === 0) {
-      console.log('[radio/start] Searching any playlist with tracks...');
-      const allPlaylists = await kv.getByPrefix('playlist:');
-      for (const pl of allPlaylists) {
-        if (!pl.trackIds?.length) continue;
-        const plTracks: any[] = [];
-        for (const trackId of pl.trackIds) {
-          const t = await kv.get(`track:${trackId}`);
-          if (t) plTracks.push(t);
-        }
-        if (plTracks.length > 0) {
-          sourceLabel = `Playlist: ${pl.name || pl.id}`;
-          tracks = plTracks;
-          console.log(`[radio/start] Found playlist "${pl.name}" with ${plTracks.length} tracks`);
-          break;
-        }
-      }
-    }
-
-    // ── 4. Fallback: all uploaded tracks ────────────────────────────
-    if (tracks.length === 0) {
-      console.log('[radio/start] Loading all tracks as last resort...');
-      const allTracks = await kv.getByPrefix('track:');
-      tracks = allTracks.filter((t: any) => t?.id);
-      if (tracks.length > 0) {
-        sourceLabel = 'All tracks';
-        tracks = tracks.sort(() => Math.random() - 0.5);
+    // Load all tracks from playlist
+    const tracks = [];
+    for (const trackId of livePlaylist.trackIds) {
+      const track = await kv.get(`track:${trackId}`);
+      if (track) {
+        tracks.push(track);
       }
     }
 
     if (tracks.length === 0) {
-      console.error('[radio/start] NO TRACKS FOUND anywhere');
-      return c.json({ error: 'No tracks found. Please upload some audio tracks first.' }, 400);
+      return c.json({ error: 'No valid tracks found in playlist' }, 400);
     }
-
-    // ── Filter: prefer tracks with actual audio files ────────────────
-    const tracksWithAudio = tracks.filter((t: any) => t.storageFilename);
-    const tracksWithoutAudio = tracks.filter((t: any) => !t.storageFilename);
-    if (tracksWithAudio.length > 0) {
-      // Put tracks with audio first, others at the end
-      tracks = [...tracksWithAudio, ...tracksWithoutAudio];
-      console.log(`[radio/start] ${tracksWithAudio.length} tracks with audio, ${tracksWithoutAudio.length} without`);
-    } else {
-      console.warn(`[radio/start] WARNING: No tracks have audio files! storageFilename is missing on all ${tracks.length} tracks.`);
-    }
-
-    const firstTrack = tracks[0];
-    console.log(`[radio/start] First track: "${firstTrack.title}" by ${firstTrack.artist}, storageFilename=${firstTrack.storageFilename || 'NONE'}, storageBucket=${firstTrack.storageBucket || 'NONE'}`);
 
     // Initialize Auto DJ
     autoDJState = {
       isPlaying: true,
       currentTrackIndex: 0,
-      currentTrack: firstTrack,
+      currentTrack: tracks[0],
       playlistTracks: tracks,
       startTime: new Date().toISOString(),
       currentTrackStartTime: new Date().toISOString(),
       listeners: 0,
       autoAdvance: true,
       pendingJingle: null,
-      isPlayingJingle: false,
-      // Track which schedule slot (if any) drove the start
-      activeScheduleSlot: activeScheduleSlot ? {
-        id: activeScheduleSlot.id,
-        title: activeScheduleSlot.title,
-        playlistId: activeScheduleSlot.playlistId,
-        playlistName: activeScheduleSlot.playlistName,
-        startTime: activeScheduleSlot.startTime,
-        endTime: activeScheduleSlot.endTime,
-        dayOfWeek: activeScheduleSlot.dayOfWeek,
-      } : null,
+      isPlayingJingle: false
     };
 
-    // Persist state to KV immediately so cold-starts don't lose it
-    console.log('[radio/start] Saving autoDJ state to KV...');
-    await saveAutoDJState();
-    console.log('[radio/start] autoDJ state saved');
-
-    // ── Generate audio URL for immediate playback ──────────────────────
-    // Buckets are PRIVATE — uses signed URL only (no public URL fallback).
-    // This lets the frontend start playing WITHOUT a second KV round-trip
-    // to /radio/current-stream (which can fail on cold-start KV latency).
-    const startBucket = firstTrack.storageBucket || 'make-06086aa3-tracks';
-    const signedAudioUrl = await getAudioUrl(startBucket, firstTrack.storageFilename);
-    if (signedAudioUrl) {
-      console.log(`[radio/start] Audio URL generated for "${firstTrack.title}"`);
-    } else if (firstTrack.storageFilename) {
-      console.warn(`[radio/start] Could not generate audio URL for "${firstTrack.title}" (file: ${firstTrack.storageFilename})`);
-    }
-    // Cover art URL — generate a fresh signed URL (the stored coverUrl may be expired)
-    let coverUrlSigned: string | null = firstTrack.coverUrl || null;
-    if (firstTrack.coverFilename && firstTrack.coverBucket) {
-      const coverUrl = await getAudioUrl(firstTrack.coverBucket, firstTrack.coverFilename);
-      if (coverUrl) coverUrlSigned = coverUrl;
-    }
-
-    // Update Now Playing — use fresh signed cover URL, not the (possibly expired) stored one
-    console.log('[radio/start] Saving stream:nowplaying to KV...');
+    // Update Now Playing
     await kv.set('stream:nowplaying', {
       track: {
-        id: firstTrack.id,
-        title: firstTrack.title,
-        artist: firstTrack.artist,
-        album: firstTrack.album,
-        duration: firstTrack.duration,
-        cover: coverUrlSigned
+        id: tracks[0].id,
+        title: tracks[0].title,
+        artist: tracks[0].artist,
+        album: tracks[0].album,
+        duration: tracks[0].duration,
+        cover: tracks[0].coverUrl
       },
       startTime: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     });
-    console.log('[radio/start] stream:nowplaying saved');
 
-    console.log('[radio/start] Saving stream:status = online to KV...');
+    // Update stream status
     await kv.set('stream:status', {
       status: 'online',
       listeners: 0,
@@ -1485,12 +774,10 @@ app.post("/make-server-06086aa3/radio/start", requireAuth, async (c) => {
       uptime: 0,
       updatedAt: new Date().toISOString()
     });
-    console.log('[radio/start] stream:status saved ✅');
 
-    console.log(`🎵 Auto DJ started: ${tracks.length} tracks from "${sourceLabel}"`);
-    await addAuditLog({ level: 'success', category: 'Auto DJ', message: `Auto DJ started — ${tracks.length} tracks from "${sourceLabel}"`, userId: c.get('userId') });
+    console.log('🎵 Auto DJ started with', tracks.length, 'tracks');
 
-    // Broadcast start event — use fresh signed cover URL
+    // Broadcast start event
     try {
       const channel = supabase.channel('radio-updates');
       await channel.send({
@@ -1498,12 +785,12 @@ app.post("/make-server-06086aa3/radio/start", requireAuth, async (c) => {
         event: 'track-changed',
         payload: {
           track: {
-            id: firstTrack.id,
-            title: firstTrack.title,
-            artist: firstTrack.artist,
-            album: firstTrack.album,
-            duration: firstTrack.duration,
-            cover: coverUrlSigned
+            id: tracks[0].id,
+            title: tracks[0].title,
+            artist: tracks[0].artist,
+            album: tracks[0].album,
+            duration: tracks[0].duration,
+            cover: tracks[0].coverUrl
           },
           startTime: new Date().toISOString(),
           updatedAt: new Date().toISOString()
@@ -1514,36 +801,9 @@ app.post("/make-server-06086aa3/radio/start", requireAuth, async (c) => {
     }
 
     return c.json({ 
-      message: `Auto DJ started (${sourceLabel})`,
-      currentTrack: firstTrack,
-      totalTracks: tracks.length,
-      tracksWithAudio: tracksWithAudio.length,
-      source: sourceLabel,
-      hasAudioFile: !!firstTrack.storageFilename,
-      // Active schedule slot info (null if started from Live Stream/fallback)
-      activeSchedule: activeScheduleSlot ? {
-        id: activeScheduleSlot.id,
-        title: activeScheduleSlot.title,
-        playlistName: activeScheduleSlot.playlistName,
-        startTime: activeScheduleSlot.startTime,
-        endTime: activeScheduleSlot.endTime,
-      } : null,
-      // ── Inline stream data so frontend can play immediately ──
-      // Bypasses KV read latency on cold-start Edge Function instances.
-      stream: {
-        playing: true,
-        audioUrl: signedAudioUrl,
-        seekPosition: 0,
-        remainingSeconds: firstTrack.duration || 180,
-        track: {
-          id: firstTrack.id,
-          title: firstTrack.title,
-          artist: firstTrack.artist,
-          album: firstTrack.album,
-          duration: firstTrack.duration || 180,
-          coverUrl: coverUrlSigned,
-        },
-      },
+      message: 'Auto DJ started successfully',
+      currentTrack: tracks[0],
+      totalTracks: tracks.length
     });
   } catch (error: any) {
     console.error('Start Auto DJ error:', error);
@@ -1554,13 +814,7 @@ app.post("/make-server-06086aa3/radio/start", requireAuth, async (c) => {
 // Stop Auto DJ
 app.post("/make-server-06086aa3/radio/stop", requireAuth, async (c) => {
   try {
-    await loadAutoDJState();
     autoDJState.isPlaying = false;
-    autoDJState.currentTrack = null;
-    autoDJState.playlistTracks = [];
-    autoDJState.startTime = null;
-    autoDJState.currentTrackStartTime = null;
-    await saveAutoDJState();
 
     await kv.set('stream:status', {
       status: 'offline',
@@ -1571,7 +825,6 @@ app.post("/make-server-06086aa3/radio/stop", requireAuth, async (c) => {
     });
 
     console.log('🛑 Auto DJ stopped');
-    await addAuditLog({ level: 'info', category: 'Auto DJ', message: 'Auto DJ stopped', userId: c.get('userId') });
 
     return c.json({ message: 'Auto DJ stopped successfully' });
   } catch (error: any) {
@@ -1583,7 +836,6 @@ app.post("/make-server-06086aa3/radio/stop", requireAuth, async (c) => {
 // Skip to next track
 app.post("/make-server-06086aa3/radio/next", requireAuth, async (c) => {
   try {
-    await loadAutoDJState();
     if (!autoDJState.isPlaying) {
       return c.json({ error: 'Auto DJ is not running' }, 400);
     }
@@ -1613,31 +865,11 @@ app.post("/make-server-06086aa3/radio/next", requireAuth, async (c) => {
       await jingleRotation.markJinglePlayed(jingle.id);
       
       console.log(`✅ Skipped to jingle: "${jingle.title}"`);
-
-      // Generate audio URL for jingle (signed URL — buckets are private)
-      const jingleBkt = jingle.storageBucket || 'make-06086aa3-jingles';
-      const jingleAudioUrl = jingle.storageFilename
-        ? await getAudioUrl(jingleBkt, jingle.storageFilename)
-        : null;
       
       return c.json({ 
         message: 'Playing jingle',
         currentTrack: autoDJState.currentTrack,
-        isJingle: true,
-        stream: {
-          playing: true,
-          audioUrl: jingleAudioUrl,
-          seekPosition: 0,
-          remainingSeconds: jingle.duration || 15,
-          track: {
-            id: jingle.id,
-            title: `🔔 ${jingle.title}`,
-            artist: 'Station ID',
-            album: jingle.category?.replace(/_/g, ' ') || 'Jingle',
-            duration: jingle.duration || 15,
-            coverUrl: null,
-          },
-        },
+        isJingle: true
       });
     }
 
@@ -1646,81 +878,29 @@ app.post("/make-server-06086aa3/radio/next", requireAuth, async (c) => {
     
     // Increment track count
     autoDJHelper.incrementMusicTrackCount();
-
-    // ── Schedule check: if a scheduled slot is active, switch to its playlist ──
-    const scheduledForSkip = await getCurrentScheduledPlaylist();
-    if (scheduledForSkip) {
-      console.log(`📅 Skip: applying schedule "${scheduledForSkip.title}"`);
-      const schedPlaylist = await kv.get(`playlist:${scheduledForSkip.playlistId}`);
-      if (schedPlaylist && schedPlaylist.trackIds && schedPlaylist.trackIds.length > 0) {
-        const schedTracks: any[] = [];
-        for (const tid of schedPlaylist.trackIds) {
-          const t = await kv.get(`track:${tid}`);
-          if (t) schedTracks.push(t);
-        }
-        if (schedTracks.length > 0) {
-          autoDJState.playlistTracks = schedTracks;
-          autoDJState.currentTrackIndex = -1; // will be incremented to 0 below
-        }
-      }
-      // Update active schedule reference
-      (autoDJState as any).activeScheduleSlot = {
-        id: scheduledForSkip.id,
-        title: scheduledForSkip.title,
-        playlistId: scheduledForSkip.playlistId,
-        playlistName: scheduledForSkip.playlistName,
-        startTime: scheduledForSkip.startTime,
-        endTime: scheduledForSkip.endTime,
-        dayOfWeek: scheduledForSkip.dayOfWeek,
-      };
-    } else {
-      // No schedule active — clear reference (playing from fallback source)
-      (autoDJState as any).activeScheduleSlot = null;
-    }
     
     // Move to next track
-    autoDJState.currentTrackIndex = (autoDJState.currentTrackIndex + 1) % Math.max(autoDJState.playlistTracks.length, 1);
+    autoDJState.currentTrackIndex = (autoDJState.currentTrackIndex + 1) % autoDJState.playlistTracks.length;
     autoDJState.currentTrack = autoDJState.playlistTracks[autoDJState.currentTrackIndex];
     autoDJState.currentTrackStartTime = new Date().toISOString();
 
-    // Guard: if playlist is empty (KV failed to load tracks), return error gracefully
-    if (!autoDJState.currentTrack) {
-      console.error('[radio/next] No track available at index', autoDJState.currentTrackIndex, '— playlist length:', autoDJState.playlistTracks.length);
-      return c.json({ error: 'No tracks available in playlist. Try restarting Auto DJ.', stream: { playing: false } }, 400);
-    }
-
-    // ── Generate fresh signed URLs FIRST (before writing to nowplaying/broadcast) ──
-    const skipTrack = autoDJState.currentTrack;
-    const skipBkt = skipTrack?.storageBucket || 'make-06086aa3-tracks';
-    const skipAudioUrl = skipTrack?.storageFilename
-      ? await getAudioUrl(skipBkt, skipTrack.storageFilename)
-      : null;
-    let skipCoverUrl = skipTrack?.coverUrl || null;
-    if (skipTrack?.coverFilename && skipTrack?.coverBucket) {
-      const coverResult = await getAudioUrl(skipTrack.coverBucket, skipTrack.coverFilename);
-      if (coverResult) skipCoverUrl = coverResult;
-    }
-
-    // Update Now Playing — use fresh signed cover URL
+    // Update Now Playing
     await kv.set('stream:nowplaying', {
       track: {
-        id: skipTrack.id,
-        title: skipTrack.title,
-        artist: skipTrack.artist,
-        album: skipTrack.album,
-        duration: skipTrack.duration,
-        cover: skipCoverUrl
+        id: autoDJState.currentTrack.id,
+        title: autoDJState.currentTrack.title,
+        artist: autoDJState.currentTrack.artist,
+        album: autoDJState.currentTrack.album,
+        duration: autoDJState.currentTrack.duration,
+        cover: autoDJState.currentTrack.coverUrl
       },
       startTime: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     });
 
-    // Persist updated position to KV
-    await saveAutoDJState();
+    console.log('⏭️ Skipped to next track:', autoDJState.currentTrack.title);
 
-    console.log('⏭️ Skipped to next track:', skipTrack.title);
-
-    // Broadcast skip event — use fresh signed cover URL
+    // Broadcast skip event
     try {
       const channel = supabase.channel('radio-updates');
       await channel.send({
@@ -1728,12 +908,12 @@ app.post("/make-server-06086aa3/radio/next", requireAuth, async (c) => {
         event: 'track-changed',
         payload: {
           track: {
-            id: skipTrack.id,
-            title: skipTrack.title,
-            artist: skipTrack.artist,
-            album: skipTrack.album,
-            duration: skipTrack.duration,
-            cover: skipCoverUrl
+            id: autoDJState.currentTrack.id,
+            title: autoDJState.currentTrack.title,
+            artist: autoDJState.currentTrack.artist,
+            album: autoDJState.currentTrack.album,
+            duration: autoDJState.currentTrack.duration,
+            cover: autoDJState.currentTrack.coverUrl
           },
           startTime: autoDJState.currentTrackStartTime,
           updatedAt: new Date().toISOString()
@@ -1745,21 +925,7 @@ app.post("/make-server-06086aa3/radio/next", requireAuth, async (c) => {
 
     return c.json({ 
       message: 'Skipped to next track',
-      currentTrack: autoDJState.currentTrack,
-      stream: {
-        playing: true,
-        audioUrl: skipAudioUrl,
-        seekPosition: 0,
-        remainingSeconds: skipTrack?.duration || 180,
-        track: {
-          id: skipTrack?.id,
-          title: skipTrack?.title,
-          artist: skipTrack?.artist,
-          album: skipTrack?.album,
-          duration: skipTrack?.duration || 180,
-          coverUrl: skipCoverUrl,
-        },
-      },
+      currentTrack: autoDJState.currentTrack
     });
   } catch (error: any) {
     console.error('Skip track error:', error);
@@ -1767,81 +933,40 @@ app.post("/make-server-06086aa3/radio/next", requireAuth, async (c) => {
   }
 });
 
-// Get Auto DJ status — FAST (uses light loader, no playlist track fetching)
+// Get Auto DJ status
 app.get("/make-server-06086aa3/radio/status", async (c) => {
   try {
-    // Load all KV sources in parallel — these are small, single-key reads
-    const [nowPlaying, streamStatus, savedState] = await Promise.all([
-      kv.get('stream:nowplaying').catch(() => null),
-      kv.get('stream:status').catch(() => null),
-      loadAutoDJStateLight(),
-    ]);
-
-    // ── Source of truth: stream:status (written atomically on start/stop) ──
-    const kvIsOnline = streamStatus?.status === 'online';
-
-    // ── Merge: KV wins for isPlaying; autodj:state wins for track detail ──
-    const isPlayingFinal  = kvIsOnline || autoDJState.isPlaying;
-    const currentTrackRaw = autoDJState.currentTrack ?? nowPlaying?.track ?? null;
-    const startTimeFinal    = autoDJState.currentTrackStartTime ?? nowPlaying?.startTime ?? null;
-    const totalTracks       = (autoDJState as any)._totalTrackCount ?? autoDJState.playlistTracks.length ?? 0;
-
-    // ── Refresh cover signed URL if possible (stored URL may have expired — buckets are private) ──
-    // autoDJState.currentTrack carries coverBucket/coverFilename; nowPlaying.track does not.
-    let currentTrackFinal = currentTrackRaw;
-    let freshCoverUrl: string | null = null;
-    if (currentTrackRaw && currentTrackRaw.coverBucket && currentTrackRaw.coverFilename) {
-      try {
-        const fresh = await getAudioUrl(currentTrackRaw.coverBucket, currentTrackRaw.coverFilename);
-        if (fresh) {
-          freshCoverUrl = fresh;
-          currentTrackFinal = { ...currentTrackRaw, coverUrl: fresh, cover: fresh };
-        }
-      } catch (_) { /* non-critical — fall through to stale URL */ }
-    }
-
-    // Also patch nowPlaying.track.cover in the response so both fields are consistent
-    let nowPlayingResponse = nowPlaying;
-    if (freshCoverUrl && nowPlaying?.track && currentTrackFinal?.id === nowPlaying.track.id) {
-      nowPlayingResponse = {
-        ...nowPlaying,
-        track: { ...nowPlaying.track, cover: freshCoverUrl },
-      };
-    }
-
+    const nowPlaying = await kv.get('stream:nowplaying');
+    const streamStatus = await kv.get('stream:status');
+    
     // Calculate track progress
     let trackProgress = 0;
     let elapsedSeconds = 0;
-    if (isPlayingFinal && startTimeFinal && currentTrackFinal) {
+    if (autoDJState.isPlaying && autoDJState.currentTrackStartTime && autoDJState.currentTrack) {
       const now = new Date();
-      elapsedSeconds = Math.floor((now.getTime() - new Date(startTimeFinal).getTime()) / 1000);
-      const duration = currentTrackFinal.duration || 180;
-      trackProgress = Math.min((elapsedSeconds / duration) * 100, 100);
+      const trackStartTime = new Date(autoDJState.currentTrackStartTime);
+      elapsedSeconds = Math.floor((now.getTime() - trackStartTime.getTime()) / 1000);
+      const trackDuration = autoDJState.currentTrack.duration || 180;
+      trackProgress = Math.min((elapsedSeconds / trackDuration) * 100, 100);
     }
-
-    // Get current schedule (single KV prefix read, fast)
-    const currentSchedule = await getCurrentScheduledPlaylist().catch(() => null);
-
-    console.log(`[radio/status] isPlaying=${isPlayingFinal}, kvOnline=${kvIsOnline}, track=${currentTrackFinal?.title || 'none'}, totalTracks=${totalTracks}, coverRefreshed=${!!freshCoverUrl}`);
+    
+    // Get current schedule
+    const currentSchedule = await getCurrentScheduledPlaylist();
 
     return c.json({
       autoDJ: {
-        isPlaying: isPlayingFinal,
-        currentTrack: currentTrackFinal,
+        isPlaying: autoDJState.isPlaying,
+        currentTrack: autoDJState.currentTrack,
         currentTrackIndex: autoDJState.currentTrackIndex,
-        totalTracks,
+        totalTracks: autoDJState.playlistTracks.length,
         startTime: autoDJState.startTime,
-        currentTrackStartTime: startTimeFinal,
+        currentTrackStartTime: autoDJState.currentTrackStartTime,
         trackProgress,
         elapsedSeconds,
         autoAdvance: autoDJState.autoAdvance,
-        currentSchedule,
-        // Which schedule slot was active when Auto DJ started (stored in state)
-        activeScheduleSlot: (autoDJState as any).activeScheduleSlot || null,
-        // Source of tracks: 'schedule', 'livestream', 'playlist', 'all', or null
-        playlistSource: (autoDJState as any).activeScheduleSlot ? 'schedule' : null,
+        currentSchedule
       },
-      nowPlaying: nowPlayingResponse,
+      nowPlaying,
       streamStatus
     });
   } catch (error: any) {
@@ -1855,71 +980,29 @@ app.get("/make-server-06086aa3/radio/status", async (c) => {
 // All listeners get the same track + seekPosition for synchronization.
 app.get("/make-server-06086aa3/radio/current-stream", async (c) => {
   try {
-    // Check KV sources in parallel (small, fast)
-    const [streamStatus, nowPlaying] = await Promise.all([
-      kv.get('stream:status').catch(() => null),
-      kv.get('stream:nowplaying').catch(() => null),
-    ]);
-
-    const kvIsOnline = streamStatus?.status === 'online';
-
-    // Light restore — no playlist fetching, fast
-    await loadAutoDJStateLight();
-
-    // Sync from KV if needed
-    if (kvIsOnline && !autoDJState.isPlaying) {
-      autoDJState.isPlaying = true;
-    }
-    // Use nowPlaying as fallback for current track (always available)
-    if (!autoDJState.currentTrack && nowPlaying?.track) {
-      autoDJState.currentTrack          = nowPlaying.track;
-      autoDJState.currentTrackStartTime = nowPlaying.startTime ?? new Date().toISOString();
-    }
-
-    if ((!autoDJState.isPlaying && !kvIsOnline) || !autoDJState.currentTrack) {
+    if (!autoDJState.isPlaying || !autoDJState.currentTrack) {
       return c.json({ playing: false, message: 'Auto DJ is not running' }, 200);
     }
 
-    let track = autoDJState.currentTrack;
-
-    // If track from KV state doesn't have storage info, try loading full track from KV
-    if (!track.storageFilename && track.id) {
-      try {
-        const fullTrack = await kv.get(`track:${track.id}`);
-        if (fullTrack?.storageFilename) {
-          track = fullTrack;
-          console.log(`[current-stream] Loaded full track data for "${track.title}" from track:${track.id}`);
-        }
-      } catch (e: any) {
-        console.warn('[current-stream] Could not load full track:', e?.message);
-      }
-    }
-
+    const track = autoDJState.currentTrack;
     const bucket = track.storageBucket || 'make-06086aa3-tracks';
     const filename = track.storageFilename;
 
     if (!filename) {
-      console.warn(`[current-stream] Track "${track.title}" (${track.id}) has no storageFilename`);
-      // Still refresh cover URL even though there's no audio
-      let noAudioCover = track.coverUrl || null;
-      if (track.coverFilename && track.coverBucket) {
-        try {
-          const fc = await getAudioUrl(track.coverBucket, track.coverFilename);
-          if (fc) noAudioCover = fc;
-        } catch (_) { /* non-critical */ }
-      }
       return c.json({ playing: true, error: 'Current track has no audio file', track: {
         id: track.id, title: track.title, artist: track.artist, album: track.album,
-        duration: track.duration || 180, coverUrl: noAudioCover,
+        duration: track.duration || 180, coverUrl: track.coverUrl || null,
         isJingle: autoDJState.isPlayingJingle || false,
       }}, 200);
     }
 
-    // Generate audio URL (signed URL — buckets are private, no public fallback)
-    const audioUrl = await getAudioUrl(bucket, filename);
+    // Generate signed URL (valid for 2 hours)
+    const { data: signedUrlData, error: signedUrlError } = await supabase.storage
+      .from(bucket)
+      .createSignedUrl(filename, 7200);
 
-    if (!audioUrl) {
-      console.error(`[current-stream] Could not generate audio URL for ${bucket}/${filename}`);
+    if (signedUrlError || !signedUrlData?.signedUrl) {
+      console.error('Signed URL error:', signedUrlError);
       return c.json({ playing: true, error: 'Failed to generate audio URL' }, 500);
     }
 
@@ -1941,14 +1024,19 @@ app.get("/make-server-06086aa3/radio/current-stream", async (c) => {
     let jingleUrl = null;
     if (pendingJingle?.storageFilename) {
       const jBucket = pendingJingle.storageBucket || 'make-06086aa3-jingles';
-      jingleUrl = await getAudioUrl(jBucket, pendingJingle.storageFilename);
+      const { data: jData } = await supabase.storage
+        .from(jBucket)
+        .createSignedUrl(pendingJingle.storageFilename, 7200);
+      if (jData?.signedUrl) jingleUrl = jData.signedUrl;
     }
 
     // Cover art URL
     let coverUrl = track.coverUrl || null;
     if (track.coverFilename && track.coverBucket) {
-      const coverUrlResult = await getAudioUrl(track.coverBucket, track.coverFilename);
-      if (coverUrlResult) coverUrl = coverUrlResult;
+      const { data: coverData } = await supabase.storage
+        .from(track.coverBucket)
+        .createSignedUrl(track.coverFilename, 7200);
+      if (coverData?.signedUrl) coverUrl = coverData.signedUrl;
     }
 
     // ── Peek at next track for crossfade preloading ──
@@ -1960,12 +1048,16 @@ app.get("/make-server-06086aa3/radio/current-stream", async (c) => {
         const nt = pl[nextIdx];
         if (nt?.storageFilename) {
           const ntBucket = nt.storageBucket || 'make-06086aa3-tracks';
-          const ntAudioUrl = await getAudioUrl(ntBucket, nt.storageFilename);
-          if (ntAudioUrl) {
+          const { data: ntUrl } = await supabase.storage
+            .from(ntBucket)
+            .createSignedUrl(nt.storageFilename, 7200);
+          if (ntUrl?.signedUrl) {
             let ntCover = nt.coverUrl || null;
             if (nt.coverFilename && nt.coverBucket) {
-              const ntCoverUrl = await getAudioUrl(nt.coverBucket, nt.coverFilename);
-              if (ntCoverUrl) ntCover = ntCoverUrl;
+              const { data: ntCoverData } = await supabase.storage
+                .from(nt.coverBucket)
+                .createSignedUrl(nt.coverFilename, 7200);
+              if (ntCoverData?.signedUrl) ntCover = ntCoverData.signedUrl;
             }
             nextTrack = {
               id: nt.id,
@@ -1974,7 +1066,7 @@ app.get("/make-server-06086aa3/radio/current-stream", async (c) => {
               album: nt.album,
               duration: nt.duration || 180,
               coverUrl: ntCover,
-              audioUrl: ntAudioUrl,
+              audioUrl: ntUrl.signedUrl,
             };
           }
         }
@@ -1994,7 +1086,7 @@ app.get("/make-server-06086aa3/radio/current-stream", async (c) => {
         coverUrl,
         isJingle: autoDJState.isPlayingJingle || false,
       },
-      audioUrl,
+      audioUrl: signedUrlData.signedUrl,
       seekPosition,
       remainingSeconds,
       startedAt: autoDJState.currentTrackStartTime,
@@ -2009,120 +1101,10 @@ app.get("/make-server-06086aa3/radio/current-stream", async (c) => {
   }
 });
 
-// ==================== RADIO QUEUE (Upcoming Tracks) ====================
-// Returns the full playlist queue with track metadata for the UI.
-// Uses the full loadAutoDJState since we need track details.
-app.get("/make-server-06086aa3/radio/queue", async (c) => {
-  try {
-    // Check stream status first
-    const streamStatus = await kv.get('stream:status').catch(() => null);
-    const kvIsOnline = streamStatus?.status === 'online';
-    await loadAutoDJStateLight();
-    if (!autoDJState.isPlaying && !kvIsOnline) {
-      return c.json({ queue: [], currentIndex: 0, totalTracks: 0 });
-    }
-
-    // Load full state to get playlist tracks
-    await loadAutoDJState();
-
-    const tracks = autoDJState.playlistTracks || [];
-    const currentIdx = autoDJState.currentTrackIndex || 0;
-
-    // Build queue items with essential metadata.
-    // Refresh cover URLs in parallel (signed URLs expire after 2h — buckets are private).
-    const queue = await Promise.all(tracks.map(async (t: any, idx: number) => {
-      let coverUrl = t.coverUrl || null;
-      if (t.coverFilename && t.coverBucket) {
-        try {
-          const fresh = await getAudioUrl(t.coverBucket, t.coverFilename);
-          if (fresh) coverUrl = fresh;
-        } catch (_) { /* non-critical */ }
-      }
-      return {
-        id: t.id,
-        title: t.title || 'Untitled',
-        artist: t.artist || 'Unknown Artist',
-        album: t.album || '',
-        duration: t.duration || 0,
-        coverUrl,
-        isCurrentTrack: idx === currentIdx,
-      };
-    }));
-
-    // Include schedule source info
-    const activeSlot = (autoDJState as any).activeScheduleSlot || null;
-
-    return c.json({
-      queue,
-      currentIndex: currentIdx,
-      totalTracks: tracks.length,
-      activeSchedule: activeSlot,
-    });
-  } catch (error: any) {
-    console.error('Radio queue error:', error);
-    return c.json({ error: `Failed to get queue: ${error.message}`, queue: [] }, 500);
-  }
-});
-
-// ==================== RADIO SCHEDULE STATUS ====================
-// Returns current schedule context for the Live Stream playlist page.
-app.get("/make-server-06086aa3/radio/schedule-status", async (c) => {
-  try {
-    // Current schedule slot
-    const currentSchedule = await getCurrentScheduledPlaylist().catch(() => null);
-    
-    // All schedule slots (for the "upcoming" list)
-    const allSchedules = await kv.getByPrefix('schedule:').catch(() => []);
-    const activeSchedules = (allSchedules as any[]).filter((s: any) => s.isActive);
-    
-    // Auto DJ status
-    const streamStatus = await kv.get('stream:status').catch(() => null);
-    await loadAutoDJStateLight();
-    const isOnline = streamStatus?.status === 'online' || autoDJState.isPlaying;
-    const activeSlot = (autoDJState as any).activeScheduleSlot || null;
-    
-    // Sort upcoming by day + startTime
-    const now = new Date();
-    const currentDay = now.getUTCDay();
-    const currentTime = `${String(now.getUTCHours()).padStart(2,'0')}:${String(now.getUTCMinutes()).padStart(2,'0')}`;
-    
-    const upcoming = activeSchedules
-      .filter((s: any) => {
-        if (currentSchedule && s.id === currentSchedule.id) return false;
-        return true;
-      })
-      .sort((a: any, b: any) => {
-        const dayA = a.dayOfWeek ?? 0;
-        const dayB = b.dayOfWeek ?? 0;
-        if (dayA !== dayB) return ((dayA - currentDay + 7) % 7) - ((dayB - currentDay + 7) % 7);
-        return (a.startTime || '').localeCompare(b.startTime || '');
-      })
-      .slice(0, 10);
-    
-    return c.json({
-      isOnline,
-      currentSchedule,
-      activeScheduleSlot: activeSlot,
-      upcomingSlots: upcoming,
-      totalScheduleSlots: activeSchedules.length,
-    });
-  } catch (error: any) {
-    console.error('Radio schedule status error:', error);
-    return c.json({ error: error.message }, 500);
-  }
-});
-
 // Live Radio Stream endpoint (legacy file-serving — kept for backward compat)
 app.get("/make-server-06086aa3/radio/live", async (c) => {
   try {
-    const ss = await kv.get('stream:status').catch(() => null);
-    if (!autoDJState.isPlaying && ss?.status !== 'online') {
-      return c.text('Radio stream is offline. Please start the Auto DJ first.', 503);
-    }
-    if (!autoDJState.currentTrack) {
-      await loadAutoDJState();
-    }
-    if (!autoDJState.currentTrack) {
+    if (!autoDJState.isPlaying || !autoDJState.currentTrack) {
       return c.text('Radio stream is offline. Please start the Auto DJ first.', 503);
     }
 
@@ -2204,6 +1186,183 @@ app.delete("/make-server-06086aa3/radio/listener", async (c) => {
   await kv.set('stream:status', streamStatus);
   
   return c.json({ message: 'Listener disconnected', listeners: autoDJState.listeners });
+});
+
+// ==================== AUTODJ EXTERNAL API ====================
+// These endpoints are called by the VPS-based AutoDJ (Node.js) to get playlist data
+// and report now-playing metadata back.
+
+// Get current playlist for AutoDJ
+app.get("/make-server-06086aa3/radio/autodj/playlist", async (c) => {
+  try {
+    // 1. Check if there's an active schedule
+    const allSchedules = await kv.getByPrefix('schedule:');
+    const now = new Date();
+    const currentDay = now.getDay();
+    const currentTime = now.toTimeString().slice(0, 5);
+
+    let activePlaylistId = 'livestream'; // default
+    let scheduleName = 'Live Stream';
+
+    for (const schedule of allSchedules) {
+      if (!schedule.isActive) continue;
+      if (schedule.dayOfWeek !== null && schedule.dayOfWeek !== currentDay) continue;
+      if (currentTime >= schedule.startTime && currentTime < schedule.endTime) {
+        activePlaylistId = schedule.playlistId;
+        scheduleName = schedule.title || 'Scheduled';
+        break;
+      }
+    }
+
+    // 2. Get playlist
+    const playlist = await kv.get(`playlist:${activePlaylistId}`);
+    if (!playlist || !playlist.trackIds || playlist.trackIds.length === 0) {
+      // Fallback to livestream if scheduled playlist is empty
+      if (activePlaylistId !== 'livestream') {
+        const fallback = await kv.get('playlist:livestream');
+        if (fallback?.trackIds?.length > 0) {
+          return await resolvePlaylistTracks(c, fallback, 'Live Stream (fallback)');
+        }
+      }
+      return c.json({ tracks: [], schedule: scheduleName, message: 'No tracks in playlist' });
+    }
+
+    return await resolvePlaylistTracks(c, playlist, scheduleName);
+  } catch (error: any) {
+    console.error('AutoDJ playlist error:', error);
+    return c.json({ error: error.message, tracks: [] }, 500);
+  }
+});
+
+// Helper: resolve playlist track IDs to full track objects with signed URLs
+async function resolvePlaylistTracks(c: any, playlist: any, scheduleName: string) {
+  const tracks = [];
+
+  for (const trackId of playlist.trackIds) {
+    const track = await kv.get(`track:${trackId}`);
+    if (!track) continue;
+    if (!track.storageFilename) continue;
+
+    const bucket = track.storageBucket || 'make-06086aa3-tracks';
+
+    // Generate signed download URL (valid 4 hours)
+    const { data: signedUrlData, error: signedUrlError } = await supabase.storage
+      .from(bucket)
+      .createSignedUrl(track.storageFilename, 14400);
+
+    if (signedUrlError || !signedUrlData?.signedUrl) {
+      console.error(`Signed URL error for ${track.storageFilename}:`, signedUrlError);
+      continue;
+    }
+
+    // Cover URL
+    let coverUrl = track.coverUrl || null;
+    if (track.coverFilename && track.coverBucket) {
+      const { data: coverData } = await supabase.storage
+        .from(track.coverBucket)
+        .createSignedUrl(track.coverFilename, 14400);
+      if (coverData?.signedUrl) coverUrl = coverData.signedUrl;
+    }
+
+    tracks.push({
+      id: track.id || trackId,
+      title: track.title || 'Unknown',
+      artist: track.artist || 'Unknown',
+      album: track.album || '',
+      duration: track.duration || 0,
+      coverUrl,
+      downloadUrl: signedUrlData.signedUrl,
+      storageFilename: track.storageFilename,
+    });
+  }
+
+  console.log(`[autodj-api] Playlist "${scheduleName}": ${tracks.length} tracks resolved`);
+  return c.json({ tracks, schedule: scheduleName });
+}
+
+// Get jingles for AutoDJ
+app.get("/make-server-06086aa3/radio/autodj/jingles", async (c) => {
+  try {
+    const allJingles = await kv.getByPrefix('jingle:');
+    const jingles = [];
+
+    for (const jingle of allJingles) {
+      if (!jingle.storageFilename) continue;
+
+      const bucket = jingle.storageBucket || 'make-06086aa3-jingles';
+      const { data: signedUrlData } = await supabase.storage
+        .from(bucket)
+        .createSignedUrl(jingle.storageFilename, 14400);
+
+      if (!signedUrlData?.signedUrl) continue;
+
+      jingles.push({
+        id: jingle.id,
+        title: jingle.title || 'Jingle',
+        downloadUrl: signedUrlData.signedUrl,
+        storageFilename: jingle.storageFilename,
+        duration: jingle.duration || 0,
+      });
+    }
+
+    return c.json({ jingles });
+  } catch (error: any) {
+    console.error('AutoDJ jingles error:', error);
+    return c.json({ error: error.message, jingles: [] }, 500);
+  }
+});
+
+// AutoDJ reports now-playing metadata
+app.post("/make-server-06086aa3/radio/autodj/metadata", async (c) => {
+  try {
+    const body = await c.req.json();
+    const { title, artist, filename, duration, trackId, coverUrl } = body;
+
+    const nowPlaying = {
+      track: {
+        id: trackId || '',
+        title: title || 'Unknown',
+        artist: artist || 'Unknown',
+        duration: duration || 0,
+        cover: coverUrl || null,
+      },
+      startTime: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    await kv.set('stream:nowplaying', nowPlaying);
+
+    // Update stream status to online
+    const streamStatus = await kv.get('stream:status') || {};
+    streamStatus.status = 'online';
+    streamStatus.updatedAt = new Date().toISOString();
+    await kv.set('stream:status', streamStatus);
+
+    // Add to history
+    const historyKey = `history:${Date.now()}`;
+    await kv.set(historyKey, {
+      ...nowPlaying,
+      playedAt: new Date().toISOString(),
+    });
+
+    // Broadcast via Realtime
+    try {
+      const channel = supabase.channel('radio-updates');
+      await channel.send({
+        type: 'broadcast',
+        event: 'track-changed',
+        payload: nowPlaying,
+      });
+    } catch (broadcastErr) {
+      console.error('Broadcast error:', broadcastErr);
+    }
+
+    console.log(`[autodj-api] Now playing: ${artist} — ${title}`);
+    return c.json({ ok: true });
+  } catch (error: any) {
+    console.error('AutoDJ metadata error:', error);
+    return c.json({ error: error.message }, 500);
+  }
 });
 
 // ==================== NOW PLAYING / STREAM STATUS ====================
@@ -2306,37 +1465,8 @@ app.get("/make-server-06086aa3/tracks", async (c) => {
     const genre = c.req.query('genre');
     const search = c.req.query('search');
     const tracks = await kv.getByPrefix('track:');
-    console.log(`📀 [GET /tracks] Found ${tracks?.length ?? 0} tracks in KV (genre=${genre || 'all'}, search=${search || 'none'})`);
     
-    let filteredTracks = Array.isArray(tracks) ? tracks : [];
-
-    // Generate fresh signed URLs for every track with storage metadata.
-    // Buckets are private — public URLs return 403, so we must use signed URLs.
-    filteredTracks = await Promise.all(filteredTracks.map(async (track) => {
-      // Refresh audio URL
-      if (track.storageBucket && track.storageFilename) {
-        try {
-          const freshUrl = await getAudioUrl(track.storageBucket, track.storageFilename);
-          if (freshUrl) {
-            track.audioUrl = freshUrl;
-          }
-        } catch (e: any) {
-          console.warn(`⚠️ [GET /tracks] Could not generate audio URL for ${track.id}: ${e?.message}`);
-        }
-      }
-      // Refresh cover URL
-      if (track.coverBucket && track.coverFilename) {
-        try {
-          const freshCover = await getAudioUrl(track.coverBucket, track.coverFilename);
-          if (freshCover) {
-            track.coverUrl = freshCover;
-          }
-        } catch (e: any) {
-          console.warn(`⚠️ [GET /tracks] Could not generate cover URL for ${track.id}: ${e?.message}`);
-        }
-      }
-      return track;
-    }));
+    let filteredTracks = tracks;
     
     if (genre) {
       filteredTracks = filteredTracks.filter(track => 
@@ -2370,54 +1500,10 @@ app.get("/make-server-06086aa3/tracks/:id", async (c) => {
       return c.json({ error: 'Track not found' }, 404);
     }
 
-    // Generate fresh signed URLs (buckets are private — public URLs return 403)
-    if (track.storageBucket && track.storageFilename) {
-      const freshUrl = await getAudioUrl(track.storageBucket, track.storageFilename);
-      if (freshUrl) {
-        track.audioUrl = freshUrl;
-      }
-    }
-    if (track.coverBucket && track.coverFilename) {
-      const freshCover = await getAudioUrl(track.coverBucket, track.coverFilename);
-      if (freshCover) {
-        track.coverUrl = freshCover;
-      }
-    }
-
     return c.json({ track });
   } catch (error) {
     console.error('Get track error:', error);
     return c.json({ error: `Get track error: ${error.message}` }, 500);
-  }
-});
-
-// Get a fresh signed audio URL for playback (lightweight — no track data, just the URL)
-app.get("/make-server-06086aa3/tracks/:id/play-url", async (c) => {
-  try {
-    const id = c.req.param('id');
-    const track = await kv.get(`track:${id}`);
-    if (!track) {
-      return c.json({ error: 'Track not found' }, 404);
-    }
-    const bucket = track.storageBucket || 'make-06086aa3-tracks';
-    const filename = track.storageFilename;
-    if (!filename) {
-      return c.json({ error: 'Track has no audio file in storage' }, 404);
-    }
-    const audioUrl = await getAudioUrl(bucket, filename);
-    if (!audioUrl) {
-      return c.json({ error: `Could not generate audio URL for ${bucket}/${filename}` }, 500);
-    }
-    // Also return a fresh cover URL if available
-    let coverUrl = track.coverUrl || null;
-    if (track.coverFilename && track.coverBucket) {
-      const freshCover = await getAudioUrl(track.coverBucket, track.coverFilename);
-      if (freshCover) coverUrl = freshCover;
-    }
-    return c.json({ audioUrl, coverUrl });
-  } catch (error: any) {
-    console.error('Get play-url error:', error);
-    return c.json({ error: `Get play-url error: ${error.message}` }, 500);
   }
 });
 
@@ -2436,7 +1522,6 @@ app.post("/make-server-06086aa3/tracks", requireAuth, async (c) => {
     };
 
     await kv.set(`track:${trackId}`, track);
-    await addAuditLog({ level: 'success', category: 'Tracks', message: `Track created: "${track.title || 'Untitled'}"`, userId: c.get('userId') });
 
     return c.json({ track }, 201);
   } catch (error) {
@@ -2466,62 +1551,13 @@ app.put("/make-server-06086aa3/tracks/:id", requireAuth, async (c) => {
   }
 });
 
-// Delete track — permanently removes from KV, Storage (audio + cover), and all playlists
+// Delete track
 app.delete("/make-server-06086aa3/tracks/:id", requireAuth, async (c) => {
   try {
     const id = c.req.param('id');
-
-    // 1. Load track data first to find Storage references
-    const track = await kv.get(`track:${id}`);
-    if (!track) {
-      return c.json({ error: 'Track not found' }, 404);
-    }
-
-    // 2. Delete audio file from Storage
-    if (track.storageBucket && track.storageFilename) {
-      console.log(`[delete-track] Removing audio: bucket=${track.storageBucket}, file=${track.storageFilename}`);
-      const { error: audioErr } = await supabase.storage
-        .from(track.storageBucket)
-        .remove([track.storageFilename]);
-      if (audioErr) {
-        console.warn(`[delete-track] Failed to delete audio file: ${audioErr.message}`);
-      }
-    }
-
-    // 3. Delete cover art from Storage
-    if (track.coverFilename) {
-      const coverBucket = track.coverBucket || 'make-06086aa3-covers';
-      console.log(`[delete-track] Removing cover: bucket=${coverBucket}, file=${track.coverFilename}`);
-      const { error: coverErr } = await supabase.storage
-        .from(coverBucket)
-        .remove([track.coverFilename]);
-      if (coverErr) {
-        console.warn(`[delete-track] Failed to delete cover file: ${coverErr.message}`);
-      }
-    }
-
-    // 4. Remove track reference from all playlists
-    try {
-      const allPlaylists = await kv.getByPrefix('playlist:');
-      for (const pl of allPlaylists) {
-        if (pl.trackIds && Array.isArray(pl.trackIds) && pl.trackIds.includes(id)) {
-          pl.trackIds = pl.trackIds.filter((tid: string) => tid !== id);
-          pl.updatedAt = new Date().toISOString();
-          await kv.set(`playlist:${pl.id}`, pl);
-          console.log(`[delete-track] Removed track ${id} from playlist ${pl.id}`);
-        }
-      }
-    } catch (plErr: any) {
-      console.warn(`[delete-track] Error cleaning playlists: ${plErr.message}`);
-    }
-
-    // 5. Delete from KV store
     await kv.del(`track:${id}`);
-
-    console.log(`[delete-track] Track ${id} fully deleted (KV + Storage + playlists)`);
-    await addAuditLog({ level: 'warning', category: 'Tracks', message: `Track deleted: "${track.title || id}"`, details: `Audio + cover removed from storage, cleaned from playlists`, userId: c.get('userId') });
-    return c.json({ message: 'Track permanently deleted from library and storage' });
-  } catch (error: any) {
+    return c.json({ message: 'Track deleted successfully' });
+  } catch (error) {
     console.error('Delete track error:', error);
     return c.json({ error: `Delete track error: ${error.message}` }, 500);
   }
@@ -2636,24 +1672,24 @@ app.post("/make-server-06086aa3/tracks/:id/cover", requireAuth, async (c) => {
       return c.json({ error: `Failed to upload cover: ${error.message}` }, 500);
     }
 
-    // Generate a signed URL for the cover (buckets are private — public URLs return 403)
-    const signedCoverUrl = await getAudioUrl('make-06086aa3-covers', fileName);
+    // Get public URL
+    const { data: { publicUrl } } = supabase.storage
+      .from('make-06086aa3-covers')
+      .getPublicUrl(fileName);
 
-    // Update track with cover storage info + signed URL
+    // Update track with new cover URL
     const updatedTrack = {
       ...track,
-      coverUrl: signedCoverUrl, // signed URL (2h TTL) — GET /tracks refreshes it
-      coverBucket: 'make-06086aa3-covers',
-      coverFilename: fileName,
+      coverUrl: publicUrl,
       updatedAt: new Date().toISOString()
     };
     await kv.set(`track:${trackId}`, updatedTrack);
 
-    console.log(`✅ Cover uploaded for track ${trackId}: ${fileName}`);
+    console.log(`✅ Cover uploaded for track ${trackId}: ${publicUrl}`);
 
     return c.json({ 
       message: 'Cover uploaded successfully',
-      coverUrl: signedCoverUrl,
+      coverUrl: publicUrl,
       track: updatedTrack
     });
   } catch (error) {
@@ -2727,11 +1763,10 @@ app.post("/make-server-06086aa3/tracks/:id/extract-metadata", requireAuth, async
             });
           
           if (!coverUploadError) {
-            // Buckets are private — generate signed URL, also store bucket/filename for refresh
-            const signedCover = await getAudioUrl('make-06086aa3-covers', coverFilename);
-            extractedMetadata.coverUrl = signedCover;
-            extractedMetadata.coverBucket = 'make-06086aa3-covers';
-            extractedMetadata.coverFilename = coverFilename;
+            const { data: coverUrlData } = supabase.storage
+              .from('make-06086aa3-covers')
+              .getPublicUrl(coverFilename);
+            extractedMetadata.coverUrl = coverUrlData.publicUrl;
           }
         }
 
@@ -2864,13 +1899,7 @@ app.delete("/make-server-06086aa3/shows/:id", requireAuth, async (c) => {
 // Get all donations
 app.get("/make-server-06086aa3/donations", requireAuth, async (c) => {
   try {
-    const allEntries = await kv.getByPrefix('donation:');
-    // Filter out non-donation entries (e.g. donation:stats)
-    const donations = allEntries.filter((d: any) => d.id && d.amount !== undefined);
-    // Sort by date desc
-    donations.sort((a: any, b: any) => {
-      return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
-    });
+    const donations = await kv.getByPrefix('donation:');
     return c.json({ donations });
   } catch (error) {
     console.error('Get donations error:', error);
@@ -2882,21 +1911,11 @@ app.get("/make-server-06086aa3/donations", requireAuth, async (c) => {
 app.post("/make-server-06086aa3/donations", async (c) => {
   try {
     const body = await c.req.json();
-
-    if (!body.amount || isNaN(parseFloat(body.amount))) {
-      return c.json({ error: 'Valid donation amount is required' }, 400);
-    }
-
     const donationId = crypto.randomUUID();
     
     const donation = {
       id: donationId,
-      name: body.name || 'Anonymous',
-      email: body.email || null,
-      amount: parseFloat(body.amount),
-      tier: body.tier || null,
-      message: body.message || null,
-      isAnonymous: body.isAnonymous || false,
+      ...body,
       createdAt: new Date().toISOString()
     };
 
@@ -2904,9 +1923,8 @@ app.post("/make-server-06086aa3/donations", async (c) => {
 
     // Update donation stats
     const stats = await kv.get('donation:stats') || { total: 0, count: 0, monthlyGoal: 2000 };
-    stats.total = (stats.total || 0) + donation.amount;
-    stats.count = (stats.count || 0) + 1;
-    stats.lastDonation = donation.createdAt;
+    stats.total += parseFloat(body.amount || 0);
+    stats.count += 1;
     await kv.set('donation:stats', stats);
 
     return c.json({ donation }, 201);
@@ -2924,32 +1942,6 @@ app.get("/make-server-06086aa3/donations/stats", async (c) => {
   } catch (error) {
     console.error('Get donation stats error:', error);
     return c.json({ error: `Get donation stats error: ${error.message}` }, 500);
-  }
-});
-
-// Get recent donations (public — for SupportPage)
-app.get("/make-server-06086aa3/donations/recent", async (c) => {
-  try {
-    const limit = parseInt(c.req.query('limit') || '10');
-    const allEntries = await kv.getByPrefix('donation:');
-    // Filter out non-donation entries (e.g. donation:stats), sort newest first
-    const donations = allEntries
-      .filter((d: any) => d.id && d.amount !== undefined)
-      .sort((a: any, b: any) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
-      .slice(0, limit)
-      .map((d: any) => ({
-        id: d.id,
-        name: d.isAnonymous ? 'Anonymous' : (d.name || 'Anonymous'),
-        amount: d.amount,
-        tier: d.tier || null,
-        message: d.isAnonymous ? null : (d.message || null),
-        createdAt: d.createdAt,
-      }));
-
-    return c.json({ donations });
-  } catch (error: any) {
-    console.error('Get recent donations error:', error);
-    return c.json({ error: `Get recent donations error: ${error.message}` }, 500);
   }
 });
 
@@ -3240,10 +2232,7 @@ app.delete("/make-server-06086aa3/profiles/:id", requireAuth, async (c) => {
 // Get all podcasts
 app.get("/make-server-06086aa3/podcasts", async (c) => {
   try {
-    const allPodcastEntries = await kv.getByPrefix('podcast:');
-    // Filter out episode entries (seeded as podcast:<slug>:episode:<id>)
-    // Episodes have a 'podcastSlug' field; real podcasts don't
-    const podcasts = allPodcastEntries.filter((p: any) => !p.podcastSlug && (p.title || p.name));
+    const podcasts = await kv.getByPrefix('podcast:');
     return c.json({ podcasts });
   } catch (error: any) {
     console.error('Get podcasts error:', error);
@@ -3251,46 +2240,17 @@ app.get("/make-server-06086aa3/podcasts", async (c) => {
   }
 });
 
-// Get single podcast (by id or slug)
+// Get single podcast
 app.get("/make-server-06086aa3/podcasts/:id", async (c) => {
   try {
     const id = c.req.param('id');
-    let podcast = await kv.get(`podcast:${id}`);
-    
-    if (!podcast) {
-      // Try finding by slug if the id-based lookup failed
-      const allPodcasts = await kv.getByPrefix('podcast:');
-      podcast = allPodcasts.find((p: any) => (p.slug === id || p.id === id) && !p.podcastSlug);
-    }
+    const podcast = await kv.get(`podcast:${id}`);
     
     if (!podcast) {
       return c.json({ error: 'Podcast not found' }, 404);
     }
-
-    // Load episodes from both key formats
-    const episodesById = await kv.getByPrefix(`episode:${podcast.id}:`);
-    const episodesBySlug = podcast.slug ? await kv.getByPrefix(`podcast:${podcast.slug}:episode:`) : [];
-    const allEpisodes = [...episodesById, ...episodesBySlug];
     
-    // Deduplicate by id
-    const seen = new Set();
-    const episodes = allEpisodes.filter((ep: any) => {
-      if (seen.has(ep.id)) return false;
-      seen.add(ep.id);
-      return true;
-    }).sort((a: any, b: any) => {
-      const dateA = new Date(a.publishedAt || a.createdAt || 0).getTime();
-      const dateB = new Date(b.publishedAt || b.createdAt || 0).getTime();
-      return dateB - dateA;
-    });
-    
-    return c.json({ 
-      podcast: { 
-        ...podcast, 
-        episodes, 
-        episodeCount: episodes.length 
-      } 
-    });
+    return c.json({ podcast });
   } catch (error: any) {
     console.error('Get podcast error:', error);
     return c.json({ error: `Get podcast error: ${error.message}` }, 500);
@@ -3358,58 +2318,6 @@ app.delete("/make-server-06086aa3/podcasts/:id", requireAuth, async (c) => {
   } catch (error: any) {
     console.error('Delete podcast error:', error);
     return c.json({ error: `Delete podcast error: ${error.message}` }, 500);
-  }
-});
-
-// Toggle podcast subscription
-app.post("/make-server-06086aa3/podcasts/:id/subscribe", async (c) => {
-  try {
-    const podcastId = c.req.param('id');
-    const userId = 'anonymous'; // simplified for now
-    
-    const subscriptionKey = `subscription:${userId}:podcast:${podcastId}`;
-    const existing = await kv.get(subscriptionKey);
-    
-    if (existing) {
-      await kv.del(subscriptionKey);
-      return c.json({ subscribed: false });
-    } else {
-      await kv.set(subscriptionKey, {
-        userId,
-        podcastId,
-        subscribedAt: new Date().toISOString(),
-      });
-      return c.json({ subscribed: true });
-    }
-  } catch (error: any) {
-    console.error('Toggle subscription error:', error);
-    return c.json({ error: `Toggle subscription error: ${error.message}` }, 500);
-  }
-});
-
-// Toggle episode like
-app.post("/make-server-06086aa3/podcasts/episodes/:id/like", async (c) => {
-  try {
-    const episodeId = c.req.param('id');
-    const userId = 'anonymous'; // simplified for now
-    
-    const likeKey = `like:${userId}:episode:${episodeId}`;
-    const existing = await kv.get(likeKey);
-    
-    if (existing) {
-      await kv.del(likeKey);
-      return c.json({ liked: false });
-    } else {
-      await kv.set(likeKey, {
-        userId,
-        episodeId,
-        likedAt: new Date().toISOString(),
-      });
-      return c.json({ liked: true });
-    }
-  } catch (error: any) {
-    console.error('Toggle like error:', error);
-    return c.json({ error: `Toggle like error: ${error.message}` }, 500);
   }
 });
 
@@ -3645,105 +2553,36 @@ app.post("/make-server-06086aa3/icecast/metadata", requireAuth, async (c) => {
   }
 });
 
-// ==================== TRACK UPLOAD (2-STEP: SIGNED URL + PROCESS) ====================
+// ==================== TRACK UPLOAD WITH FILE ====================
 
-// Helper to generate unique shortId
-function generateShortId() {
-  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-  let shortId = '';
-  for (let i = 0; i < 6; i++) {
-    shortId += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return shortId;
-}
-
-// Helper: race a promise against a timeout
-function withServerTimeout<T>(promise: Promise<T>, ms: number, fallback: T, label: string): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((resolve) => setTimeout(() => {
-      console.warn(`⏱️  ${label} timed out after ${ms}ms, using fallback`);
-      resolve(fallback);
-    }, ms))
-  ]);
-}
-
-// Step 1: Get a signed upload URL for direct-to-Storage upload (bypasses Edge Function body limit)
-app.post("/make-server-06086aa3/tracks/get-upload-url", requireAuth, async (c) => {
+// Track upload endpoint (supports multipart/form-data)
+app.post("/make-server-06086aa3/tracks/upload", requireAuth, async (c) => {
   try {
-    const body = await c.req.json();
-    const { originalFilename, contentType } = body;
-    console.log(`📤 [get-upload-url] Request: filename=${originalFilename}, type=${contentType}`);
-
-    if (!originalFilename) {
-      return c.json({ error: 'originalFilename is required' }, 400);
+    const formData = await c.req.formData();
+    const file = formData.get('file') as File;
+    const position = formData.get('position') as string || 'end';
+    const autoAddToLiveStream = formData.get('autoAddToLiveStream') === 'true';
+    
+    if (!file) {
+      return c.json({ error: 'No file provided' }, 400);
     }
-
-    // Validate MP3
-    const allowedTypes = ['audio/mpeg', 'audio/mp3'];
-    const isMP3 = allowedTypes.includes(contentType || '') || /\.mp3$/i.test(originalFilename);
-    if (!isMP3) {
-      return c.json({ error: 'Invalid file type. Only MP3 files are supported.' }, 400);
+    
+    // Validate file type
+    const allowedTypes = ['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audio/m4a', 'audio/flac'];
+    if (!allowedTypes.includes(file.type) && !file.name.match(/\.(mp3|wav|m4a|flac)$/i)) {
+      return c.json({ error: 'Invalid file type. Only MP3, WAV, M4A, and FLAC are supported.' }, 400);
     }
-
-    const bucket = 'make-06086aa3-tracks';
-    const timestamp = Date.now();
-    const randomString = Math.random().toString(36).substring(7);
-    const extension = originalFilename.split('.').pop() || 'mp3';
-    const filename = `track-${timestamp}-${randomString}.${extension}`;
-
-    // Create a signed upload URL (valid 10 minutes)
-    console.log(`📤 [get-upload-url] Creating signed URL for bucket=${bucket}, file=${filename}`);
-    const { data, error } = await supabase.storage
-      .from(bucket)
-      .createSignedUploadUrl(filename);
-
-    if (error) {
-      console.error('❌ [get-upload-url] Signed URL creation failed:', error);
-      return c.json({ error: `Failed to create upload URL: ${error.message}` }, 500);
-    }
-
-    if (!data?.signedUrl) {
-      console.error('❌ [get-upload-url] No signedUrl in response:', JSON.stringify(data));
-      return c.json({ error: 'No signed URL returned from storage' }, 500);
-    }
-
-    console.log(`✅ [get-upload-url] Signed URL created for: ${filename} (url length: ${data.signedUrl.length})`);
-
-    return c.json({
-      signedUrl: data.signedUrl,
-      token: data.token,
-      path: data.path,
-      filename,
-      bucket,
-    });
-  } catch (error: any) {
-    console.error('❌ [get-upload-url] Error:', error);
-    return c.json({ error: `Failed to create upload URL: ${error.message}` }, 500);
-  }
-});
-
-// Step 2: Process an already-uploaded file (extract metadata, create track record)
-app.post("/make-server-06086aa3/tracks/process", requireAuth, async (c) => {
-  try {
-    const body = await c.req.json();
-    const {
-      filename,
-      bucket: reqBucket,
-      originalFilename,
-      position = 'end',
-      autoAddToLiveStream = true,
-      generateWaveform: enableWaveform = false,
-    } = body;
-
-    console.log(`🎵 [process] Request: file=${filename}, original=${originalFilename}, position=${position}`);
-
-    if (!filename || !originalFilename) {
-      return c.json({ error: 'filename and originalFilename are required' }, 400);
-    }
-
-    const bucket = reqBucket || 'make-06086aa3-tracks';
-
+    
+    // Generate unique shortId (6 characters, alphanumeric)
+    const generateShortId = () => {
+      const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+      let shortId = '';
+      for (let i = 0; i < 6; i++) {
+        shortId += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      return shortId;
+    };
+    
     // Ensure shortId is unique
     let shortId = generateShortId();
     let existing = await kv.get(`shortlink:${shortId}`);
@@ -3751,75 +2590,60 @@ app.post("/make-server-06086aa3/tracks/process", requireAuth, async (c) => {
       shortId = generateShortId();
       existing = await kv.get(`shortlink:${shortId}`);
     }
-
-    // Get signed URL (buckets are private — public URLs return 403)
-    const audioUrl = await getAudioUrl(bucket, filename);
-    console.log(`🎵 [process] Signed audio URL generated: ${audioUrl ? 'OK' : 'FAILED'}`);
-
-    // Download the file from Storage to extract metadata
-    console.log('🎵 [process] Downloading file from Storage for metadata extraction...');
-
-    // Parse filename for fallback metadata
-    const originalName = originalFilename.replace(/\.(mp3|wav|m4a|flac)$/i, '');
-    const nameParts = originalName.split(' - ');
-    const fallbackTitle = nameParts.length >= 2 ? nameParts.slice(1).join(' - ').trim() : originalName;
-    const fallbackArtist = nameParts.length >= 2 ? nameParts[0].trim() : 'Unknown Artist';
-
-    const fallbackResult = {
-      metadata: {
-        title: fallbackTitle,
-        artist: fallbackArtist,
-        album: '',
-        genre: 'Funk',
-        year: new Date().getFullYear(),
-        duration: 180,
-        bpm: undefined as number | undefined,
-        coverData: undefined as any,
-      },
-      coverUrl: getDefaultCoverUrl('Funk'),
-      waveform: undefined as number[] | undefined,
-    };
-
-    let metadataResult = fallbackResult;
-
-    try {
-      // Download the file from storage (service role key has access)
-      console.log(`🎵 [process] Downloading from bucket=${bucket}, file=${filename}...`);
-      const { data: fileData, error: downloadError } = await supabase.storage
-        .from(bucket)
-        .download(filename);
-
-      if (downloadError || !fileData) {
-        console.warn(`⚠️  [process] Could not download file for metadata extraction: ${downloadError?.message || 'no data returned'}`);
-        console.warn(`⚠️  [process] Using fallback metadata from filename: ${originalFilename}`);
-      } else {
-        const fileBuffer = await fileData.arrayBuffer();
-        console.log(`📦 Downloaded ${(fileBuffer.byteLength / 1024 / 1024).toFixed(1)}MB for metadata extraction`);
-
-        // Run full metadata extraction with a 15-second timeout
-        metadataResult = await withServerTimeout(
-          extractCompleteMetadata(
-            supabase,
-            fileBuffer,
-            'audio/mpeg',
-            originalFilename,
-            {
-              searchOnline: true,
-              generateWaveform: enableWaveform,
-              waveformSamples: 100,
-            }
-          ),
-          15000,
-          fallbackResult,
-          'extractCompleteMetadata'
-        );
-      }
-    } catch (metaErr: any) {
-      console.warn('⚠️  Metadata extraction failed, using fallback:', metaErr.message);
+    
+    // Generate unique filename
+    const timestamp = Date.now();
+    const randomString = Math.random().toString(36).substring(7);
+    const extension = file.name.split('.').pop() || 'mp3';
+    const filename = `track-${timestamp}-${randomString}.${extension}`;
+    
+    // Upload to Supabase Storage
+    const bucket = 'make-06086aa3-tracks';
+    
+    // Create bucket if it doesn't exist
+    const { data: buckets } = await supabase.storage.listBuckets();
+    const bucketExists = buckets?.some(b => b.name === bucket);
+    if (!bucketExists) {
+      await supabase.storage.createBucket(bucket, { public: false });
     }
-
-    const { metadata: extractedMetadata, coverUrl, coverBucket, coverFilename: coverFn, waveform } = metadataResult;
-
+    
+    // Upload file
+    const fileBuffer = await file.arrayBuffer();
+    const { data: uploadData, error: uploadError } = await supabase.storage
+      .from(bucket)
+      .upload(filename, fileBuffer, {
+        contentType: file.type,
+        upsert: false
+      });
+    
+    if (uploadError) {
+      console.error('Storage upload error:', uploadError);
+      return c.json({ error: `Failed to upload file: ${uploadError.message}` }, 500);
+    }
+    
+    // Get public URL
+    const { data: urlData } = supabase.storage
+      .from(bucket)
+      .getPublicUrl(filename);
+    
+    const audioUrl = urlData.publicUrl;
+    
+    // 🎵 Extract complete metadata with ID3 tags, cover art search, and waveform
+    console.log('🎵 Starting complete metadata extraction...');
+    const enableWaveform = formData.get('generateWaveform') === 'true';
+    
+    const { metadata: extractedMetadata, coverUrl, waveform } = await extractCompleteMetadata(
+      supabase,
+      fileBuffer,
+      file.type,
+      file.name,
+      {
+        searchOnline: true, // Search MusicBrainz if no embedded cover
+        generateWaveform: enableWaveform, // Optional waveform generation
+        waveformSamples: 100
+      }
+    );
+    
     const {
       title,
       artist,
@@ -3827,9 +2651,9 @@ app.post("/make-server-06086aa3/tracks/process", requireAuth, async (c) => {
       genre,
       year,
       duration,
-      bpm,
+      bpm
     } = extractedMetadata;
-
+    
     const metadata = {
       title,
       artist,
@@ -3839,43 +2663,42 @@ app.post("/make-server-06086aa3/tracks/process", requireAuth, async (c) => {
       year,
       bpm,
       coverUrl,
-      coverBucket: coverBucket || null,    // for signed URL refresh
-      coverFilename: coverFn || null,      // for signed URL refresh
       audioUrl,
-      waveform,
-      shortId,
-      streamUrl: `${Deno.env.get('SUPABASE_URL')}/functions/v1/make-server-06086aa3/stream/${shortId}`,
-      storageFilename: filename,
+      waveform, // Waveform data for visualization
+      shortId, // Short link ID
+      streamUrl: `https://soulfm.stream/${shortId}`, // Full streaming URL
+      storageFilename: filename, // Original storage filename
       storageBucket: bucket,
-      tags: ['NEWFUNK'],
-      playCount: 0,
+      tags: ['NEWFUNK'], // Auto-tag with NEWFUNK
+      playCount: 0, // Initialize play count
       uploadedBy: c.get('userId'),
-      uploadedAt: new Date().toISOString(),
+      uploadedAt: new Date().toISOString()
     };
-
+    
     // Create track in database
     const trackId = `track_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const track = {
       id: trackId,
       ...metadata,
       createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
     };
-
+    
     await kv.set(`track:${trackId}`, track);
-
-    // Create shortlink mapping
+    
+    // Create shortlink mapping (for quick lookup)
     await kv.set(`shortlink:${shortId}`, {
       trackId,
       shortId,
-      createdAt: new Date().toISOString(),
+      createdAt: new Date().toISOString()
     });
-
+    
     // Add to Live Stream playlist if requested
     if (autoAddToLiveStream) {
       let livePlaylist = await kv.get('playlist:livestream');
-
+      
       if (!livePlaylist) {
+        // Create Live Stream playlist if it doesn't exist
         livePlaylist = {
           id: 'livestream',
           name: 'Live Stream',
@@ -3883,22 +2706,23 @@ app.post("/make-server-06086aa3/tracks/process", requireAuth, async (c) => {
           genre: 'Mixed',
           trackIds: [],
           createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
         };
       }
-
+      
+      // Add track to playlist
       if (position === 'start') {
         livePlaylist.trackIds = [trackId, ...(livePlaylist.trackIds || [])];
       } else {
         livePlaylist.trackIds = [...(livePlaylist.trackIds || []), trackId];
       }
-
+      
       livePlaylist.updatedAt = new Date().toISOString();
       await kv.set('playlist:livestream', livePlaylist);
     }
-
-    console.log(`✅ Track processed: ${metadata.title} by ${metadata.artist} → ${metadata.streamUrl}`);
-
+    
+    console.log(`Track uploaded: ${metadata.title} by ${metadata.artist} → ${metadata.streamUrl}`);
+    
     return c.json({
       message: 'Track uploaded successfully',
       track,
@@ -3906,19 +2730,16 @@ app.post("/make-server-06086aa3/tracks/process", requireAuth, async (c) => {
         title: metadata.title,
         artist: metadata.artist,
         album: metadata.album,
-        duration: metadata.duration,
-        genre: metadata.genre,
-        year: metadata.year,
-        coverUrl: metadata.coverUrl,
+        duration: metadata.duration
       },
       shortId,
       streamUrl: metadata.streamUrl,
-      audioUrl: metadata.audioUrl,
-      addedToLiveStream: autoAddToLiveStream,
+      addedToLiveStream: autoAddToLiveStream
     });
+    
   } catch (error: any) {
-    console.error('Track process error:', error);
-    return c.json({ error: `Failed to process track: ${error.message}` }, 500);
+    console.error('Track upload error:', error);
+    return c.json({ error: `Failed to upload track: ${error.message}` }, 500);
   }
 });
 
@@ -4164,7 +2985,6 @@ app.post("/make-server-06086aa3/playlists", requireAuth, async (c) => {
     };
     
     await kv.set(`playlist:${playlistId}`, playlist);
-    await addAuditLog({ level: 'success', category: 'Playlists', message: `Playlist created: "${playlist.name}"`, userId: c.get('userId') });
     
     return c.json({ 
       message: 'Playlist created successfully',
@@ -4193,6 +3013,7 @@ app.put("/make-server-06086aa3/playlists/:id", requireAuth, async (c) => {
       description: body.description !== undefined ? body.description : playlist.description,
       color: body.color !== undefined ? body.color : playlist.color,
       genre: body.genre !== undefined ? body.genre : playlist.genre,
+      trackIds: body.trackIds !== undefined ? body.trackIds : (playlist.trackIds || []),
       updatedAt: new Date().toISOString()
     };
     
@@ -4224,7 +3045,6 @@ app.delete("/make-server-06086aa3/playlists/:id", requireAuth, async (c) => {
     }
     
     await kv.del(`playlist:${id}`);
-    await addAuditLog({ level: 'warning', category: 'Playlists', message: `Playlist deleted: ${id}`, userId: c.get('userId') });
     
     return c.json({ message: 'Playlist deleted successfully' });
   } catch (error: any) {
@@ -4299,7 +3119,6 @@ app.delete("/make-server-06086aa3/playlists/:id/tracks/:trackId", requireAuth, a
 app.get("/make-server-06086aa3/schedule", async (c) => {
   try {
     const allSchedules = await kv.getByPrefix('schedule:');
-    console.log(`[GET /schedule] Found ${allSchedules.length} schedule entries in KV. IDs: ${allSchedules.map((s: any) => s.id).join(', ')}`);
     
     // Load playlist info for each schedule
     const schedulesWithPlaylists = await Promise.all(
@@ -4314,9 +3133,6 @@ app.get("/make-server-06086aa3/schedule", async (c) => {
       })
     );
     
-    // Prevent CDN / browser caching of schedule list
-    c.header('Cache-Control', 'no-store, no-cache, must-revalidate');
-    c.header('Pragma', 'no-cache');
     return c.json({ 
       schedules: schedulesWithPlaylists.sort((a, b) => {
         // Sort by day of week, then by start time
@@ -4336,9 +3152,7 @@ app.get("/make-server-06086aa3/schedule", async (c) => {
 app.post("/make-server-06086aa3/schedule", requireAuth, async (c) => {
   try {
     const body = await c.req.json();
-    const { playlistId, dayOfWeek, startTime, endTime, title, isActive, repeatWeekly, scheduleMode, scheduledDate, utcOffsetMinutes, timezone } = body;
-    
-    console.log(`[schedule/create] Received:`, JSON.stringify({ playlistId, dayOfWeek, startTime, endTime, title, isActive, repeatWeekly, scheduleMode, scheduledDate, utcOffsetMinutes, timezone }));
+    const { playlistId, dayOfWeek, startTime, endTime, title, isActive, repeatWeekly } = body;
     
     if (!playlistId || !startTime || !endTime || !title) {
       return c.json({ error: 'Missing required fields' }, 400);
@@ -4347,7 +3161,6 @@ app.post("/make-server-06086aa3/schedule", requireAuth, async (c) => {
     // Verify playlist exists
     const playlist = await kv.get(`playlist:${playlistId}`);
     if (!playlist) {
-      console.error(`[schedule/create] Playlist not found: ${playlistId}`);
       return c.json({ error: 'Playlist not found' }, 404);
     }
     
@@ -4362,13 +3175,7 @@ app.post("/make-server-06086aa3/schedule", requireAuth, async (c) => {
       title,
       isActive: isActive !== undefined ? isActive : true,
       repeatWeekly: repeatWeekly !== undefined ? repeatWeekly : true,
-      scheduleMode: scheduleMode || 'recurring',
-      scheduledDate: scheduledDate || null,
       // Jingle integration config (per-slot overrides)
-      // Timezone: stored as JS getTimezoneOffset() value (e.g. -60 for UTC+1 Berlin winter)
-      // Used by getCurrentScheduledPlaylist() to convert local slot times to UTC for matching
-      utcOffsetMinutes: utcOffsetMinutes !== undefined ? parseInt(utcOffsetMinutes) : 0,
-      timezone: timezone || null,
       jingleConfig: body.jingleConfig || {
         introJingleId: null,
         outroJingleId: null,
@@ -4380,15 +3187,6 @@ app.post("/make-server-06086aa3/schedule", requireAuth, async (c) => {
     };
     
     await kv.set(`schedule:${scheduleId}`, schedule);
-    
-    // Verify write was successful (read-after-write check)
-    const verify = await kv.get(`schedule:${scheduleId}`);
-    if (!verify) {
-      console.error(`[schedule/create] CRITICAL: kv.set succeeded but read-back failed for key schedule:${scheduleId}`);
-      return c.json({ error: 'Schedule created but verification failed — possible KV consistency issue' }, 500);
-    }
-    
-    console.log(`[schedule/create] ✅ Created schedule ${scheduleId}: "${title}" → day=${dayOfWeek}, ${startTime}-${endTime}, mode=${schedule.scheduleMode}`);
     
     return c.json({ 
       message: 'Schedule created successfully',
@@ -4428,10 +3226,6 @@ app.put("/make-server-06086aa3/schedule/:id", requireAuth, async (c) => {
       title: body.title !== undefined ? body.title : schedule.title,
       isActive: body.isActive !== undefined ? body.isActive : schedule.isActive,
       repeatWeekly: body.repeatWeekly !== undefined ? body.repeatWeekly : schedule.repeatWeekly,
-      scheduleMode: body.scheduleMode !== undefined ? body.scheduleMode : (schedule.scheduleMode || 'recurring'),
-      scheduledDate: body.scheduledDate !== undefined ? body.scheduledDate : (schedule.scheduledDate || null),
-      utcOffsetMinutes: body.utcOffsetMinutes !== undefined ? parseInt(body.utcOffsetMinutes) : (schedule.utcOffsetMinutes ?? 0),
-      timezone: body.timezone !== undefined ? body.timezone : (schedule.timezone || null),
       // Jingle integration config (merge with existing)
       jingleConfig: body.jingleConfig !== undefined
         ? { ...(schedule.jingleConfig || {}), ...body.jingleConfig }
@@ -4478,8 +3272,6 @@ app.post("/make-server-06086aa3/schedule/slots", requireAuth, async (c) => {
     const body = await c.req.json();
     const { playlistId, dayOfWeek, startTime, endTime, title, isActive } = body;
     
-    console.log(`[schedule/slots/create] Received:`, JSON.stringify({ playlistId, dayOfWeek, startTime, endTime, title, isActive, scheduleMode: body.scheduleMode, scheduledDate: body.scheduledDate }));
-    
     if (!playlistId || !startTime || !endTime || !title) {
       return c.json({ error: 'Missing required fields: playlistId, startTime, endTime, title' }, 400);
     }
@@ -4500,10 +3292,6 @@ app.post("/make-server-06086aa3/schedule/slots", requireAuth, async (c) => {
       title,
       isActive: isActive !== undefined ? isActive : true,
       repeatWeekly: body.repeatWeekly !== undefined ? body.repeatWeekly : true,
-      scheduleMode: body.scheduleMode || 'recurring',
-      scheduledDate: body.scheduledDate || null,
-      utcOffsetMinutes: body.utcOffsetMinutes !== undefined ? parseInt(body.utcOffsetMinutes) : 0,
-      timezone: body.timezone || null,
       jingleConfig: body.jingleConfig || null,
       createdAt: new Date().toISOString()
     };
@@ -4921,13 +3709,28 @@ app.post("/make-server-06086aa3/upload/image", async (c) => {
       return c.json({ error: `Upload failed: ${error.message}` }, 500);
     }
 
-    // All buckets are private — generate signed URL (2h TTL)
-    const signedUrl = await getAudioUrl(bucketName, filePath);
-    if (!signedUrl) {
-      console.error('Signed URL generation failed for:', bucketName, filePath);
-      return c.json({ error: `Failed to create signed URL for ${bucketName}/${filePath}` }, 500);
+    // Get public URL (for public buckets) or signed URL (for private buckets)
+    let publicUrl: string;
+    
+    if (bucketName === 'make-06086aa3-covers') {
+      // Public bucket - get public URL
+      const { data: publicUrlData } = supabase.storage
+        .from(bucketName)
+        .getPublicUrl(filePath);
+      publicUrl = publicUrlData.publicUrl;
+    } else {
+      // Private bucket - create signed URL (valid for 1 year)
+      const { data: signedUrlData, error: signedError } = await supabase.storage
+        .from(bucketName)
+        .createSignedUrl(filePath, 31536000); // 1 year
+
+      if (signedError) {
+        console.error('Signed URL error:', signedError);
+        return c.json({ error: `Failed to create signed URL: ${signedError.message}` }, 500);
+      }
+
+      publicUrl = signedUrlData.signedUrl;
     }
-    const publicUrl = signedUrl;
 
     return c.json({
       success: true,
@@ -4987,36 +3790,33 @@ app.post("/make-server-06086aa3/upload/audio", async (c) => {
       return c.json({ error: `Upload failed: ${error.message}` }, 500);
     }
 
+    // Create signed URL (private bucket, valid for 1 year)
+    const { data: signedUrlData, error: signedError } = await supabase.storage
+      .from('make-06086aa3-tracks')
+      .createSignedUrl(filePath, 31536000); // 1 year
+
+    if (signedError) {
+      console.error('Signed URL error:', signedError);
+      return c.json({ error: `Failed to create signed URL: ${signedError.message}` }, 500);
+    }
+
     // Extract metadata if requested
     let metadata = null;
     if (extractMetadata) {
       try {
         const buffer = new Uint8Array(arrayBuffer);
-        const parsedMeta = await parseBuffer(buffer, file.type || 'audio/mpeg', { duration: true });
-        if (parsedMeta) {
-          metadata = {
-            title: parsedMeta.common.title || null,
-            artist: parsedMeta.common.artist || parsedMeta.common.albumartist || null,
-            album: parsedMeta.common.album || null,
-            genre: parsedMeta.common.genre?.[0] || null,
-            year: parsedMeta.common.year || null,
-            duration: parsedMeta.format.duration ? Math.floor(parsedMeta.format.duration) : null,
-            bpm: parsedMeta.common.bpm || null,
-          };
-          console.log('Extracted audio metadata:', metadata);
-        }
+        const parsedMetadata = await parseBuffer(buffer, file.type || 'audio/mpeg');
+        metadata = extractCompleteMetadata(parsedMetadata);
+        console.log('Extracted audio metadata:', metadata);
       } catch (metadataError) {
         console.error('Metadata extraction error:', metadataError);
         // Don't fail upload if metadata extraction fails
       }
     }
 
-    // Buckets are private — generate signed URL for immediate playback
-    const signedTrackUrl = await getAudioUrl('make-06086aa3-tracks', filePath);
-
     return c.json({
       success: true,
-      url: signedTrackUrl,
+      url: signedUrlData.signedUrl,
       path: filePath,
       size: file.size,
       type: file.type,
@@ -5029,1608 +3829,210 @@ app.post("/make-server-06086aa3/upload/audio", async (c) => {
   }
 });
 
-// ==================== FEEDBACK MANAGEMENT ====================
+// ==================== AZURACAST PROXY ====================
+// All AzuraCast API calls go through here (browser can't call HTTP from HTTPS directly)
 
-// Get all feedback
-app.get("/make-server-06086aa3/feedback", requireAuth, async (c) => {
+const AZURA_URL = 'http://187.77.85.42';
+const AZURA_KEY = '129fb7c30b2b9314:2169c875e9c0f0abc7e170697960fa0e';
+const AZURA_STATION = '1';
+
+function azuraHeaders() {
+  return { 'X-API-Key': AZURA_KEY, 'Content-Type': 'application/json' };
+}
+
+// GET all tracks from AzuraCast media library
+app.get('/make-server-06086aa3/azuracast/tracks', requireAuth, async (c) => {
   try {
-    const feedback = await kv.getByPrefix('feedback:');
-    feedback.sort((a: any, b: any) =>
-      new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
-    );
-    return c.json({ feedback });
-  } catch (error: any) {
-    console.error('Get feedback error:', error);
-    return c.json({ error: `Get feedback error: ${error.message}` }, 500);
-  }
-});
-
-// Submit feedback (public)
-app.post("/make-server-06086aa3/feedback", async (c) => {
-  try {
-    const body = await c.req.json();
-    const { name, email, subject, message, rating, category } = body;
-
-    if (!subject || !message) {
-      return c.json({ error: 'Subject and message are required' }, 400);
-    }
-
-    const feedbackId = `fb_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const sentiment: string = rating >= 4 ? 'positive' : rating <= 2 ? 'negative' : 'neutral';
-
-    const item = {
-      id: feedbackId,
-      name: name || 'Anonymous',
-      email: email || '',
-      subject,
-      message,
-      rating: rating || 3,
-      sentiment,
-      status: 'new',
-      category: category || 'General',
-      createdAt: new Date().toISOString(),
-    };
-
-    await kv.set(`feedback:${feedbackId}`, item);
-    console.log(`📝 Feedback received: "${subject}" from ${item.name}`);
-    await addAuditLog({ level: 'info', category: 'Feedback', message: `New feedback from ${item.name}: "${subject}"` });
-
-    return c.json({ feedback: item }, 201);
-  } catch (error: any) {
-    console.error('Create feedback error:', error);
-    return c.json({ error: `Create feedback error: ${error.message}` }, 500);
-  }
-});
-
-// Update feedback status
-app.put("/make-server-06086aa3/feedback/:id", requireAuth, async (c) => {
-  try {
-    const id = c.req.param('id');
-    const body = await c.req.json();
-
-    const existing = await kv.get(`feedback:${id}`);
-    if (!existing) {
-      return c.json({ error: 'Feedback not found' }, 404);
-    }
-
-    const updated = { ...existing, ...body, updatedAt: new Date().toISOString() };
-    await kv.set(`feedback:${id}`, updated);
-
-    return c.json({ feedback: updated });
-  } catch (error: any) {
-    console.error('Update feedback error:', error);
-    return c.json({ error: `Update feedback error: ${error.message}` }, 500);
-  }
-});
-
-// Delete feedback
-app.delete("/make-server-06086aa3/feedback/:id", requireAuth, async (c) => {
-  try {
-    const id = c.req.param('id');
-    await kv.del(`feedback:${id}`);
-    return c.json({ message: 'Feedback deleted successfully' });
-  } catch (error: any) {
-    console.error('Delete feedback error:', error);
-    return c.json({ error: `Delete feedback error: ${error.message}` }, 500);
-  }
-});
-
-// ==================== BRANDING SETTINGS ====================
-
-// Get branding settings
-app.get("/make-server-06086aa3/settings/branding", async (c) => {
-  try {
-    let settings = await kv.get('settings:branding');
-
-    if (!settings) {
-      settings = {
-        stationName: 'Soul FM Hub',
-        tagline: 'The Wave of Your Soul',
-        description: 'Online radio station dedicated to soul, funk, R&B, and jazz music. Broadcasting 24/7.',
-        primaryColor: '#00d9ff',
-        secondaryColor: '#00ffaa',
-        accentColor: '#FF8C42',
-        bgDark: '#0a1628',
-        fontDisplay: 'Righteous',
-        fontBody: 'Space Grotesk',
-        metaTitle: 'Soul FM Hub — The Wave of Your Soul',
-        metaDescription: 'Listen to the best soul, funk, R&B, and jazz music 24/7. Live DJs, curated playlists, and community.',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      await kv.set('settings:branding', settings);
-    }
-
-    return c.json({ settings });
-  } catch (error: any) {
-    console.error('Get branding settings error:', error);
-    return c.json({ error: `Get branding settings error: ${error.message}` }, 500);
-  }
-});
-
-// Update branding settings
-app.post("/make-server-06086aa3/settings/branding", requireAuth, async (c) => {
-  try {
-    const body = await c.req.json();
-    const current = await kv.get('settings:branding') || {};
-    const updated = { ...current, ...body, updatedAt: new Date().toISOString() };
-    await kv.set('settings:branding', updated);
-    await addAuditLog({ level: 'info', category: 'Settings', message: 'Branding settings updated', userId: c.get('userId') });
-
-    console.log('✅ Branding settings updated');
-    return c.json({ settings: updated });
-  } catch (error: any) {
-    console.error('Update branding settings error:', error);
-    return c.json({ error: `Update branding settings error: ${error.message}` }, 500);
-  }
-});
-
-// ==================== AUDIT LOGS ====================
-
-// Get audit logs
-app.get("/make-server-06086aa3/logs", requireAuth, async (c) => {
-  try {
-    const logs = await kv.getByPrefix('auditlog:');
-    logs.sort((a: any, b: any) =>
-      new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime()
-    );
-
-    const limit = parseInt(c.req.query('limit') || '100');
-    return c.json({ logs: logs.slice(0, limit) });
-  } catch (error: any) {
-    console.error('Get logs error:', error);
-    return c.json({ error: `Get logs error: ${error.message}` }, 500);
-  }
-});
-
-// Create audit log entry
-app.post("/make-server-06086aa3/logs", requireAuth, async (c) => {
-  try {
-    const body = await c.req.json();
-    const logId = `log_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-    const entry = {
-      id: logId,
-      timestamp: new Date().toISOString(),
-      level: body.level || 'info',
-      category: body.category || 'System',
-      message: body.message || '',
-      details: body.details || null,
-      userId: c.get('userId') || null,
-      ip: body.ip || null,
-    };
-    await kv.set(`auditlog:${logId}`, entry);
-    return c.json({ log: entry }, 201);
-  } catch (error: any) {
-    console.error('Create log error:', error);
-    return c.json({ error: `Create log error: ${error.message}` }, 500);
-  }
-});
-
-// Clear old logs
-app.delete("/make-server-06086aa3/logs", requireAuth, async (c) => {
-  try {
-    const logs = await kv.getByPrefix('auditlog:');
-    let deleted = 0;
-    for (const log of logs) {
-      if (log.id) {
-        await kv.del(`auditlog:${log.id}`);
-        deleted++;
-      }
-    }
-    // Re-add a single audit log recording this clear action
-    await addAuditLog({ level: 'warning', category: 'System', message: `Audit logs cleared (${deleted} entries)`, userId: c.get('userId') });
-    return c.json({ message: `${deleted} log(s) cleared` });
-  } catch (error: any) {
-    console.error('Clear logs error:', error);
-    return c.json({ error: `Clear logs error: ${error.message}` }, 500);
-  }
-});
-
-// ==================== BACKUP / EXPORT ====================
-
-// Export data as JSON
-app.get("/make-server-06086aa3/export/:type", requireAuth, async (c) => {
-  try {
-    const type = c.req.param('type');
-    let data: any = {};
-    const timestamp = new Date().toISOString();
-
-    switch (type) {
-      case 'tracks': {
-        const tracks = await kv.getByPrefix('track:');
-        data = { type: 'tracks', count: tracks.length, exportedAt: timestamp, tracks };
-        break;
-      }
-      case 'playlists': {
-        const playlists = await kv.getByPrefix('playlist:');
-        data = { type: 'playlists', count: playlists.length, exportedAt: timestamp, playlists };
-        break;
-      }
-      case 'schedule': {
-        const schedules = await kv.getByPrefix('schedule:');
-        data = { type: 'schedule', count: schedules.length, exportedAt: timestamp, schedules };
-        break;
-      }
-      case 'shows': {
-        const shows = await kv.getByPrefix('show:');
-        const podcasts = (await kv.getByPrefix('podcast:')).filter((p: any) => !p.podcastSlug && (p.title || p.name));
-        data = { type: 'shows_podcasts', shows: { count: shows.length, items: shows }, podcasts: { count: podcasts.length, items: podcasts }, exportedAt: timestamp };
-        break;
-      }
-      case 'settings': {
-        const streamSettings = await kv.get('settings:stream');
-        const brandingSettings = await kv.get('settings:branding');
-        data = { type: 'settings', exportedAt: timestamp, stream: streamSettings, branding: brandingSettings };
-        break;
-      }
-      case 'news': {
-        const news = await kv.getByPrefix('news:');
-        data = { type: 'news', count: news.length, exportedAt: timestamp, news };
-        break;
-      }
-      case 'full': {
-        const tracks = await kv.getByPrefix('track:');
-        const playlists = await kv.getByPrefix('playlist:');
-        const schedules = await kv.getByPrefix('schedule:');
-        const shows = await kv.getByPrefix('show:');
-        const podcasts = (await kv.getByPrefix('podcast:')).filter((p: any) => !p.podcastSlug && (p.title || p.name));
-        const news = await kv.getByPrefix('news:');
-        const profiles = await kv.getByPrefix('profile:');
-        const streamSettings = await kv.get('settings:stream');
-        const brandingSettings = await kv.get('settings:branding');
-        data = {
-          type: 'full_backup',
-          exportedAt: timestamp,
-          tracks: { count: tracks.length, items: tracks },
-          playlists: { count: playlists.length, items: playlists },
-          schedules: { count: schedules.length, items: schedules },
-          shows: { count: shows.length, items: shows },
-          podcasts: { count: podcasts.length, items: podcasts },
-          news: { count: news.length, items: news },
-          profiles: { count: profiles.length, items: profiles },
-          settings: { stream: streamSettings, branding: brandingSettings },
-        };
-        break;
-      }
-      default:
-        return c.json({ error: `Unknown export type: ${type}` }, 400);
-    }
-
-    // Record export in audit log
-    await addAuditLog({ level: 'success', category: 'Backup', message: `Data exported: ${type}`, userId: c.get('userId') });
-
-    console.log(`📦 Data exported: ${type}`);
-    return c.json(data);
-  } catch (error: any) {
-    console.error('Export error:', error);
-    return c.json({ error: `Export error: ${error.message}` }, 500);
-  }
-});
-
-// Get export history (from audit logs)
-app.get("/make-server-06086aa3/export-history", requireAuth, async (c) => {
-  try {
-    const logs = await kv.getByPrefix('auditlog:');
-    const exportLogs = logs
-      .filter((l: any) => l.category === 'Backup')
-      .sort((a: any, b: any) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime())
-      .slice(0, 20);
-    return c.json({ history: exportLogs });
-  } catch (error: any) {
-    console.error('Export history error:', error);
-    return c.json({ error: `Export history error: ${error.message}` }, 500);
-  }
-});
-
-// ==================== ADMIN DASHBOARD STATS ====================
-
-app.get("/make-server-06086aa3/admin/dashboard-stats", requireAuth, async (c) => {
-  try {
-    const [feedback, logs] = await Promise.all([
-      kv.getByPrefix('feedback:'),
-      kv.getByPrefix('auditlog:'),
-    ]);
-
-    const newFeedbackCount = feedback.filter((f: any) => f.status === 'new').length;
-    const totalFeedbackCount = feedback.length;
-
-    // Sort logs by timestamp desc and take the latest 5
-    const recentLogs = logs
-      .sort((a: any, b: any) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime())
-      .slice(0, 5)
-      .map((l: any) => ({
-        id: l.id,
-        timestamp: l.timestamp,
-        level: l.level,
-        category: l.category,
-        message: l.message,
-      }));
-
-    const errorCount = logs.filter((l: any) => l.level === 'error').length;
-    const warningCount = logs.filter((l: any) => l.level === 'warning').length;
-
-    return c.json({
-      feedback: { total: totalFeedbackCount, new: newFeedbackCount },
-      logs: { total: logs.length, errors: errorCount, warnings: warningCount, recent: recentLogs },
+    const page = c.req.query('page') || '1';
+    const r = await fetch(`${AZURA_URL}/api/station/${AZURA_STATION}/files?rowCount=500&page=${page}`, {
+      headers: { 'X-API-Key': AZURA_KEY },
     });
-  } catch (error: any) {
-    console.error('Dashboard stats error:', error);
-    return c.json({ error: `Dashboard stats error: ${error.message}` }, 500);
-  }
-});
-
-// ==================== AI DEV TEAM ====================
-
-// Seed default AI team members (idempotent)
-async function seedAITeamMembers() {
-  try {
-    const existing = await kv.getByPrefix('ai-team:member:');
-    if (existing.length > 0) return;
-
-    const members = [
-      {
-        id: 'aria',
-        name: 'ARIA',
-        fullName: 'AI Research & Integration Architect',
-        role: 'Team Lead',
-        avatar: 'A',
-        color: '#00d9ff',
-        specialties: ['Architecture', 'Code Review', 'Sprint Planning', 'Technical Decisions'],
-        status: 'online',
-        bio: 'Senior architect specializing in system design and team coordination. Leads sprint planning, reviews all PRs, and makes final architectural decisions for the platform.',
-        currentTask: null,
-        tasksCompleted: 0,
-        joinedAt: new Date().toISOString(),
-      },
-      {
-        id: 'pixel',
-        name: 'PIXEL',
-        fullName: 'Progressive Interface & Experience Lead',
-        role: 'Frontend Developer',
-        avatar: 'P',
-        color: '#00ffaa',
-        specialties: ['React', 'Tailwind CSS', 'Animations', 'Responsive Design', 'Accessibility'],
-        status: 'online',
-        bio: 'Frontend specialist focused on building beautiful, responsive UI components with React and Tailwind. Expert in motion design and micro-interactions.',
-        currentTask: null,
-        tasksCompleted: 0,
-        joinedAt: new Date().toISOString(),
-      },
-      {
-        id: 'nexus',
-        name: 'NEXUS',
-        fullName: 'Network & Exchange Unified System',
-        role: 'Backend Developer',
-        avatar: 'N',
-        color: '#9b59b6',
-        specialties: ['Hono API', 'Supabase', 'KV Store', 'Edge Functions', 'Data Modeling'],
-        status: 'online',
-        bio: 'Backend engineer specializing in Hono web server, Supabase Edge Functions, and KV store data patterns. Designs APIs and handles server-side logic.',
-        currentTask: null,
-        tasksCompleted: 0,
-        joinedAt: new Date().toISOString(),
-      },
-      {
-        id: 'forge',
-        name: 'FORGE',
-        fullName: 'Foundation Operations & Release Guardian Engine',
-        role: 'DevOps Engineer',
-        avatar: 'F',
-        color: '#ff8c00',
-        specialties: ['CI/CD', 'Deployment', 'Performance', 'Monitoring', 'Infrastructure'],
-        status: 'idle',
-        bio: 'DevOps engineer managing deployments, performance optimization, and infrastructure monitoring. Ensures smooth releases and platform stability.',
-        currentTask: null,
-        tasksCompleted: 0,
-        joinedAt: new Date().toISOString(),
-      },
-      {
-        id: 'sentinel',
-        name: 'SENTINEL',
-        fullName: 'System Evaluation & Testing Intelligence',
-        role: 'QA Engineer',
-        avatar: 'S',
-        color: '#e74c3c',
-        specialties: ['Testing', 'Bug Tracking', 'E2E Tests', 'Regression', 'Quality Metrics'],
-        status: 'online',
-        bio: 'Quality assurance specialist running automated test suites, tracking bugs, and ensuring code meets quality standards before deployment.',
-        currentTask: null,
-        tasksCompleted: 0,
-        joinedAt: new Date().toISOString(),
-      },
-      {
-        id: 'prism',
-        name: 'PRISM',
-        fullName: 'Pattern & Research Interface Strategy Module',
-        role: 'UX Designer',
-        avatar: 'R',
-        color: '#E040FB',
-        specialties: ['Design Systems', 'UX Patterns', 'Wireframes', 'User Research', 'Prototyping'],
-        status: 'idle',
-        bio: 'UX designer creating intuitive user experiences, maintaining the design system, and conducting user research to inform product decisions.',
-        currentTask: null,
-        tasksCompleted: 0,
-        joinedAt: new Date().toISOString(),
-      },
-    ];
-
-    for (const member of members) {
-      await kv.set(`ai-team:member:${member.id}`, member);
-    }
-    console.log('✅ AI team members seeded');
-  } catch (err: any) {
-    console.error('seedAITeamMembers error:', err?.message || err);
-  }
-}
-
-// GET /ai-team/members
-app.get("/make-server-06086aa3/ai-team/members", requireAuth, async (c) => {
-  try {
-    await seedAITeamMembers();
-    const members = await kv.getByPrefix('ai-team:member:');
-    return c.json({ members });
-  } catch (error: any) {
-    console.error('Get AI team members error:', error);
-    return c.json({ error: `Get AI team members error: ${error.message}` }, 500);
-  }
-});
-
-// PUT /ai-team/members/:id
-app.put("/make-server-06086aa3/ai-team/members/:id", requireAuth, async (c) => {
-  try {
-    const memberId = c.req.param('id');
-    const updates = await c.req.json();
-    const member = await kv.get(`ai-team:member:${memberId}`);
-    if (!member) return c.json({ error: 'Member not found' }, 404);
-    const updated = { ...member, ...updates, updatedAt: new Date().toISOString() };
-    await kv.set(`ai-team:member:${memberId}`, updated);
-    return c.json({ member: updated });
-  } catch (error: any) {
-    console.error('Update AI team member error:', error);
-    return c.json({ error: `Update AI team member error: ${error.message}` }, 500);
-  }
-});
-
-// GET /ai-team/tasks
-app.get("/make-server-06086aa3/ai-team/tasks", requireAuth, async (c) => {
-  try {
-    const tasks = await kv.getByPrefix('ai-team:task:');
-    tasks.sort((a: any, b: any) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-    return c.json({ tasks });
-  } catch (error: any) {
-    console.error('Get AI team tasks error:', error);
-    return c.json({ error: `Get AI team tasks error: ${error.message}` }, 500);
-  }
-});
-
-// POST /ai-team/tasks
-app.post("/make-server-06086aa3/ai-team/tasks", requireAuth, async (c) => {
-  try {
-    const body = await c.req.json();
-    const taskId = `task_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-    const task = {
-      id: taskId,
-      title: body.title || 'Untitled Task',
-      description: body.description || '',
-      status: body.status || 'backlog',
-      priority: body.priority || 'medium',
-      assigneeId: body.assigneeId || null,
-      labels: body.labels || [],
-      comments: [],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    await kv.set(`ai-team:task:${taskId}`, task);
-    await addAuditLog({ level: 'info', category: 'AI Dev Team', message: `Task created: "${task.title}"`, userId: c.get('userId') });
-    return c.json({ task }, 201);
-  } catch (error: any) {
-    console.error('Create AI team task error:', error);
-    return c.json({ error: `Create AI team task error: ${error.message}` }, 500);
-  }
-});
-
-// PUT /ai-team/tasks/:id
-app.put("/make-server-06086aa3/ai-team/tasks/:id", requireAuth, async (c) => {
-  try {
-    const taskId = c.req.param('id');
-    const updates = await c.req.json();
-    const task = await kv.get(`ai-team:task:${taskId}`);
-    if (!task) return c.json({ error: 'Task not found' }, 404);
-    const updated = { ...task, ...updates, updatedAt: new Date().toISOString() };
-    await kv.set(`ai-team:task:${taskId}`, updated);
-    return c.json({ task: updated });
-  } catch (error: any) {
-    console.error('Update AI team task error:', error);
-    return c.json({ error: `Update AI team task error: ${error.message}` }, 500);
-  }
-});
-
-// DELETE /ai-team/tasks/:id
-app.delete("/make-server-06086aa3/ai-team/tasks/:id", requireAuth, async (c) => {
-  try {
-    const taskId = c.req.param('id');
-    const task = await kv.get(`ai-team:task:${taskId}`);
-    if (!task) return c.json({ error: 'Task not found' }, 404);
-    await kv.del(`ai-team:task:${taskId}`);
-    await addAuditLog({ level: 'info', category: 'AI Dev Team', message: `Task deleted: "${task.title}"`, userId: c.get('userId') });
-    return c.json({ success: true });
-  } catch (error: any) {
-    console.error('Delete AI team task error:', error);
-    return c.json({ error: `Delete AI team task error: ${error.message}` }, 500);
-  }
-});
-
-// GET /ai-team/chat/:memberId
-app.get("/make-server-06086aa3/ai-team/chat/:memberId", requireAuth, async (c) => {
-  try {
-    const memberId = c.req.param('memberId');
-    const messages = await kv.getByPrefix(`ai-team:chat:${memberId}:`);
-    messages.sort((a: any, b: any) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime());
-    return c.json({ messages });
-  } catch (error: any) {
-    console.error('Get AI team chat error:', error);
-    return c.json({ error: `Get AI team chat error: ${error.message}` }, 500);
-  }
-});
-
-// POST /ai-team/chat/:memberId
-app.post("/make-server-06086aa3/ai-team/chat/:memberId", requireAuth, async (c) => {
-  try {
-    const memberId = c.req.param('memberId');
-    const body = await c.req.json();
-    const member = await kv.get(`ai-team:member:${memberId}`);
-    if (!member) return c.json({ error: 'Member not found' }, 404);
-
-    const userMsgId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
-    const userMsg = {
-      id: userMsgId,
-      memberId,
-      sender: 'admin',
-      text: body.text || '',
-      timestamp: new Date().toISOString(),
-    };
-    await kv.set(`ai-team:chat:${memberId}:${userMsgId}`, userMsg);
-
-    // ── Try Claude API, fallback to templates ──
-    let responseText: string;
-    let aiPowered = false;
-
-    const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
-    if (anthropicKey) {
-      try {
-        responseText = await callClaudeAPI(anthropicKey, member, memberId, body.text || '');
-        aiPowered = true;
-      } catch (claudeErr: any) {
-        console.error('Claude API error, falling back to templates:', claudeErr?.message || claudeErr);
-        responseText = generateAIResponse(member, body.text || '');
-      }
-    } else {
-      console.log('ANTHROPIC_API_KEY not set, using template responses');
-      responseText = generateAIResponse(member, body.text || '');
-    }
-
-    const aiMsgId = `msg_${Date.now() + 1}_${Math.random().toString(36).substr(2, 4)}`;
-    const aiMsg = {
-      id: aiMsgId,
-      memberId,
-      sender: memberId,
-      text: responseText,
-      timestamp: new Date(Date.now() + 500).toISOString(),
-      aiPowered,
-    };
-    await kv.set(`ai-team:chat:${memberId}:${aiMsgId}`, aiMsg);
-
-    return c.json({ userMessage: userMsg, aiResponse: aiMsg });
-  } catch (error: any) {
-    console.error('AI team chat error:', error);
-    return c.json({ error: `AI team chat error: ${error.message}` }, 500);
-  }
-});
-
-function generateAIResponse(member: any, userMessage: string): string {
-  const msg = userMessage.toLowerCase();
-  const name = member.name;
-  const role = member.role;
-
-  if (msg.includes('status') || msg.includes('прогресс') || msg.includes('как дела')) {
-    const statusResponses: Record<string, string[]> = {
-      'Team Lead': [
-        `All systems nominal. The team is performing well — sprint velocity is up 15% this iteration. I've reviewed 3 PRs today and have 2 more pending. Let me know if you need a detailed status report.`,
-        `Good news — we're on track for the sprint deadline. PIXEL is finishing the UI polish, NEXUS has the API endpoints ready, and SENTINEL is running regression tests. No blockers at the moment.`,
-      ],
-      'Frontend Developer': [
-        `Working on responsive layouts for the new admin panels. The glassmorphism components are looking sharp on all breakpoints. Currently optimizing animation performance — some motion elements were causing frame drops on mobile.`,
-        `I've completed the component refactor for the media library. The new list view with inline playback is live. Working on accessibility improvements next — adding ARIA labels and keyboard navigation.`,
-      ],
-      'Backend Developer': [
-        `API endpoints are stable. I've optimized the KV store queries — batch reads are now 40% faster. Currently working on caching strategies for frequently accessed data. The signed URL flow is performing well.`,
-        `Just finished implementing the new data validation layer. All endpoints now have proper input sanitization. Working on rate limiting next to prevent abuse.`,
-      ],
-      'DevOps Engineer': [
-        `Infrastructure is running smoothly. Edge Function cold starts are averaging 180ms. Storage buckets are properly configured with public access. I'm monitoring bandwidth usage — we're at 12% of our monthly limit.`,
-        `Deployment pipeline is green. Last deploy was clean with zero downtime. I've set up alerts for storage quota and bandwidth thresholds.`,
-      ],
-      'QA Engineer': [
-        `Test coverage is at 87%. I found 2 minor edge cases in the playlist management — filed them as low-priority bugs. The upload flow test suite is passing all 12 scenarios including the 50MB boundary test.`,
-        `Regression suite passed. The drag-and-drop schedule fix is working correctly in all tested browsers. I've added 5 new test cases for the audio metadata extraction flow.`,
-      ],
-      'UX Designer': [
-        `Working on the design system documentation. I've standardized the glassmorphism patterns across all admin panels. The cyan/mint gradient palette is consistent now. Preparing wireframes for the next feature sprint.`,
-        `User flow analysis is complete for the media library. The Spotify-style list view is testing well. I'm refining the micro-interactions for better feedback on drag-and-drop operations.`,
-      ],
-    };
-    const pool = statusResponses[role] || [`Everything is going well. I'm focused on my current assignments and making steady progress.`];
-    return pool[Math.floor(Math.random() * pool.length)];
-  }
-
-  if (msg.includes('task') || msg.includes('задач') || msg.includes('assign') || msg.includes('работа')) {
-    return `I'm ready to take on new tasks. Just create a task in the board and assign it to me. My current workload is manageable — I can handle ${Math.floor(Math.random() * 3) + 2} more items this sprint. What area should I focus on?`;
-  }
-
-  if (msg.includes('bug') || msg.includes('баг') || msg.includes('error') || msg.includes('ошибк')) {
-    const bugResponses: Record<string, string> = {
-      'Team Lead': `I'll prioritize this. Let me pull in the right team member to investigate. Can you share the error details or steps to reproduce?`,
-      'Frontend Developer': `On it. I'll check the component tree and event handlers. If you can tell me which page/component, I'll narrow it down quickly. Is it a rendering issue or a logic error?`,
-      'Backend Developer': `I'll check the server logs immediately. Could be a KV store read/write issue or an edge case in the API validation. What endpoint is affected?`,
-      'DevOps Engineer': `Checking infrastructure metrics now. Could be related to cold starts or timeout settings. I'll review the Edge Function logs for any anomalies.`,
-      'QA Engineer': `I'll create a bug report and add it to the regression suite. Let me try to reproduce it first. What browser/device were you using?`,
-      'UX Designer': `If it's a visual glitch, I'll audit the CSS cascade and responsive breakpoints. Could be a z-index or overflow issue. Which viewport size is affected?`,
-    };
-    return bugResponses[role] || `I'll investigate this bug right away. Let me gather more information to diagnose the issue.`;
-  }
-
-  if (msg.includes('deploy') || msg.includes('релиз') || msg.includes('release') || msg.includes('деплой')) {
-    return role === 'DevOps Engineer'
-      ? `Deployment checklist is ready. All tests are green, SENTINEL confirmed no regressions. I can initiate the deploy whenever you give the go-ahead. Estimated downtime: zero (rolling deployments).`
-      : `For deployment questions, FORGE (DevOps) is the right person. From my side, the ${role.toLowerCase()} work is ready for release. All changes are committed and reviewed.`;
-  }
-
-  if (msg.includes('hello') || msg.includes('привет') || msg.includes('hi') || msg.includes('hey')) {
-    return `Hey! ${name} here, your ${role}. I'm online and ready to help. What would you like me to work on? You can assign tasks, ask about progress, or discuss any technical challenges.`;
-  }
-
-  const defaults = [
-    `Understood. I'll analyze this from the ${role.toLowerCase()} perspective and get back to you with my recommendations. Is there a deadline I should be aware of?`,
-    `Good point. Let me think about this in the context of our current architecture. I'll draft a proposal and share it with the team for review.`,
-    `Got it. I'll prioritize this in my current sprint. Would you like me to coordinate with other team members on this, or should I handle it independently?`,
-    `Acknowledged. I'll break this down into actionable items and update the task board. Expect an update within the next sprint cycle.`,
-  ];
-  return defaults[Math.floor(Math.random() * defaults.length)];
-}
-
-// ── Claude SSE Streaming Endpoint ────────────────────────────────────────
-
-app.post("/make-server-06086aa3/ai-team/chat/:memberId/stream", requireAuth, async (c) => {
-  const memberId = c.req.param('memberId');
-  const body = await c.req.json();
-  const member = await kv.get(`ai-team:member:${memberId}`);
-  if (!member) return c.json({ error: 'Member not found' }, 404);
-
-  const userMsgId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
-  const userMsg = {
-    id: userMsgId, memberId, sender: 'admin',
-    text: body.text || '', timestamp: new Date().toISOString(),
-  };
-  await kv.set(`ai-team:chat:${memberId}:${userMsgId}`, userMsg);
-
-  const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
-  const aiMsgId = `msg_${Date.now() + 1}_${Math.random().toString(36).substr(2, 4)}`;
-  const encoder = new TextEncoder();
-  const sendSSE = (ctrl: ReadableStreamDefaultController, event: string, data: any) => {
-    ctrl.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
-  };
-
-  const stream = new ReadableStream({
-    async start(controller) {
-      try {
-        sendSSE(controller, 'user_message', userMsg);
-
-        if (!anthropicKey) {
-          const fallbackText = generateAIResponse(member, body.text || '');
-          const aiMsg = { id: aiMsgId, memberId, sender: memberId, text: fallbackText, timestamp: new Date(Date.now() + 500).toISOString(), aiPowered: false };
-          await kv.set(`ai-team:chat:${memberId}:${aiMsgId}`, aiMsg);
-          sendSSE(controller, 'done', aiMsg);
-          controller.close();
-          return;
-        }
-
-        const { systemPrompt, messages } = await buildClaudeContext(member, memberId, body.text || '');
-
-        const claudeResponse = await fetch('https://api.anthropic.com/v1/messages', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01' },
-          body: JSON.stringify({ model: 'claude-3-5-haiku-20241022', max_tokens: 1024, system: systemPrompt, messages, stream: true }),
-        });
-
-        if (!claudeResponse.ok) {
-          console.error(`Claude API error ${claudeResponse.status}:`, await claudeResponse.text());
-          const fallbackText = generateAIResponse(member, body.text || '');
-          const aiMsg = { id: aiMsgId, memberId, sender: memberId, text: fallbackText, timestamp: new Date(Date.now() + 500).toISOString(), aiPowered: false };
-          await kv.set(`ai-team:chat:${memberId}:${aiMsgId}`, aiMsg);
-          sendSSE(controller, 'done', aiMsg);
-          controller.close();
-          return;
-        }
-
-        let fullText = '';
-        const reader = claudeResponse.body!.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
-            const jsonStr = line.slice(6);
-            if (jsonStr === '[DONE]') continue;
-            try {
-              const evt = JSON.parse(jsonStr);
-              if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta') {
-                fullText += evt.delta.text;
-                sendSSE(controller, 'chunk', { text: evt.delta.text });
-              }
-            } catch { /* skip */ }
-          }
-        }
-
-        const aiMsg = { id: aiMsgId, memberId, sender: memberId, text: fullText, timestamp: new Date(Date.now() + 500).toISOString(), aiPowered: true };
-        await kv.set(`ai-team:chat:${memberId}:${aiMsgId}`, aiMsg);
-        sendSSE(controller, 'done', aiMsg);
-      } catch (err: any) {
-        console.error('Streaming chat error:', err);
-        try {
-          const fallbackText = generateAIResponse(member, body.text || '');
-          const aiMsg = { id: aiMsgId, memberId, sender: memberId, text: fallbackText, timestamp: new Date(Date.now() + 500).toISOString(), aiPowered: false };
-          await kv.set(`ai-team:chat:${memberId}:${aiMsgId}`, aiMsg);
-          sendSSE(controller, 'done', aiMsg);
-        } catch { /* exhausted */ }
-      } finally {
-        try { controller.close(); } catch { /* already closed */ }
-      }
-    },
-  });
-
-  return new Response(stream, {
-    headers: {
-      'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*',
-    },
-  });
-});
-
-// ── Claude API helpers ──────────────────────────────────────────────────
-
-async function buildClaudeContext(member: any, memberId: string, userMessage: string) {
-  const systemPrompt = buildMemberSystemPrompt(member);
-  const chatHistory = await kv.getByPrefix(`ai-team:chat:${memberId}:`);
-  chatHistory.sort((a: any, b: any) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime());
-  const recentHistory = chatHistory.slice(-20);
-
-  const allTasks = await kv.getByPrefix('ai-team:task:');
-  const memberTasks = allTasks.filter((t: any) => t.assigneeId === memberId);
-  const activeTasks = memberTasks.filter((t: any) => t.status === 'in-progress' || t.status === 'review');
-
-  const messages: Array<{ role: string; content: string }> = [];
-  if (activeTasks.length > 0) {
-    const taskContext = activeTasks.map((t: any) =>
-      `- [${t.status}] "${t.title}" (${t.priority} priority)${t.description ? ': ' + t.description : ''}`
-    ).join('\n');
-    messages.push({ role: 'user', content: `[SYSTEM CONTEXT — my current assigned tasks]\n${taskContext}` });
-    messages.push({ role: 'assistant', content: `Got it, I'm aware of my current assignments. How can I help you?` });
-  }
-  for (const msg of recentHistory) {
-    messages.push({ role: msg.sender === 'admin' ? 'user' : 'assistant', content: msg.text });
-  }
-  messages.push({ role: 'user', content: userMessage });
-  return { systemPrompt, messages };
-}
-
-async function callClaudeAPI(apiKey: string, member: any, memberId: string, userMessage: string): Promise<string> {
-  const { systemPrompt, messages } = await buildClaudeContext(member, memberId, userMessage);
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 25000);
-  try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: 'claude-3-5-haiku-20241022', max_tokens: 1024, system: systemPrompt, messages }),
-      signal: controller.signal,
-    });
-    if (!response.ok) {
-      const errBody = await response.text();
-      throw new Error(`Claude API returned ${response.status}: ${errBody}`);
-    }
-    const data = await response.json();
-    if (data.content && data.content.length > 0) return data.content[0].text;
-    throw new Error('Empty response from Claude API');
-  } finally { clearTimeout(timeout); }
-}
-
-function buildMemberSystemPrompt(member: any): string {
-  const projectContext = `You are ${member.name} (${member.fullName}), a ${member.role} on the AI Dev Department of Soul FM Hub — an online radio station platform.
-
-PROJECT CONTEXT:
-- Soul FM Hub is built with React + Tailwind CSS (frontend) and Hono on Supabase Edge Functions (backend)
-- Design theme: cyan/mint (#00d9ff, #00ffaa), glassmorphism, dark mode, font Righteous
-- Backend uses KV-store pattern on Supabase, with Storage for audio/images
-- Features: Auto DJ, media library, playlists, schedule management, live DJ console, song requests, shoutouts, podcasts, contests, news injection, jingle rotation, content automation
-- Admin panel with PIN-based auth (0000), multiple management pages
-- The platform has 6 AI team members: ARIA (Team Lead), PIXEL (Frontend), NEXUS (Backend), FORGE (DevOps), SENTINEL (QA), PRISM (UX)
-
-YOUR PERSONA:
-- Name: ${member.name}
-- Full Name: ${member.fullName}
-- Role: ${member.role}
-- Specialties: ${(member.specialties || []).join(', ')}
-- Bio: ${member.bio}
-- Status: ${member.status}
-
-BEHAVIORAL RULES:
-1. Stay in character as ${member.name} the ${member.role} at all times
-2. Respond with technical expertise relevant to your role
-3. Reference other team members by their names (ARIA, PIXEL, NEXUS, FORGE, SENTINEL, PRISM) when appropriate
-4. Be professional but friendly, with a slightly tech-savvy personality
-5. Keep responses concise (2-4 sentences typically, longer for complex technical discussions)
-6. You can discuss tasks, bugs, architecture, deployments, design decisions, testing strategies
-7. Support both English and Russian — respond in the same language the user writes in
-8. When discussing code, reference the actual tech stack (React, Tailwind, Hono, Supabase, KV store, Edge Functions)
-9. You can mention sprint progress, PR reviews, and other agile concepts naturally
-10. Never break character or mention that you are an AI language model`;
-
-  const roleSpecifics: Record<string, string> = {
-    'Team Lead': `\n\nAS TEAM LEAD, you additionally:
-- Coordinate between all team members and resolve blockers
-- Make architectural decisions and approve PRs
-- Track sprint progress and velocity
-- Resolve conflicts and prioritize work
-- Have visibility into all aspects of the project`,
-
-    'Frontend Developer': `\n\nAS FRONTEND DEVELOPER, you additionally:
-- Expert in React component architecture, hooks, and state management
-- Deep knowledge of Tailwind CSS v4, glassmorphism effects, animations (Motion library)
-- Handle responsive design, accessibility (ARIA), and performance optimization
-- Work with Radix UI primitives, Recharts, react-dnd, Sonner toasts
-- Implement the admin panel UI, media library, schedule management views`,
-
-    'Backend Developer': `\n\nAS BACKEND DEVELOPER, you additionally:
-- Expert in Hono web server running on Supabase Edge Functions (Deno runtime)
-- Design RESTful APIs with proper auth middleware (requireAuth, PIN-based + JWT)
-- Manage KV-store data patterns (prefixed keys, getByPrefix for collections)
-- Handle file uploads via signed URLs + Supabase Storage
-- Implement Auto DJ logic, schedule resolution, audio metadata extraction`,
-
-    'DevOps Engineer': `\n\nAS DEVOPS ENGINEER, you additionally:
-- Manage Supabase Edge Function deployments and infrastructure
-- Monitor performance, cold starts, bandwidth usage
-- Configure Storage buckets (public/private), CORS, and security headers
-- Handle CI/CD pipelines and release management
-- Track system health, error rates, and uptime metrics`,
-
-    'QA Engineer': `\n\nAS QA ENGINEER, you additionally:
-- Run automated test suites and regression testing
-- Track bugs, create detailed bug reports with reproduction steps
-- Validate upload flows (3-step signed URL architecture), drag-and-drop, audio playback
-- Test across browsers and devices, ensure responsive design works
-- Monitor test coverage and quality metrics`,
-
-    'UX Designer': `\n\nAS UX DESIGNER, you additionally:
-- Maintain the design system (cyan/mint palette, glassmorphism, Righteous font)
-- Create wireframes and prototypes for new features
-- Conduct user flow analysis and usability audits
-- Define micro-interactions, transitions, and motion design patterns
-- Ensure consistency across all admin pages and public-facing UI`,
-  };
-
-  return projectContext + (roleSpecifics[member.role] || '');
-}
-
-// GET /ai-team/stats
-app.get("/make-server-06086aa3/ai-team/stats", requireAuth, async (c) => {
-  try {
-    const [tasks, members] = await Promise.all([
-      kv.getByPrefix('ai-team:task:'),
-      kv.getByPrefix('ai-team:member:'),
-    ]);
-
-    const byStatus = {
-      backlog: tasks.filter((t: any) => t.status === 'backlog').length,
-      'in-progress': tasks.filter((t: any) => t.status === 'in-progress').length,
-      review: tasks.filter((t: any) => t.status === 'review').length,
-      done: tasks.filter((t: any) => t.status === 'done').length,
-    };
-
-    const byPriority = {
-      critical: tasks.filter((t: any) => t.priority === 'critical').length,
-      high: tasks.filter((t: any) => t.priority === 'high').length,
-      medium: tasks.filter((t: any) => t.priority === 'medium').length,
-      low: tasks.filter((t: any) => t.priority === 'low').length,
-    };
-
-    return c.json({
-      totalTasks: tasks.length,
-      totalMembers: members.length,
-      onlineMembers: members.filter((m: any) => m.status === 'online').length,
-      byStatus,
-      byPriority,
-      sprintProgress: byStatus.done > 0 ? Math.round((byStatus.done / tasks.length) * 100) : 0,
-    });
-  } catch (error: any) {
-    console.error('AI team stats error:', error);
-    return c.json({ error: `AI team stats error: ${error.message}` }, 500);
-  }
-});
-
-// ═════════════════════════════════════════���════════════════════════════
-// ── BROADCAST TEAM (Отдел Эфира) ─────────────────────────────────────
-// ══════════════════════════════════════════════════════════════════════
-
-const DEFAULT_BROADCAST_MEMBERS = [
-  { id: 'nico', name: 'Nico', fullName: 'Nico Steel', role: 'Program Director', roleKey: 'program-director', color: '#94a3b8', emoji: '🎬', bio: 'Программный директор Soul FM Hub. Координирует эфирную сетку, утверждает контент, управляет командой и определяет стратегическое развитие станции.', specialties: ['Programming', 'Team Management', 'Content Strategy', 'Scheduling', 'Quality Control'], photoType: 'figma', photoId: 'nico', status: 'online', show: null, schedule: 'Mon-Sun 24/7', genres: ['All Formats', 'Strategy', 'Management'] },
-  { id: 'sandra', name: 'Sandra', fullName: 'Sandra Ray', role: 'Singer / Vocalist', roleKey: 'singer', color: '#ff69b4', emoji: '🎤', bio: 'Главный голос Soul FM Hub. Записывает вокальные партии, джинглы и промо-ролики для эфира. Её тёплый тембр стал визитной карточкой станции.', specialties: ['Vocals', 'Jingles', 'Promo Voiceovers', 'Live Sessions'], photoType: 'figma', photoId: 'sandra', status: 'online', show: 'Morning Vibes', schedule: 'Mon-Fri 07:00-10:00', genres: ['Soul', 'R&B', 'Neo-Soul', 'Jazz'] },
-  { id: 'liana', name: 'Liana', fullName: 'Liana Nova', role: 'Announcer / Host', roleKey: 'announcer', color: '#ff6b35', emoji: '📻', bio: 'Профессиональный диктор и ведущая эфира. Озвучивает новости, анонсы, спецвыпуски. Мастер импровизации и живого общения с аудиторией.', specialties: ['News Reading', 'Live Hosting', 'Announcements', 'Interviews'], photoType: 'figma', photoId: 'liana', status: 'on-air', show: 'Soul FM News Hour', schedule: 'Mon-Fri 12:00-13:00', genres: ['Talk', 'News', 'Entertainment'] },
-  { id: 'den', name: 'Den', fullName: 'Den Cipher', role: 'DJ / Music Director', roleKey: 'dj', color: '#00d9ff', emoji: '🎧', bio: 'Главный диджей и музыкальный директор Soul FM Hub. Создаёт микс-шоу, курирует плейлисты и задаёт музыкальный вектор станции.', specialties: ['DJ Sets', 'Mix Shows', 'Music Curation', 'Live Mixing'], photoType: 'figma', photoId: 'den', status: 'online', show: 'Neon Nights', schedule: 'Fri-Sat 22:00-02:00', genres: ['Deep House', 'Electronic', 'Chillwave', 'Nu-Disco'] },
-  { id: 'mark', name: 'Mark', fullName: 'Mark Volt', role: 'News & Marketing', roleKey: 'news-marketing', color: '#3b82f6', emoji: '📰', bio: 'Отвечает за новостной контент и маркетинг станции. Ведёт новостные выпуски, создаёт промо-кампании, работает с рекламодателями и развивает бренд Soul FM.', specialties: ['News Production', 'Marketing Strategy', 'Brand Development', 'Ad Campaigns', 'Social Media'], photoType: 'figma', photoId: 'mark', status: 'online', show: 'Soul FM News & Trends', schedule: 'Mon-Fri 09:00-17:00', genres: ['News', 'Marketing', 'Promo', 'Trends'] },
-  { id: 'max', name: 'Max', fullName: 'Max Sterling', role: 'Mix Engineer', roleKey: 'mix-engineer', color: '#a855f7', emoji: '🎛️', bio: 'Звукоинженер и мастер сведения. Обрабатывает треки, сводит звук, отвечает за качество аудио в эфире. Работает с микшерным пультом и DAW.', specialties: ['Audio Mixing', 'Mastering', 'Sound Design', 'DAW Production', 'Live Sound'], photoType: 'figma', photoId: 'max', status: 'online', show: 'Studio Sessions', schedule: 'Mon-Fri 10:00-18:00', genres: ['All Genres', 'Production', 'Mastering'] },
-  { id: 'stella', name: 'Stella', fullName: 'Stella Vox', role: 'Dictor / News Editor', roleKey: 'dictor-editor', color: '#ec4899', emoji: '🎙️', bio: 'Диктор, редактор новостей и голос информационного вещания Soul FM. Готовит выпуски, редактирует тексты, ведёт прямые эфиры и интервью.', specialties: ['News Anchoring', 'Script Writing', 'Content Editing', 'Live Broadcasting', 'Interviews'], photoType: 'figma', photoId: 'stella', status: 'on-air', show: 'Evening News Digest', schedule: 'Mon-Fri 18:00-19:00', genres: ['News', 'Talk', 'Interviews', 'Editorial'] },
-];
-
-app.get("/make-server-06086aa3/broadcast-team/members", requireAuth, async (c) => {
-  try {
-    let members = await kv.getByPrefix('broadcast:member:');
-    // Re-seed if empty or if team composition changed (new members added)
-    const expectedIds = new Set(DEFAULT_BROADCAST_MEMBERS.map(m => m.id));
-    const existingIds = new Set(members.map((m: any) => m.id));
-    const needsReseed = members.length === 0 || DEFAULT_BROADCAST_MEMBERS.some(m => !existingIds.has(m.id));
-    if (needsReseed) {
-      // Remove old members not in new default list
-      for (const m of members) {
-        if (!expectedIds.has((m as any).id)) await kv.del(`broadcast:member:${(m as any).id}`);
-      }
-      // Add missing members from default list
-      for (const m of DEFAULT_BROADCAST_MEMBERS) {
-        if (!existingIds.has(m.id)) {
-          await kv.set(`broadcast:member:${m.id}`, { ...m, joinedAt: new Date().toISOString() });
-        }
-      }
-      members = await kv.getByPrefix('broadcast:member:');
-      await addAuditLog({ level: 'info', category: 'Broadcast Team', message: `Synced broadcast team: ${members.length} members` });
-    }
-    const order = ['program-director', 'singer', 'announcer', 'dj', 'news-marketing', 'mix-engineer', 'dictor-editor'];
-    members.sort((a: any, b: any) => order.indexOf(a.roleKey) - order.indexOf(b.roleKey));
-    return c.json({ members });
-  } catch (e: any) { return c.json({ error: `Broadcast team error: ${e.message}` }, 500); }
-});
-
-app.put("/make-server-06086aa3/broadcast-team/members/:id", requireAuth, async (c) => {
-  try {
-    const id = c.req.param('id');
-    const existing: any = await kv.get(`broadcast:member:${id}`);
-    if (!existing) return c.json({ error: 'Member not found' }, 404);
-    const updates = await c.req.json();
-    const updated = { ...existing, ...updates, updatedAt: new Date().toISOString() };
-    await kv.set(`broadcast:member:${id}`, updated);
-    await addAuditLog({ level: 'info', category: 'Broadcast Team', message: `Updated broadcast member: ${updated.name}` });
-    return c.json({ member: updated });
-  } catch (e: any) { return c.json({ error: e.message }, 500); }
-});
-
-app.get("/make-server-06086aa3/broadcast-team/on-air", requireAuth, async (c) => {
-  try {
-    const members = await kv.getByPrefix('broadcast:member:');
-    const onAir = members.filter((m: any) => m.status === 'on-air');
-    return c.json({ onAir, total: members.length, onlineCount: members.filter((m: any) => m.status !== 'offline').length });
-  } catch (e: any) { return c.json({ error: e.message }, 500); }
-});
-
-app.post("/make-server-06086aa3/broadcast-team/members/:id/status", requireAuth, async (c) => {
-  try {
-    const id = c.req.param('id');
-    const { status } = await c.req.json();
-    const member: any = await kv.get(`broadcast:member:${id}`);
-    if (!member) return c.json({ error: 'Member not found' }, 404);
-    member.status = status; member.updatedAt = new Date().toISOString();
-    await kv.set(`broadcast:member:${id}`, member);
-    await addAuditLog({ level: status === 'on-air' ? 'success' : 'info', category: 'Broadcast Team', message: `${member.name} status → ${status}` });
-    return c.json({ member });
-  } catch (e: any) { return c.json({ error: e.message }, 500); }
-});
-
-app.post("/make-server-06086aa3/broadcast-team/reset", requireAuth, async (c) => {
-  try {
-    const existing = await kv.getByPrefix('broadcast:member:');
-    for (const m of existing) await kv.del(`broadcast:member:${(m as any).id}`);
-    for (const m of DEFAULT_BROADCAST_MEMBERS) await kv.set(`broadcast:member:${m.id}`, { ...m, joinedAt: new Date().toISOString() });
-    return c.json({ message: 'Broadcast team reset', count: DEFAULT_BROADCAST_MEMBERS.length });
-  } catch (e: any) { return c.json({ error: e.message }, 500); }
-});
-
-// ══════════════════════════════════════════════════════════════════════
-// ── AUTOPILOT SYSTEM ─────────────────────────────────────────────────
-// ══════════════════════════════════════════════════════════════════════
-
-// POST /ai-team/autopilot/start
-app.post("/make-server-06086aa3/ai-team/autopilot/start", requireAuth, async (c) => {
-  try {
-    const body = await c.req.json().catch(() => ({}));
-    const durationMin = body.durationMinutes || 60;
-    const session = {
-      id: `ap_${Date.now()}`,
-      status: 'running',
-      startedAt: new Date().toISOString(),
-      endsAt: new Date(Date.now() + durationMin * 60 * 1000).toISOString(),
-      durationMinutes: durationMin,
-      cyclesCompleted: 0,
-      successCount: 0,
-      errorCount: 0,
-      warningCount: 0,
-    };
-    await kv.set('ai-team:autopilot:session', session);
-    await addAuditLog({ level: 'info', category: 'Autopilot', message: `Autopilot started for ${durationMin} minutes` });
-    return c.json({ session });
-  } catch (e: any) {
-    return c.json({ error: `Autopilot start error: ${e.message}` }, 500);
-  }
-});
-
-// POST /ai-team/autopilot/stop
-app.post("/make-server-06086aa3/ai-team/autopilot/stop", requireAuth, async (c) => {
-  try {
-    const session: any = await kv.get('ai-team:autopilot:session');
-    if (session) {
-      session.status = 'stopped';
-      session.stoppedAt = new Date().toISOString();
-      await kv.set('ai-team:autopilot:session', session);
-    }
-    await addAuditLog({ level: 'info', category: 'Autopilot', message: 'Autopilot stopped by admin' });
-    return c.json({ session });
-  } catch (e: any) {
-    return c.json({ error: `Autopilot stop error: ${e.message}` }, 500);
-  }
-});
-
-// GET /ai-team/autopilot/status
-app.get("/make-server-06086aa3/ai-team/autopilot/status", requireAuth, async (c) => {
-  try {
-    const session: any = await kv.get('ai-team:autopilot:session');
-    const logs = await kv.getByPrefix('ai-team:autopilot:log:');
-    logs.sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-
-    // Auto-stop if expired
-    if (session?.status === 'running' && new Date(session.endsAt) <= new Date()) {
-      session.status = 'completed';
-      session.completedAt = new Date().toISOString();
-      await kv.set('ai-team:autopilot:session', session);
-    }
-
-    return c.json({ session: session || null, logs: logs.slice(0, 100) });
-  } catch (e: any) {
-    return c.json({ error: `Autopilot status error: ${e.message}` }, 500);
-  }
-});
-
-// POST /ai-team/autopilot/cycle — execute one autopilot work cycle
-app.post("/make-server-06086aa3/ai-team/autopilot/cycle", requireAuth, async (c) => {
-  try {
-    const session: any = await kv.get('ai-team:autopilot:session');
-    if (!session || session.status !== 'running') {
-      return c.json({ error: 'Autopilot is not running' }, 400);
-    }
-    if (new Date(session.endsAt) <= new Date()) {
-      session.status = 'completed';
-      session.completedAt = new Date().toISOString();
-      await kv.set('ai-team:autopilot:session', session);
-      return c.json({ error: 'Autopilot session has ended', session });
-    }
-
-    // Pick a random member
-    const members = await kv.getByPrefix('ai-team:member:');
-    if (!members.length) return c.json({ error: 'No team members found' }, 404);
-    const member: any = members[Math.floor(Math.random() * members.length)];
-
-    // Perform real system check based on role
-    const result = await performAutopilotCheck(member);
-
-    // Create task in Kanban board
-    const taskId = `task_ap_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
-    const task = {
-      id: taskId,
-      title: result.title,
-      description: result.description,
-      status: result.status === 'success' ? 'done' : result.status === 'error' ? 'backlog' : 'review',
-      priority: result.status === 'error' ? 'high' : result.status === 'warning' ? 'medium' : 'low',
-      assigneeId: member.id,
-      labels: ['autopilot', result.category.toLowerCase().replace(/\s+/g, '-')],
-      comments: [],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      autopilot: true,
-      autopilotResult: result.status,
-    };
-    await kv.set(`ai-team:task:${taskId}`, task);
-
-    // If error, create a follow-up fix task
-    let fixTaskId: string | null = null;
-    if (result.status === 'error') {
-      fixTaskId = `task_fix_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
-      const fixTask = {
-        id: fixTaskId,
-        title: `[FIX] ${result.title}`,
-        description: `Auto-generated fix task:\n\nOriginal issue: ${result.description}\n\nError details: ${result.details}\n\nAssigned for rework.`,
-        status: 'in-progress',
-        priority: 'high',
-        assigneeId: member.id,
-        labels: ['autopilot', 'bug', 'rework'],
-        comments: [],
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        autopilot: true,
-        autopilotResult: 'rework',
-      };
-      await kv.set(`ai-team:task:${fixTaskId}`, fixTask);
-    }
-
-    // Log the activity
-    const logId = `aplog_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
-    const logEntry = {
-      id: logId,
-      timestamp: new Date().toISOString(),
-      memberId: member.id,
-      memberName: member.name,
-      memberRole: member.role,
-      memberAvatar: member.avatar,
-      memberColor: member.color,
-      title: result.title,
-      description: result.description,
-      details: result.details,
-      category: result.category,
-      status: result.status,
-      taskId,
-      fixTaskId,
-      metrics: result.metrics || null,
-    };
-    await kv.set(`ai-team:autopilot:log:${logId}`, logEntry);
-
-    // Update session counters
-    session.cyclesCompleted = (session.cyclesCompleted || 0) + 1;
-    if (result.status === 'success') session.successCount = (session.successCount || 0) + 1;
-    else if (result.status === 'error') session.errorCount = (session.errorCount || 0) + 1;
-    else session.warningCount = (session.warningCount || 0) + 1;
-    await kv.set('ai-team:autopilot:session', session);
-
-    // Audit log
-    await addAuditLog({
-      level: result.status === 'error' ? 'error' : result.status === 'warning' ? 'warning' : 'success',
-      category: 'Autopilot',
-      message: `[${member.name}] ${result.title}: ${result.status}`,
-      details: result.details,
-    });
-
-    return c.json({ log: logEntry, task, session });
-  } catch (e: any) {
-    console.error('Autopilot cycle error:', e);
-    return c.json({ error: `Autopilot cycle error: ${e.message}` }, 500);
-  }
-});
-
-// POST /ai-team/autopilot/clear-logs
-app.post("/make-server-06086aa3/ai-team/autopilot/clear-logs", requireAuth, async (c) => {
-  try {
-    const logs = await kv.getByPrefix('ai-team:autopilot:log:');
-    for (const log of logs) {
-      await kv.del(`ai-team:autopilot:log:${(log as any).id}`);
-    }
-    return c.json({ cleared: logs.length });
+    return c.json(await r.json(), r.status);
   } catch (e: any) {
     return c.json({ error: e.message }, 500);
   }
 });
 
-// ── Autopilot check logic ──────────────────────────────────���──────────
-
-async function performAutopilotCheck(member: any): Promise<{
-  title: string; description: string; details: string;
-  category: string; status: 'success' | 'error' | 'warning';
-  metrics?: Record<string, any>;
-}> {
-  const role = member.role;
-
+// DELETE track from AzuraCast
+app.delete('/make-server-06086aa3/azuracast/tracks/:id', requireAuth, async (c) => {
   try {
-    switch (role) {
-      case 'Backend Developer': return await checkBackend();
-      case 'DevOps Engineer': return await checkDevOps();
-      case 'QA Engineer': return await checkQA();
-      case 'Frontend Developer': return await checkFrontend();
-      case 'UX Designer': return await checkUX();
-      case 'Team Lead': return await checkTeamLead();
-      default: return await checkGeneric(member);
-    }
-  } catch (err: any) {
-    return {
-      title: `${role} check failed`,
-      description: `Unexpected error during ${role.toLowerCase()} check`,
-      details: err.message || String(err),
-      category: 'System Error',
-      status: 'error',
-    };
+    const id = c.req.param('id');
+    const r = await fetch(`${AZURA_URL}/api/station/${AZURA_STATION}/file/${id}`, {
+      method: 'DELETE',
+      headers: { 'X-API-Key': AZURA_KEY },
+    });
+    const text = await r.text();
+    return c.json(text ? JSON.parse(text) : { success: true }, r.status);
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500);
   }
-}
+});
 
-async function checkBackend(): Promise<any> {
-  const checks: string[] = [];
-  let hasIssue = false;
-  let issueDetail = '';
-
-  // 1. Count tracks & verify data integrity
-  const tracks = await kv.getByPrefix('track:');
-  checks.push(`${tracks.length} tracks in KV store`);
-
-  // 2. Check for tracks missing required fields
-  const badTracks = tracks.filter((t: any) => !t.title || !t.id);
-  if (badTracks.length > 0) {
-    hasIssue = true;
-    issueDetail = `${badTracks.length} tracks missing required fields (title/id)`;
-    checks.push(`⚠ ${issueDetail}`);
-  } else {
-    checks.push(`All tracks have valid schema`);
+// GET all playlists from AzuraCast
+app.get('/make-server-06086aa3/azuracast/playlists', requireAuth, async (c) => {
+  try {
+    const r = await fetch(`${AZURA_URL}/api/station/${AZURA_STATION}/playlists`, {
+      headers: { 'X-API-Key': AZURA_KEY },
+    });
+    return c.json(await r.json(), r.status);
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500);
   }
+});
 
-  // 3. Count playlists and check orphaned track refs
-  const playlists = await kv.getByPrefix('playlist:');
-  checks.push(`${playlists.length} playlists`);
-  const trackIds = new Set(tracks.map((t: any) => t.id));
-  let orphanCount = 0;
-  for (const pl of playlists) {
-    const ids: string[] = (pl as any).trackIds || [];
-    orphanCount += ids.filter(id => !trackIds.has(id)).length;
+// POST create playlist in AzuraCast
+app.post('/make-server-06086aa3/azuracast/playlists', requireAuth, async (c) => {
+  try {
+    const body = await c.req.json();
+    const r = await fetch(`${AZURA_URL}/api/station/${AZURA_STATION}/playlist`, {
+      method: 'POST',
+      headers: azuraHeaders(),
+      body: JSON.stringify(body),
+    });
+    return c.json(await r.json(), r.status);
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500);
   }
-  if (orphanCount > 0) {
-    hasIssue = true;
-    issueDetail = `${orphanCount} orphaned track references in playlists`;
-    checks.push(`⚠ ${issueDetail}`);
+});
 
-    // Auto-fix: remove orphans from playlists
-    for (const pl of playlists) {
-      const p = pl as any;
-      const orig = p.trackIds || [];
-      const cleaned = orig.filter((id: string) => trackIds.has(id));
-      if (cleaned.length < orig.length) {
-        p.trackIds = cleaned;
-        await kv.set(`playlist:${p.id}`, p);
-      }
-    }
-    checks.push(`✓ Auto-cleaned orphaned references from playlists`);
-  } else {
-    checks.push(`No orphaned track references`);
+// PUT update playlist in AzuraCast
+app.put('/make-server-06086aa3/azuracast/playlists/:id', requireAuth, async (c) => {
+  try {
+    const id = c.req.param('id');
+    const body = await c.req.json();
+    const r = await fetch(`${AZURA_URL}/api/station/${AZURA_STATION}/playlist/${id}`, {
+      method: 'PUT',
+      headers: azuraHeaders(),
+      body: JSON.stringify(body),
+    });
+    return c.json(await r.json(), r.status);
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500);
   }
+});
 
-  // 4. Check schedule slots
-  const schedules = await kv.getByPrefix('schedule:');
-  checks.push(`${schedules.length} schedule slots`);
-
-  // 5. Check KV key count
-  const allLogs = await kv.getByPrefix('auditlog:');
-  checks.push(`${allLogs.length} audit log entries`);
-
-  return {
-    title: 'Backend data integrity check',
-    description: `Validated ${tracks.length} tracks, ${playlists.length} playlists, ${schedules.length} schedule slots`,
-    details: checks.join('\n'),
-    category: 'Data Integrity',
-    status: hasIssue ? (orphanCount > 0 ? 'warning' : 'error') : 'success',
-    metrics: { tracks: tracks.length, playlists: playlists.length, schedules: schedules.length, orphans: orphanCount, badTracks: badTracks.length },
-  };
-}
-
-async function checkDevOps(): Promise<any> {
-  const checks: string[] = [];
-  let hasIssue = false;
-
-  // 1. Check storage buckets
-  const { data: buckets, error: bucketsErr } = await supabase.storage.listBuckets();
-  if (bucketsErr) {
-    return {
-      title: 'Storage health check failed',
-      description: 'Unable to list storage buckets',
-      details: bucketsErr.message,
-      category: 'Infrastructure',
-      status: 'error',
-    };
+// DELETE playlist from AzuraCast
+app.delete('/make-server-06086aa3/azuracast/playlists/:id', requireAuth, async (c) => {
+  try {
+    const id = c.req.param('id');
+    const r = await fetch(`${AZURA_URL}/api/station/${AZURA_STATION}/playlist/${id}`, {
+      method: 'DELETE',
+      headers: { 'X-API-Key': AZURA_KEY },
+    });
+    const text = await r.text();
+    return c.json(text ? JSON.parse(text) : { success: true }, r.status);
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500);
   }
+});
 
-  const expectedBuckets = ['make-06086aa3-tracks', 'make-06086aa3-covers', 'make-06086aa3-jingles'];
-  const existingNames = buckets?.map(b => b.name) || [];
+// PUT assign tracks to playlist (replaces entire playlist contents)
+app.put('/make-server-06086aa3/azuracast/playlists/:id/tracks', requireAuth, async (c) => {
+  try {
+    const id = c.req.param('id');
+    const { trackIds } = await c.req.json(); // number[]
+    const r = await fetch(`${AZURA_URL}/api/station/${AZURA_STATION}/playlist/${id}/files`, {
+      method: 'PUT',
+      headers: azuraHeaders(),
+      body: JSON.stringify(trackIds),
+    });
+    const text = await r.text();
+    return c.json(text ? JSON.parse(text) : { success: true }, r.status);
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500);
+  }
+});
 
-  for (const expected of expectedBuckets) {
-    if (existingNames.includes(expected)) {
-      checks.push(`✓ Bucket "${expected}" exists`);
+// POST toggle playlist enable/disable
+app.post('/make-server-06086aa3/azuracast/playlists/:id/toggle', requireAuth, async (c) => {
+  try {
+    const id = c.req.param('id');
+    const r = await fetch(`${AZURA_URL}/api/station/${AZURA_STATION}/playlist/${id}/toggle`, {
+      headers: { 'X-API-Key': AZURA_KEY },
+    });
+    return c.json(await r.json(), r.status);
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500);
+  }
+});
 
-      // Check bucket contents
-      const { data: files } = await supabase.storage.from(expected).list('', { limit: 1000 });
-      const fileCount = files?.length || 0;
-      checks.push(`  → ${fileCount} files`);
+// POST upload audio file to AzuraCast
+app.post('/make-server-06086aa3/azuracast/upload', requireAuth, async (c) => {
+  try {
+    const formData = await c.req.formData();
+    const file = formData.get('file') as File | null;
+    if (!file) return c.json({ error: 'No file provided' }, 400);
+
+    const fd = new FormData();
+    fd.append('file', file, file.name);
+
+    const r = await fetch(`${AZURA_URL}/api/station/${AZURA_STATION}/files`, {
+      method: 'POST',
+      headers: { 'X-API-Key': AZURA_KEY },
+      body: fd,
+    });
+    const data = await r.json();
+    return c.json(data, r.status);
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500);
+  }
+});
+
+// POST skip to next track in AzuraCast
+app.post('/make-server-06086aa3/azuracast/skip', requireAuth, async (c) => {
+  try {
+    const r = await fetch(`${AZURA_URL}/api/station/${AZURA_STATION}/backend/skip`, {
+      method: 'POST',
+      headers: { 'X-API-Key': AZURA_KEY },
+    });
+    const text = await r.text();
+    return c.json(text ? JSON.parse(text) : { success: true }, r.status);
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500);
+  }
+});
+
+// GET now playing info (PUBLIC — no auth, used by RadioPlayer & BroadcastControl)
+app.get('/make-server-06086aa3/azuracast/nowplaying', async (c) => {
+  try {
+    const r = await fetch(`${AZURA_URL}/api/nowplaying/${AZURA_STATION}`);
+    const data = await r.json();
+    return c.json(data, r.status);
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500);
+  }
+});
+
+// POST station backend/frontend actions (restart, skip, etc.)
+app.post('/make-server-06086aa3/azuracast/station/:action', requireAuth, async (c) => {
+  try {
+    const action = c.req.param('action');
+    // Map action name to AzuraCast endpoint
+    let endpoint: string;
+    if (action === 'restart') {
+      endpoint = `${AZURA_URL}/api/station/${AZURA_STATION}/restart`;
+    } else if (action === 'skip') {
+      endpoint = `${AZURA_URL}/api/station/${AZURA_STATION}/backend/skip`;
+    } else if (action === 'disconnect') {
+      endpoint = `${AZURA_URL}/api/station/${AZURA_STATION}/disconnect`;
     } else {
-      hasIssue = true;
-      checks.push(`✗ Bucket "${expected}" MISSING`);
+      return c.json({ error: 'Unknown action' }, 400);
     }
+    const r = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'X-API-Key': AZURA_KEY },
+    });
+    const text = await r.text();
+    return c.json(text ? JSON.parse(text) : { success: true }, r.status);
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500);
   }
-
-  // 2. Check bucket public configs
-  for (const b of buckets || []) {
-    if (b.name.startsWith('make-06086aa3')) {
-      if (!b.public) {
-        hasIssue = true;
-        checks.push(`⚠ Bucket "${b.name}" is not public — fixing...`);
-        await supabase.storage.updateBucket(b.name, { public: true });
-        checks.push(`✓ Fixed bucket "${b.name}" → public`);
-      }
-    }
-  }
-
-  checks.push(`Total storage buckets: ${buckets?.length || 0}`);
-
-  return {
-    title: 'Infrastructure & storage health check',
-    description: `Checked ${expectedBuckets.length} critical buckets, ${buckets?.length || 0} total`,
-    details: checks.join('\n'),
-    category: 'Infrastructure',
-    status: hasIssue ? 'warning' : 'success',
-    metrics: { totalBuckets: buckets?.length || 0, expected: expectedBuckets.length, missing: expectedBuckets.filter(e => !existingNames.includes(e)).length },
-  };
-}
-
-async function checkQA(): Promise<any> {
-  const checks: string[] = [];
-  let errorCount = 0;
-
-  // 1. Validate track schemas
-  const tracks = await kv.getByPrefix('track:');
-  let missingAudio = 0;
-  let missingTitle = 0;
-  let missingDuration = 0;
-
-  for (const t of tracks) {
-    const track = t as any;
-    if (!track.title) missingTitle++;
-    if (!track.audioUrl && !track.storageBucket) missingAudio++;
-    if (!track.duration && track.duration !== 0) missingDuration++;
-  }
-
-  if (missingTitle > 0) { errorCount++; checks.push(`✗ ${missingTitle} tracks without title`); }
-  else checks.push(`✓ All ${tracks.length} tracks have titles`);
-
-  if (missingAudio > 0) { checks.push(`⚠ ${missingAudio} tracks without audio source`); }
-  else checks.push(`✓ All tracks have audio source`);
-
-  if (missingDuration > 0) { checks.push(`⚠ ${missingDuration} tracks without duration metadata`); }
-  else checks.push(`✓ All tracks have duration metadata`);
-
-  // 2. Check playlist consistency
-  const playlists = await kv.getByPrefix('playlist:');
-  let emptyPlaylists = 0;
-  for (const pl of playlists) {
-    if (!((pl as any).trackIds?.length > 0)) emptyPlaylists++;
-  }
-  if (emptyPlaylists > 0) checks.push(`⚠ ${emptyPlaylists} empty playlists`);
-  else checks.push(`✓ All ${playlists.length} playlists have tracks`);
-
-  // 3. Check branding config exists
-  const branding = await kv.get('branding:config');
-  if (branding) checks.push(`✓ Branding config present`);
-  else { checks.push(`⚠ No branding config found`); }
-
-  // 4. Validate schedule slots have valid playlist refs
-  const schedules = await kv.getByPrefix('schedule:');
-  const playlistIds = new Set(playlists.map((p: any) => p.id));
-  let invalidSchedules = 0;
-  for (const s of schedules) {
-    const slot = s as any;
-    if (slot.playlistId && !playlistIds.has(slot.playlistId)) invalidSchedules++;
-  }
-  if (invalidSchedules > 0) {
-    errorCount++;
-    checks.push(`✗ ${invalidSchedules} schedule slots reference non-existent playlists`);
-  } else {
-    checks.push(`✓ All schedule slots reference valid playlists`);
-  }
-
-  return {
-    title: 'QA regression test suite',
-    description: `Tested ${tracks.length} tracks, ${playlists.length} playlists, ${schedules.length} schedules`,
-    details: checks.join('\n'),
-    category: 'Quality Assurance',
-    status: errorCount > 0 ? 'error' : (missingAudio + missingDuration + emptyPlaylists > 0 ? 'warning' : 'success'),
-    metrics: { tracks: tracks.length, missingAudio, missingTitle, missingDuration, emptyPlaylists, invalidSchedules },
-  };
-}
-
-async function checkFrontend(): Promise<any> {
-  const checks: string[] = [];
-
-  // 1. Check branding config consistency
-  const branding: any = await kv.get('branding:config');
-  if (branding) {
-    checks.push(`✓ Station name: "${branding.stationName || 'Soul FM Hub'}"`);
-    if (branding.primaryColor) checks.push(`✓ Primary color: ${branding.primaryColor}`);
-    if (branding.fontFamily) checks.push(`✓ Font: ${branding.fontFamily}`);
-  } else {
-    checks.push(`⚠ No branding config — using defaults`);
-  }
-
-  // 2. Check tracks have cover art
-  const tracks = await kv.getByPrefix('track:');
-  const noCover = tracks.filter((t: any) => !t.coverUrl).length;
-  if (noCover > 0) {
-    checks.push(`⚠ ${noCover}/${tracks.length} tracks without cover art`);
-  } else {
-    checks.push(`✓ All ${tracks.length} tracks have cover art`);
-  }
-
-  // 3. Check feedback entries
-  const feedback = await kv.getByPrefix('feedback:');
-  const unreadFeedback = feedback.filter((f: any) => !f.read).length;
-  checks.push(`📬 ${feedback.length} feedback entries (${unreadFeedback} unread)`);
-
-  // 4. Component audit — check AI team member data
-  const members = await kv.getByPrefix('ai-team:member:');
-  const incompleteBios = members.filter((m: any) => !m.bio || m.bio.length < 10).length;
-  if (incompleteBios > 0) {
-    checks.push(`⚠ ${incompleteBios} team members with incomplete bios`);
-  } else {
-    checks.push(`✓ All ${members.length} team members have complete profiles`);
-  }
-
-  return {
-    title: 'Frontend component & branding audit',
-    description: `Audited branding, ${tracks.length} track covers, ${feedback.length} feedback items`,
-    details: checks.join('\n'),
-    category: 'Frontend Audit',
-    status: noCover > 3 ? 'warning' : 'success',
-    metrics: { tracksWithoutCover: noCover, totalTracks: tracks.length, feedbackTotal: feedback.length, unreadFeedback },
-  };
-}
-
-async function checkUX(): Promise<any> {
-  const checks: string[] = [];
-
-  // 1. Design consistency — check if branding uses expected palette
-  const branding: any = await kv.get('branding:config');
-  if (branding?.primaryColor) {
-    const isOnBrand = branding.primaryColor.toLowerCase().includes('00d9ff') || branding.primaryColor.toLowerCase().includes('00ffaa');
-    checks.push(isOnBrand ? `✓ Primary color on-brand (${branding.primaryColor})` : `⚠ Primary color off-brand: ${branding.primaryColor}`);
-  } else {
-    checks.push(`✓ Using default cyan/mint palette`);
-  }
-
-  // 2. User flow — check media library has content
-  const tracks = await kv.getByPrefix('track:');
-  const playlists = await kv.getByPrefix('playlist:');
-  if (tracks.length === 0) {
-    checks.push(`⚠ Media library empty — poor user experience`);
-  } else {
-    checks.push(`✓ Media library has ${tracks.length} tracks for playback`);
-  }
-
-  if (playlists.length === 0) {
-    checks.push(`⚠ No playlists — consider creating default playlist`);
-  } else {
-    checks.push(`✓ ${playlists.length} playlists available`);
-  }
-
-  // 3. Accessibility — check all tracks have readable titles
-  const longTitles = tracks.filter((t: any) => t.title && t.title.length > 80).length;
-  if (longTitles > 0) checks.push(`⚠ ${longTitles} tracks with overly long titles (>80 chars)`);
-  else checks.push(`✓ All track titles have appropriate length`);
-
-  // 4. User engagement — song requests and shoutouts
-  const requests = await kv.getByPrefix('song-request:');
-  const shoutouts = await kv.getByPrefix('shoutout:');
-  checks.push(`📊 ${requests.length} song requests, ${shoutouts.length} shoutouts (engagement data)`);
-
-  return {
-    title: 'UX & accessibility audit',
-    description: `Reviewed design system, media library UX, accessibility standards`,
-    details: checks.join('\n'),
-    category: 'UX Design',
-    status: tracks.length === 0 ? 'warning' : 'success',
-    metrics: { tracks: tracks.length, playlists: playlists.length, requests: requests.length, shoutouts: shoutouts.length },
-  };
-}
-
-async function checkTeamLead(): Promise<any> {
-  const checks: string[] = [];
-
-  // 1. Overall system health
-  const tracks = await kv.getByPrefix('track:');
-  const playlists = await kv.getByPrefix('playlist:');
-  const tasks = await kv.getByPrefix('ai-team:task:');
-  const members = await kv.getByPrefix('ai-team:member:');
-
-  checks.push(`📊 System overview:`);
-  checks.push(`  Tracks: ${tracks.length}`);
-  checks.push(`  Playlists: ${playlists.length}`);
-  checks.push(`  AI Tasks: ${tasks.length}`);
-  checks.push(`  Team Members: ${members.length}`);
-
-  // 2. Sprint progress
-  const done = tasks.filter((t: any) => t.status === 'done').length;
-  const inProgress = tasks.filter((t: any) => t.status === 'in-progress').length;
-  const backlog = tasks.filter((t: any) => t.status === 'backlog').length;
-  const sprintProgress = tasks.length > 0 ? Math.round((done / tasks.length) * 100) : 0;
-  checks.push(`\n🏃 Sprint: ${sprintProgress}% complete`);
-  checks.push(`  Done: ${done} | In Progress: ${inProgress} | Backlog: ${backlog}`);
-
-  // 3. Critical/high tasks check
-  const critical = tasks.filter((t: any) => t.priority === 'critical' && t.status !== 'done').length;
-  const high = tasks.filter((t: any) => t.priority === 'high' && t.status !== 'done').length;
-  if (critical > 0) checks.push(`⚠ ${critical} critical tasks still open!`);
-  if (high > 0) checks.push(`⚠ ${high} high-priority tasks pending`);
-  if (critical === 0 && high === 0) checks.push(`✓ No critical/high priority issues`);
-
-  // 4. Team status
-  const online = members.filter((m: any) => m.status === 'online').length;
-  checks.push(`\n👥 Team: ${online}/${members.length} online`);
-
-  // 5. Autopilot task ratio
-  const autopilotTasks = tasks.filter((t: any) => t.autopilot);
-  const apSuccess = autopilotTasks.filter((t: any) => t.status === 'done').length;
-  const apErrors = autopilotTasks.filter((t: any) => t.autopilotResult === 'error' || t.autopilotResult === 'rework').length;
-  if (autopilotTasks.length > 0) {
-    checks.push(`\n🤖 Autopilot tasks: ${autopilotTasks.length} (✓${apSuccess} ✗${apErrors})`);
-  }
-
-  return {
-    title: 'Team Lead system health review',
-    description: `Sprint ${sprintProgress}% done, ${online}/${members.length} online, ${tracks.length} tracks in library`,
-    details: checks.join('\n'),
-    category: 'Leadership Review',
-    status: critical > 0 ? 'warning' : 'success',
-    metrics: { sprintProgress, done, inProgress, backlog, critical, high, online, totalMembers: members.length },
-  };
-}
-
-async function checkGeneric(member: any): Promise<any> {
-  return {
-    title: `${member.role} routine check`,
-    description: `${member.name} performed a routine system check`,
-    details: `Standard check cycle by ${member.name} (${member.role})`,
-    category: 'General',
-    status: 'success' as const,
-  };
-}
+});
 
 // Run admin check on startup
 console.log('🚀 Starting Soul FM Hub server...');
 await initializeStorageBuckets();
 await ensureSuperAdmin();
-
-// ── Migration: clear stale/broken configs (kimi 401 + invalid models + nico → Gemini 2.5 Pro) ──
-try {
-  const INVALID_MODELS = ["gemini-2.5-flash-preview-05-20", "gemini-2.5-pro-preview-06-05", "gemini-2.5-flash-preview-04-17", "claude-sonnet-4-6-20260210"];
-  // Include ALL agents including nico — nico's KV config might need migration
-  for (const agentId of ["nico", "liana", "mark", "den", "stella", "sandra", "max"]) {
-    const cfg = await getAgentAIConfig(agentId);
-    const needsReset =
-      cfg.provider === "kimi" ||
-      INVALID_MODELS.includes(cfg.model) ||
-      // Reset nico if still on old mistral or anthropic config → migrate to gemini/gemini-2.5-pro
-      (agentId === "nico" && cfg.provider === "mistral") ||
-      (agentId === "nico" && cfg.provider === "anthropic") ||
-      (agentId === "nico" && cfg.model === "mistral-agent");
-    if (needsReset) {
-      console.log(`🔄 Migration: resetting ${agentId} (${cfg.provider}/${cfg.model}) → default (${agentId === 'nico' ? 'gemini/gemini-2.5-pro' : 'gemini/gemini-2.0-flash'})`);
-      await deleteAgentAIConfig(agentId);
-    }
-  }
-  console.log('✅ AI provider migration check completed');
-} catch (e: any) {
-  console.error("Migration error (non-fatal):", e.message);
-}
-
 console.log('🎵 Server ready!');
 
 Deno.serve(app.fetch);
