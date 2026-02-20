@@ -61,7 +61,7 @@ export const api = {
   // Auth
   async signUp(email: string, password: string, name: string, role: string = 'listener') {
     console.log('[API] Signing up:', { email, name, role });
-    
+
     try {
       const headers = await getPublicHeaders();
       const response = await fetchWithRetry(`${API_BASE}/auth/signup`, {
@@ -69,19 +69,19 @@ export const api = {
         headers,
         body: JSON.stringify({ email, password, name, role }),
       });
-      
+
       console.log('[API] Signup response status:', response.status, response.statusText);
-      
+
       const data = await response.json();
       console.log('[API] Signup response data:', data);
-      
+
       if (!response.ok || data.error) {
         const errorMsg = data.error || `Signup failed with status ${response.status}: ${response.statusText}`;
         console.error('[API] Signup failed:', errorMsg);
         console.error('[API] Full error details:', JSON.stringify(data, null, 2));
         return { data: null, error: new Error(errorMsg) };
       }
-      
+
       // Now sign in automatically
       console.log('[API] Auto-signing in after signup');
       const signInResult = await this.signIn(email, password);
@@ -89,7 +89,7 @@ export const api = {
         console.error('[API] Auto sign-in failed:', signInResult.error);
         return { data: null, error: signInResult.error };
       }
-      
+
       console.log('[API] Signup and auto-login successful!');
       return { data: signInResult.data, error: null };
     } catch (error: any) {
@@ -206,12 +206,18 @@ export const api = {
   },
 
   async deleteTrack(id: string) {
-    const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/tracks/${id}`, {
+    // Delete from Hostinger Direct API instead of Supabase Core
+    console.log(`[API] Deleting track via Hostinger API: ${id}`);
+    const response = await fetchWithRetry(`https://api.soul-fm.com/delete/${id}`, {
       method: 'DELETE',
-      headers,
+      headers: {
+        'Authorization': 'Bearer secret_soul_upload_token_123'
+      },
     });
-    return response.json();
+    if (!response.ok) {
+      console.error('[API] deleteTrack failed:', response.status);
+    }
+    return response.ok;
   },
 
   async bulkUpdateTags(trackIds: string[], options: { action: 'add' | 'remove' | 'replace'; tags: string[] }) {
@@ -228,7 +234,7 @@ export const api = {
     const token = await getAccessToken();
     const formData = new FormData();
     formData.append('cover', coverFile);
-    
+
     const response = await fetchWithRetry(`${API_BASE}/tracks/${trackId}/cover`, {
       method: 'POST',
       headers: {
@@ -483,51 +489,30 @@ export const api = {
     return response.json();
   },
 
-  // Track Upload with File — 3-step: signed URL → direct Storage upload → server processing
+  // Track Upload with File — Direct to Hostinger API
   async uploadTrackFile(formData: FormData, onProgress?: (progress: number) => void) {
-    const accessToken = await getAccessToken();
     const file = formData.get('file') as File;
     if (!file) throw new Error('No file provided');
 
-    // Step 1: Get a signed upload URL from the server (small JSON request)
-    onProgress?.(1);
-    console.log('[API] Step 1: Getting signed upload URL...');
-    const urlResponse = await fetchWithRetry(`${API_BASE}/tracks/get-upload-url`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${accessToken}`,
-      },
-      body: JSON.stringify({
-        originalFilename: file.name,
-        contentType: file.type || 'audio/mpeg',
-      }),
-    });
+    // Default config values for the Hostinger upload
+    // In a full implementation, the playlistId would be passed in the formData from the frontend component
+    const playlistId = formData.get('playlist_id') || 'unassigned';
+    const playlistName = formData.get('playlist_name') || 'Uncategorized';
 
-    if (!urlResponse.ok) {
-      const errText = await urlResponse.text().catch(() => urlResponse.statusText);
-      console.error('[API] Step 1 failed:', urlResponse.status, errText);
-      throw new Error(`Failed to get upload URL (${urlResponse.status}): ${errText}`);
-    }
+    // Ensure they are in the formData for the Hostinger API
+    if (!formData.has('playlist_id')) formData.append('playlist_id', playlistId);
+    if (!formData.has('playlist_name')) formData.append('playlist_name', playlistName);
 
-    const urlData = await urlResponse.json();
-    if (urlData.error) throw new Error(urlData.error);
-
-    const { signedUrl, token: uploadToken, filename, bucket } = urlData;
-    console.log('[API] Signed URL received for:', filename);
+    console.log('[API] Uploading directly to Hostinger API...', { playlistName });
     onProgress?.(5);
 
-    // Step 2: Upload file directly to Supabase Storage via signed URL (XHR for progress)
-    // IMPORTANT: Supabase Kong gateway requires the `apikey` header for ALL requests
-    console.log('[API] Step 2: Uploading file directly to Storage...');
-    await new Promise<void>((resolve, reject) => {
+    return new Promise<any>((resolve, reject) => {
       const xhr = new XMLHttpRequest();
 
       if (onProgress) {
         xhr.upload.addEventListener('progress', (e) => {
           if (e.lengthComputable) {
-            // Map 0-100% upload to 5-80% progress
-            const pct = Math.round(5 + (e.loaded / e.total) * 75);
+            const pct = Math.round(5 + (e.loaded / e.total) * 90);
             onProgress(pct);
           }
         });
@@ -535,74 +520,34 @@ export const api = {
 
       xhr.addEventListener('load', () => {
         if (xhr.status >= 200 && xhr.status < 300) {
-          console.log('[API] File uploaded to Storage successfully, status:', xhr.status);
-          onProgress?.(80);
-          resolve();
+          try {
+            const response = JSON.parse(xhr.responseText);
+            console.log('[API] Hostinger upload successful', response);
+            onProgress?.(100);
+            resolve(response);
+          } catch (e) {
+            resolve({ success: true, message: 'Upload completed but response parse failed' });
+          }
         } else {
-          console.error('[API] Storage upload failed:', xhr.status, xhr.responseText);
-          let errMsg = `Storage upload failed (${xhr.status})`;
+          console.error('[API] Hostinger upload failed:', xhr.status, xhr.responseText);
+          let errMsg = `Upload failed (${xhr.status})`;
           try {
             const errBody = JSON.parse(xhr.responseText);
-            errMsg = errBody.error || errBody.message || errMsg;
-          } catch {}
+            errMsg = errBody.detail || errBody.message || errMsg;
+          } catch { }
           reject(new Error(errMsg));
         }
       });
 
-      xhr.addEventListener('error', () => {
-        console.error('[API] Storage upload network error');
-        reject(new Error('Network error during file upload to Storage'));
-      });
+      xhr.addEventListener('error', () => reject(new Error('Network error during file upload')));
+      xhr.addEventListener('abort', () => reject(new Error('Upload cancelled')));
+      xhr.timeout = 120000;
+      xhr.addEventListener('timeout', () => reject(new Error('Upload timed out')));
 
-      xhr.addEventListener('abort', () => {
-        reject(new Error('Upload cancelled'));
-      });
-
-      xhr.timeout = 120000; // 2 min timeout for large files
-      xhr.addEventListener('timeout', () => {
-        reject(new Error('Upload timed out (120s)'));
-      });
-
-      xhr.open('PUT', signedUrl);
-      // Supabase Kong gateway requires apikey header for all requests
-      xhr.setRequestHeader('apikey', publicAnonKey);
-      xhr.setRequestHeader('Authorization', `Bearer ${publicAnonKey}`);
-      xhr.setRequestHeader('Content-Type', file.type || 'audio/mpeg');
-      xhr.send(file);
+      xhr.open('POST', 'https://api.soul-fm.com/upload');
+      xhr.setRequestHeader('Authorization', 'Bearer secret_soul_upload_token_123');
+      xhr.send(formData);
     });
-
-    // Step 3: Ask server to process the uploaded file (metadata extraction, track creation)
-    console.log('[API] Step 3: Processing uploaded file...');
-    onProgress?.(85);
-
-    const processResponse = await fetchWithRetry(`${API_BASE}/tracks/process`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${accessToken}`,
-      },
-      body: JSON.stringify({
-        filename,
-        bucket,
-        originalFilename: file.name,
-        position: formData.get('position') || 'end',
-        autoAddToLiveStream: formData.get('autoAddToLiveStream') === 'true',
-        generateWaveform: formData.get('generateWaveform') === 'true',
-      }),
-    }, 2, 2000, 45000); // 2 retries, 2s backoff, 45s timeout for metadata processing
-
-    if (!processResponse.ok) {
-      const errText = await processResponse.text().catch(() => processResponse.statusText);
-      console.error('[API] Step 3 failed:', processResponse.status, errText);
-      throw new Error(`Track processing failed (${processResponse.status}): ${errText}`);
-    }
-
-    const result = await processResponse.json();
-    if (result.error) throw new Error(result.error);
-
-    onProgress?.(100);
-    console.log('[API] Track upload complete:', result.track?.title);
-    return result;
   },
 
   // Podcasts
