@@ -17,7 +17,7 @@ import {
   Linkedin,
   Github
 } from 'lucide-react';
-const soulFmLogo = '/favicon.ico'; // Automatically fixed figma asset import
+const soulFmLogo = '/favicon.ico';
 import { AnimatedBeach } from './AnimatedBeach';
 import { AnimatedWaves } from './AnimatedWaves';
 

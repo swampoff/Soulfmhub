@@ -34,7 +34,7 @@ import {
   Clapperboard,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-const soulFmLogo = '/favicon.ico'; // Automatically fixed figma asset import
+const soulFmLogo = '/favicon.ico';
 
 // ── All admin navigation items, organized by group ──────────────────
 

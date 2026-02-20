@@ -3,7 +3,7 @@ import { Link } from 'react-router';
 import { Button } from '../components/ui/button';
 import { Home, Radio, ArrowLeft, Headphones, Music } from 'lucide-react';
 import { motion } from 'motion/react';
-const soulFmLogo = '/favicon.ico'; // Automatically fixed figma asset import
+const soulFmLogo = '/favicon.ico';
 
 export function NotFoundPage() {
   return (
