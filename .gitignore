@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Build output
+dist/
+.vite/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Figma exported assets (hash-named files from Figma Dev Mode)
+# These are managed via public/assets/ with readable names instead
+src/assets/*.png
+src/assets/*.jpg
+src/assets/*.jpeg
+src/assets/*.svg
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -10,13 +10,13 @@ import { api } from '../../../lib/api';
 import { AdminLayout } from '../../components/admin/AdminLayout';
 
 // Figma assets
-import sandraPhoto from 'figma:asset/e895abb63b9f55d693a63dd7c002a242a3192b85.png';
-import lianaPhoto from 'figma:asset/b588af1e64b5cf5211ec15bac00b66a0ac0e5986.png';
-import denPhoto from 'figma:asset/30c1c79a63080cd59ff8ce73c2d420b2a94316e6.png';
-import nicoPhoto from 'figma:asset/2bcd2a7b9863e5b63f9a6dba11123e60aa992bd0.png';
-import markPhoto from 'figma:asset/31a289e2e77360c47a1716aa8258585bf84fdc26.png';
-import maxPhoto from 'figma:asset/1acbab53f0d84ffe4dcfda26ea3acba417d76402.png';
-import stellaPhoto from 'figma:asset/110f38099480aa93fa51ce4d7cb3ddcf76695405.png';
+const sandraPhoto = '/assets/avatar-sandra.png';
+const lianaPhoto = '/assets/avatar-liana.png';
+const denPhoto = '/assets/avatar-den.png';
+const nicoPhoto = '/assets/avatar-nico.png';
+const markPhoto = '/assets/avatar-mark.png';
+const maxPhoto = '/assets/avatar-max.png';
+const stellaPhoto = '/assets/avatar-stella.png';
 
 const AGENTS = [
   { id: 'nico', name: 'Nico Steel', role: 'Программный Директор', photo: nicoPhoto, color: '#94a3b8', emoji: '🎬', area: 'Координация, стратегия, анализ эфира' },
