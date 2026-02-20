@@ -10,7 +10,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from './ui/dropdown-menu';
-import soulFmLogo from 'figma:asset/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png';
+const soulFmLogo = '/assets/soul-fm-logo.png';
 import { RealtimeConnectionStatus } from './RealtimeConnectionStatus';
 
 export function Navigation() {
