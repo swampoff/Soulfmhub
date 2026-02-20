@@ -12,6 +12,9 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
+      find: /^figma:asset\/(.*)/,
+      replacement: path.resolve(__dirname, "./public/assets/niko-avatar.png"),
+    }, {
       // Alias @ to the src directory
       '@': path.resolve(__dirname, './src'),
     },
