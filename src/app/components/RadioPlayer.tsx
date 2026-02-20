@@ -4,7 +4,7 @@ import { Button } from './ui/button';
 import { Slider } from './ui/slider';
 import { useApp } from '../../context/AppContext';
 import { motion, AnimatePresence } from 'motion/react';
-import soulFmLogo from 'figma:asset/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png';
+const soulFmLogo = '/assets/soulfm-logo.png';
 import { RealtimeIndicator } from './RealtimeIndicator';
 import { api } from '../../lib/api';
 import { supabase } from '../../lib/supabase';
@@ -54,6 +54,51 @@ export function RadioPlayer() {
   // Metadata State from API (Supabase)
   const [streamState, setStreamState] = useState<StreamState | null>(null);
   const [simulatedElapsed, setSimulatedElapsed] = useState(0);
+
+
+
+  // ── AzuraCast NowPlaying polling ──
+  const [azuraTrack, setAzuraTrack] = useState<{ title: string; artist: string; art: string | null } | null>(null);
+
+  useEffect(() => {
+    if (!isPlaying) return;
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const res = await fetch("https://stream.soul-fm.com/api/nowplaying/1");
+        if (!res.ok) {
+          // fallback to direct IP
+          const res2 = await fetch("http://187.77.85.42/api/nowplaying/1");
+          if (res2.ok) {
+            const data = await res2.json();
+            if (!cancelled && data?.now_playing?.song) {
+              setAzuraTrack({
+                title: data.now_playing.song.title || "Unknown",
+                artist: data.now_playing.song.artist || "Soul FM",
+                art: data.now_playing.song.art || null,
+              });
+            }
+          }
+          return;
+        }
+        const data = await res.json();
+        if (!cancelled && data?.now_playing?.song) {
+          setAzuraTrack({
+            title: data.now_playing.song.title || "Unknown",
+            artist: data.now_playing.song.artist || "Soul FM",
+            art: data.now_playing.song.art || null,
+          });
+        }
+      } catch (e) {
+        // silent fail – metadata is optional
+      }
+    };
+
+    poll();
+    const interval = setInterval(poll, 10000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [isPlaying]);
 
   // Initialize Web Audio API for visualizer
   const initAudioData = useCallback(() => {
@@ -372,10 +417,10 @@ export function RadioPlayer() {
                   )}
                 </div>
                 <div className="text-base font-bold text-white truncate mb-0.5">
-                  {displayTrack?.title || 'Soul FM Live'}
+                  {azuraTrack?.title || displayTrack?.title || 'Soul FM Live'}
                 </div>
                 <div className="text-sm text-gray-400 truncate">
-                  {displayTrack?.artist || 'Press play to enter the stream'}
+                  {azuraTrack?.artist || displayTrack?.artist || 'Press play to enter the stream'}
                 </div>
               </div>
 
