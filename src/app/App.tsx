@@ -3,7 +3,7 @@ import { RouterProvider } from 'react-router';
 import { AppProvider } from '../context/AppContext';
 import { router } from './routes';
 import { Button } from './components/ui/button';
-import soulFmLogo from 'figma:asset/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png';
+const soulFmLogo = '/favicon.ico'; // Updated to avoid Vercel build break
 
 // ── Error Boundary Component ─────────────────────────────────────────
 class ErrorBoundary extends Component<
