@@ -9,23 +9,25 @@ import { toast } from 'sonner';
 import { api } from '../../../lib/api';
 import { AdminLayout } from '../../components/admin/AdminLayout';
 
-// Figma assets
-const sandraPhoto = '/favicon.ico'; // Automatically fixed figma asset import
-const lianaPhoto = '/favicon.ico'; // Automatically fixed figma asset import
-const denPhoto = '/favicon.ico'; // Automatically fixed figma asset import
-const nicoPhoto = '/favicon.ico'; // Automatically fixed figma asset import
-const markPhoto = '/favicon.ico'; // Automatically fixed figma asset import
-const maxPhoto = '/favicon.ico'; // Automatically fixed figma asset import
-const stellaPhoto = '/favicon.ico'; // Automatically fixed figma asset import
+// Team member photos
+const TEAM_PHOTOS: Record<string, string> = {
+  sandra: '/assets/team/sandra.svg',
+  liana: '/assets/team/liana.svg',
+  den: '/assets/team/den.svg',
+  nico: '/assets/team/nico.svg',
+  mark: '/assets/team/mark.svg',
+  max: '/assets/team/max.svg',
+  stella: '/assets/team/stella.svg',
+};
 
 const AGENTS = [
-  { id: 'nico', name: 'Nico Steel', role: 'Программный Директор', photo: nicoPhoto, color: '#94a3b8', emoji: '🎬', area: 'Координация, стратегия, анализ эфира' },
-  { id: 'sandra', name: 'Sandra Ray', role: 'Певица / Вокалистка', photo: sandraPhoto, color: '#ff69b4', emoji: '🎤', area: 'Вокал, джинглы, промо, утреннее шоу' },
-  { id: 'liana', name: 'Liana Nova', role: 'Ведущая / Диктор', photo: lianaPhoto, color: '#ff6b35', emoji: '📻', area: 'Live-шоу, интервью, интерактив' },
-  { id: 'den', name: 'Den Cipher', role: 'DJ / Муз. Директор', photo: denPhoto, color: '#00d9ff', emoji: '🎧', area: 'Миксы, плейлисты, музыкальный вектор' },
-  { id: 'mark', name: 'Mark Volt', role: 'Новости / Маркетинг', photo: markPhoto, color: '#3b82f6', emoji: '📰', area: 'Контент, промо, аналитика, рост' },
-  { id: 'max', name: 'Max Sterling', role: 'Звукоинженер', photo: maxPhoto, color: '#a855f7', emoji: '🔊', area: 'Сведение, мастеринг, новинки для ротации' },
-  { id: 'stella', name: 'Stella Vox', role: 'Редактор новостей', photo: stellaPhoto, color: '#ec4899', emoji: '✍️', area: 'Скрипты, новости, интервью, рубрики' },
+  { id: 'nico', name: 'Nico Steel', role: 'Программный Директор', photo: TEAM_PHOTOS.nico, color: '#94a3b8', emoji: '🎬', area: 'Координация, стратегия, анализ эфира' },
+  { id: 'sandra', name: 'Sandra Ray', role: 'Певица / Вокалистка', photo: TEAM_PHOTOS.sandra, color: '#ff69b4', emoji: '🎤', area: 'Вокал, джинглы, промо, утреннее шоу' },
+  { id: 'liana', name: 'Liana Nova', role: 'Ведущая / Диктор', photo: TEAM_PHOTOS.liana, color: '#ff6b35', emoji: '📻', area: 'Live-шоу, интервью, интерактив' },
+  { id: 'den', name: 'Den Cipher', role: 'DJ / Муз. Директор', photo: TEAM_PHOTOS.den, color: '#00d9ff', emoji: '🎧', area: 'Миксы, плейлисты, музыкальный вектор' },
+  { id: 'mark', name: 'Mark Volt', role: 'Новости / Маркетинг', photo: TEAM_PHOTOS.mark, color: '#3b82f6', emoji: '📰', area: 'Контент, промо, аналитика, рост' },
+  { id: 'max', name: 'Max Sterling', role: 'Звукоинженер', photo: TEAM_PHOTOS.max, color: '#a855f7', emoji: '🔊', area: 'Сведение, мастеринг, новинки для ротации' },
+  { id: 'stella', name: 'Stella Vox', role: 'Редактор новостей', photo: TEAM_PHOTOS.stella, color: '#ec4899', emoji: '✍️', area: 'Скрипты, новости, интервью, рубрики' },
 ];
 
 const TEAM_AGENTS = AGENTS.filter(a => a.id !== 'nico');
@@ -781,7 +783,7 @@ export function EditorialDepartmentPage() {
           <div className="px-5 py-4 border-b border-white/5">
             <div className="flex items-center gap-3 p-3 rounded-xl bg-gradient-to-r from-[#94a3b8]/10 to-transparent border border-[#94a3b8]/20">
               <div className="w-10 h-10 rounded-xl overflow-hidden flex-shrink-0">
-                <img src={nicoPhoto} alt="Nico" className="w-full h-full object-cover" />
+                <img src={TEAM_PHOTOS.nico} alt="Nico" className="w-full h-full object-cover" />
               </div>
               <div className="flex-1">
                 <div className="text-xs font-bold text-[#94a3b8]">Nico Steel</div>
@@ -802,7 +804,7 @@ export function EditorialDepartmentPage() {
               <div className="p-3 rounded-xl bg-gradient-to-r from-[#00d9ff]/5 to-[#00ffaa]/5 border border-[#00d9ff]/15">
                 <div className="flex items-center gap-2 mb-2">
                   <div className="w-7 h-7 rounded-lg overflow-hidden">
-                    <img src={nicoPhoto} alt="Nico" className="w-full h-full object-cover" />
+                    <img src={TEAM_PHOTOS.nico} alt="Nico" className="w-full h-full object-cover" />
                   </div>
                   <span className="text-xs font-bold text-[#94a3b8]">Резюме от Nico</span>
                 </div>

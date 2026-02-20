@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
 import { Shield, ArrowLeft, Lock, Eye, EyeOff, Radio, Headphones, Waves, Loader2, Mail, KeyRound } from 'lucide-react';
-const soulFmLogo = '/favicon.ico'; // Automatically fixed figma asset import
+const soulFmLogo = '/favicon.ico';
 import { supabase } from '../../lib/supabase';
 import { api } from '../../lib/api';
 

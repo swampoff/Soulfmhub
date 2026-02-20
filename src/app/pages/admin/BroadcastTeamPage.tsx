@@ -9,25 +9,16 @@ import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 import { api } from '../../../lib/api';
 import { AdminLayout } from '../../components/admin/AdminLayout';
-import { ImageWithFallback } from '../../components/figma/ImageWithFallback';
+import { ImageWithFallback } from '../../components/ui/ImageWithFallback';
 
-// Figma assets for broadcast team
-const sandraPhoto = '/favicon.ico'; // Automatically fixed figma asset import
-const lianaPhoto = '/favicon.ico'; // Automatically fixed figma asset import
-const denPhoto = '/favicon.ico'; // Automatically fixed figma asset import
-const nicoPhoto = '/favicon.ico'; // Automatically fixed figma asset import
-const markPhoto = '/favicon.ico'; // Automatically fixed figma asset import
-const maxPhoto = '/favicon.ico'; // Automatically fixed figma asset import
-const stellaPhoto = '/favicon.ico'; // Automatically fixed figma asset import
-
-const FIGMA_PHOTOS: Record<string, string> = {
-  sandra: sandraPhoto,
-  liana: lianaPhoto,
-  den: denPhoto,
-  nico: nicoPhoto,
-  mark: markPhoto,
-  max: maxPhoto,
-  stella: stellaPhoto,
+const TEAM_PHOTOS: Record<string, string> = {
+  sandra: '/assets/team/sandra.svg',
+  liana: '/assets/team/liana.svg',
+  den: '/assets/team/den.svg',
+  nico: '/assets/team/nico.svg',
+  mark: '/assets/team/mark.svg',
+  max: '/assets/team/max.svg',
+  stella: '/assets/team/stella.svg',
 };
 
 interface BroadcastMember {
@@ -40,7 +31,7 @@ interface BroadcastMember {
   emoji: string;
   bio: string;
   specialties: string[];
-  photoType: 'figma' | 'url';
+  photoType: 'team' | 'url';
   photoId?: string;
   photoUrl?: string;
   status: 'on-air' | 'online' | 'idle' | 'offline';
@@ -222,8 +213,8 @@ export function BroadcastTeamPage() {
                 {members.filter(m => m.status === 'on-air').map(m => (
                   <div key={m.id} className="flex items-center gap-3 bg-black/30 rounded-xl px-4 py-2.5">
                     <div className="w-10 h-10 rounded-lg overflow-hidden flex-shrink-0">
-                      {m.photoType === 'figma' && m.photoId && FIGMA_PHOTOS[m.photoId] ? (
-                        <img src={FIGMA_PHOTOS[m.photoId]} alt={m.name} className="w-full h-full object-cover" />
+                      {m.photoType === 'team' && m.photoId && TEAM_PHOTOS[m.photoId] ? (
+                        <img src={TEAM_PHOTOS[m.photoId]} alt={m.name} className="w-full h-full object-cover" />
                       ) : m.photoUrl ? (
                         <ImageWithFallback src={m.photoUrl} alt={m.name} className="w-full h-full object-cover" />
                       ) : (
@@ -271,9 +262,9 @@ export function BroadcastTeamPage() {
 
               {/* Photo + overlay */}
               <div className="relative h-52 sm:h-56 overflow-hidden">
-                {member.photoType === 'figma' && member.photoId && FIGMA_PHOTOS[member.photoId] ? (
+                {member.photoType === 'team' && member.photoId && TEAM_PHOTOS[member.photoId] ? (
                   <img
-                    src={FIGMA_PHOTOS[member.photoId]}
+                    src={TEAM_PHOTOS[member.photoId]}
                     alt={member.name}
                     className="w-full h-full object-cover object-top"
                   />

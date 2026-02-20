@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useNavigate } from 'react-router';
-const soulFmLogo = '/favicon.ico'; // Automatically fixed figma asset import
+const soulFmLogo = '/favicon.ico';
 import { AnimatedPalm } from '../components/AnimatedPalm';
 
 export function AboutPage() {

@@ -6,7 +6,7 @@ import { Play } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { api } from '../../lib/api';
 import { motion } from 'motion/react';
-const soulFmLogo = '/favicon.ico'; // Automatically fixed figma asset import
+const soulFmLogo = '/favicon.ico';
 import { FloatingParticles } from '../components/FloatingParticles';
 import { AnimatedBeach } from '../components/AnimatedBeach';
 import { AnimatedWaves } from '../components/AnimatedWaves';

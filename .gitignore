@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Build output
+dist/
+.vercel/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Figma exported assets (hash-named files)
+src/assets/[0-9a-f]*.png
+src/assets/[0-9a-f]*.jpg
+src/assets/[0-9a-f]*.svg
+
+# Generated team photo placeholders (rebuilt by prebuild script)
+public/assets/team/*.svg
+
+# Logs
+*.log
+npm-debug.log*

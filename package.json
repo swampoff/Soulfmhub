@@ -1,9 +1,10 @@
 {
-  "name": "@figma/my-make-file",
+  "name": "soulfmhub",
   "private": true,
   "version": "0.0.1",
   "type": "module",
   "scripts": {
+    "prebuild": "node scripts/optimize-assets.mjs",
     "build": "vite build",
     "dev": "vite"
   },
