@@ -1,0 +1,27 @@
+name: Deploy Edge Function
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Restore canonical Edge Function
+        run: |
+          cp supabase/functions/server/_canonical_index.tsx supabase/functions/server/index.tsx
+      
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      
+      - name: Deploy Edge Function
+        run: |
+          supabase functions deploy make-server-06086aa3 \
+            --project-ref grwrjwosnfxnzjhuqjdw \
+            --no-verify-jwt
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
