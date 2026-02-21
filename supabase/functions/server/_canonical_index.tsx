@@ -39,6 +39,17 @@ async function getStreamState(key: string): Promise<any> {
   } catch (_) { return null; }
 }
 
+// ── Base64 helper (chunked, works for large files) ──
+function toBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const chunk = 8192;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
 // ── In-memory AutoDJ state ──
 let autoDJState: any = { isPlaying: false, currentTrack: null, startTime: null };
 
@@ -266,7 +277,7 @@ app.post("/make-server-06086aa3/tracks/upload", requireAuth, async (c) => {
 
     // Upload to AzuraCast (JSON + base64)
     const arrayBuffer = await file.arrayBuffer();
-    const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+    const base64 = toBase64(arrayBuffer);
 
     const azResp = await fetch(`${AZURA_URL}/api/station/${AZURA_STATION}/files`, {
       method: 'POST',
@@ -347,7 +358,7 @@ app.post("/make-server-06086aa3/tracks/process", requireAuth, async (c) => {
 
     // Upload to AzuraCast (JSON + base64)
     const arrayBuffer = await fileBlob.arrayBuffer();
-    const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+    const base64 = toBase64(arrayBuffer);
     const targetPath = originalFilename || filename;
 
     const azResp = await fetch(`${AZURA_URL}/api/station/${AZURA_STATION}/files`, {
@@ -530,7 +541,7 @@ app.post("/make-server-06086aa3/azuracast/upload", requireAdminPin, async (c) =>
     const file = formData.get('file') as File;
     if (!file) return c.json({ error: 'No file provided' }, 400);
     const arrayBuffer = await file.arrayBuffer();
-    const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+    const base64 = toBase64(arrayBuffer);
     const resp = await fetch(`${AZURA_URL}/api/station/${AZURA_STATION}/files`, {
       method: 'POST',
       headers: { ...azuraPostHeaders() },
