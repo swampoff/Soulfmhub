@@ -1,6 +1,31 @@
 import { API_BASE, supabase } from './supabase';
 import { publicAnonKey } from '../../utils/supabase/info';
 
+// ── JWT rejection cooldown ───────────────────────────────────────────
+// When the Supabase gateway rejects a session JWT (expired, revoked,
+// wrong signing key, etc.) we set a cooldown so that subsequent calls
+// to getAuthHeaders / getAccessToken immediately return the anon key
+// instead of sending the bad JWT again (which would trigger another
+// warn + retry cycle on every single API call).
+//
+// The cooldown is reset on successful sign-in so a fresh session is
+// used immediately.
+let jwtCooldownUntil = 0;
+
+/** Call after a gateway JWT rejection to suppress repeated attempts. */
+function flagJwtRejected() {
+  jwtCooldownUntil = Date.now() + 5 * 60_000; // 5 min cooldown
+}
+
+/** Call on successful sign-in to clear the cooldown. */
+export function resetJwtCooldown() {
+  jwtCooldownUntil = 0;
+}
+
+function isJwtOnCooldown(): boolean {
+  return Date.now() < jwtCooldownUntil;
+}
+
 // ── Retry-aware fetch (handles cold-start / transient failures) ──────
 //
 // Supabase Edge Functions gateway requires authentication via EITHER:
@@ -19,7 +44,7 @@ import { publicAnonKey } from '../../utils/supabase/info';
 async function fetchWithRetry(
   input: RequestInfo | URL,
   init?: RequestInit,
-  retries = 3,
+  retries = 4,
   backoff = 2000,
   timeoutMs = 30000,
 ): Promise<Response> {
@@ -44,14 +69,27 @@ async function fetchWithRetry(
       // the anon key so the request at least reaches our server.
       if (response.status === 401 && attempt < retries - 1) {
         const body = await response.clone().text();
-        if (body.includes('Invalid JWT')) {
-          console.warn('[API] Gateway rejected JWT — clearing stale session & retrying with anon key');
-          // Clear the expired session so future calls don't repeat this
-          supabase.auth.signOut().catch(() => {});
-          // Replace Authorization with anon key for the next attempt
+        if (body.includes('Invalid JWT') || body.includes('invalid JWT') || body.includes('token is expired')) {
+          console.log('[API] Gateway rejected JWT — flagging 5-min cooldown & retrying with anon key');
+          flagJwtRejected();
+          // Don't signOut — it destroys the session which may still be
+          // valid for Supabase Realtime / other flows.  Just use anon key.
           mergedHeaders['Authorization'] = `Bearer ${publicAnonKey}`;
           continue;
         }
+      }
+
+      // If the gateway returned a boot/cold-start error, retry
+      if ((response.status === 500 || response.status === 502 || response.status === 503) && attempt < retries - 1) {
+        const body = await response.clone().text();
+        console.warn(
+          `[API] Server error (${response.status}) attempt ${attempt + 1}/${retries}:`,
+          body.slice(0, 150),
+        );
+        const delay = backoff * (attempt + 1);
+        console.log(`[API] Retrying in ${delay}ms (cold-start recovery)...`);
+        await new Promise((r) => setTimeout(r, delay));
+        continue;
       }
 
       // ── Wrap .json() with safe parsing ─────────────────────────
@@ -93,43 +131,59 @@ async function fetchWithRetry(
 }
 
 async function getAuthHeaders() {
-  // Try to refresh the session first to avoid using expired tokens
-  const { data: { session } } = await supabase.auth.getSession();
-
-  // Validate session: check that the token isn't expired
-  let validToken: string | null = null;
-  if (session?.access_token) {
-    try {
-      const payload = JSON.parse(atob(session.access_token.split('.')[1]));
-      const expiresAt = payload.exp * 1000; // JWT exp is in seconds
-      if (Date.now() < expiresAt - 30_000) {
-        // Token is valid with >= 30s margin
-        validToken = session.access_token;
-      } else {
-        // Token is expired or about to expire — try to refresh
-        console.warn('[API] Auth token expired/expiring, attempting refresh...');
-        const { data: refreshData } = await supabase.auth.refreshSession();
-        if (refreshData?.session?.access_token) {
-          validToken = refreshData.session.access_token;
-        } else {
-          // Refresh failed — clear the stale session from localStorage
-          // so subsequent calls don't re-send the expired JWT to the gateway.
-          console.warn('[API] Token refresh failed — clearing stale session');
-          await supabase.auth.signOut().catch(() => {});
-        }
-      }
-    } catch {
-      // Malformed token — clear it so we don't keep retrying
-      console.warn('[API] Malformed session token — clearing stale session');
-      await supabase.auth.signOut().catch(() => {});
-    }
+  // On ANY failure we fall back to the anon key, which our requireAuth
+  // middleware accepts as "admin-pin" access, so the request still works.
+  //
+  // If we recently had a gateway JWT rejection, skip the session entirely
+  // to avoid a repeated reject → warn → retry cycle on every request.
+  if (isJwtOnCooldown()) {
+    return {
+      'Content-Type': 'application/json',
+      'apikey': publicAnonKey,
+      'Authorization': `Bearer ${publicAnonKey}`,
+    };
   }
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
 
-  return {
-    'Content-Type': 'application/json',
-    'apikey': publicAnonKey,
-    'Authorization': validToken ? `Bearer ${validToken}` : `Bearer ${publicAnonKey}`,
-  };
+    let validToken: string | null = null;
+    if (session?.access_token) {
+      try {
+        const payload = JSON.parse(atob(session.access_token.split('.')[1]));
+        const expiresAt = payload.exp * 1000;
+        if (Date.now() < expiresAt - 120_000) {
+          // Token valid with >= 2 min margin (avoids gateway race / latency)
+          validToken = session.access_token;
+        } else {
+          // Token expired or about to — try refresh
+          console.warn('[API] Auth token expiring (<2 min left), refreshing...');
+          const { data: refreshData } = await supabase.auth.refreshSession();
+          if (refreshData?.session?.access_token) {
+            validToken = refreshData.session.access_token;
+          } else {
+            // Refresh failed — fall back silently to anon key.
+            // Don't signOut: it wipes the session for other flows.
+            console.warn('[API] Token refresh failed — using anon key');
+          }
+        }
+      } catch {
+        console.warn('[API] Malformed session token — using anon key');
+      }
+    }
+
+    return {
+      'Content-Type': 'application/json',
+      'apikey': publicAnonKey,
+      'Authorization': validToken ? `Bearer ${validToken}` : `Bearer ${publicAnonKey}`,
+    };
+  } catch (err: any) {
+    console.warn('[API] getAuthHeaders error, using anon key:', err?.message);
+    return {
+      'Content-Type': 'application/json',
+      'apikey': publicAnonKey,
+      'Authorization': `Bearer ${publicAnonKey}`,
+    };
+  }
 }
 
 async function getPublicHeaders() {
@@ -141,23 +195,27 @@ async function getPublicHeaders() {
 }
 
 async function getAccessToken() {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (session?.access_token) {
-    try {
-      const payload = JSON.parse(atob(session.access_token.split('.')[1]));
-      if (Date.now() < (payload.exp * 1000) - 30_000) {
-        return session.access_token;
+  // Skip JWT during cooldown — avoids repeated gateway rejections
+  if (isJwtOnCooldown()) return publicAnonKey;
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) {
+      try {
+        const payload = JSON.parse(atob(session.access_token.split('.')[1]));
+        if (Date.now() < (payload.exp * 1000) - 120_000) {
+          return session.access_token;
+        }
+        // Token expiring — try refresh
+        const { data: refreshData } = await supabase.auth.refreshSession();
+        if (refreshData?.session?.access_token) {
+          return refreshData.session.access_token;
+        }
+      } catch {
+        // Malformed — fall back
       }
-      // Token expired — try refresh
-      const { data: refreshData } = await supabase.auth.refreshSession();
-      if (refreshData?.session?.access_token) {
-        return refreshData.session.access_token;
-      }
-      // Refresh failed — clean up
-      await supabase.auth.signOut().catch(() => {});
-    } catch {
-      await supabase.auth.signOut().catch(() => {});
     }
+  } catch {
+    // Session error — fall back
   }
   return publicAnonKey;
 }
@@ -210,6 +268,10 @@ export const api = {
   async signIn(email: string, password: string) {
     console.log('[API] Signing in:', email);
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (!error && data?.session) {
+      // Fresh session obtained — clear any JWT rejection cooldown
+      resetJwtCooldown();
+    }
     console.log('[API] Sign in result:', { data: data?.user?.email, error });
     return { data, error };
   },
@@ -1237,30 +1299,6 @@ export const api = {
     return response.json();
   },
 
-  async getCurrentDJSession() {
-    const response = await fetchWithRetry(`${API_BASE}/dj-sessions/current`);
-    return response.json();
-  },
-
-  async startDJSession(data: { dj_name: string; title: string; session_type?: string }) {
-    const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/dj-sessions/start`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(data),
-    });
-    return response.json();
-  },
-
-  async endDJSession(sessionId: string) {
-    const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/dj-sessions/${sessionId}/end`, {
-      method: 'POST',
-      headers,
-    });
-    return response.json();
-  },
-
   // Song Requests
   async getSongRequests(status?: string) {
     const url = status && status !== 'all'
@@ -1545,356 +1583,147 @@ export const api = {
     return response.json();
   },
 
-  // ==================== AI DEV TEAM ====================
+  // ==================== RESOURCE USAGE ====================
 
-  async getAITeamMembers() {
+  async getResourceUsage() {
     const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/ai-team/members`, { headers });
+    const response = await fetchWithRetry(`${API_BASE}/admin/resource-usage`, { headers });
     return response.json();
   },
 
-  async updateAITeamMember(memberId: string, updates: Record<string, any>) {
+  async updateResourceUsage(data: {
+    storageUsedGB?: number;
+    storageTotalGB?: number;
+    bandwidthUsedGB?: number;
+    bandwidthTotalGB?: number;
+    listenersPeak?: number;
+  }) {
     const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/ai-team/members/${memberId}`, {
+    const response = await fetchWithRetry(`${API_BASE}/admin/resource-usage`, {
       method: 'PUT',
       headers,
-      body: JSON.stringify(updates),
+      body: JSON.stringify(data),
     });
     return response.json();
   },
 
-  async getAITeamTasks() {
-    const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/ai-team/tasks`, { headers });
-    return response.json();
-  },
+  // ==================== CACHE MANAGEMENT ====================
 
-  async createAITeamTask(task: { title: string; description?: string; priority?: string; assigneeId?: string; labels?: string[] }) {
+  async clearServerCache() {
     const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/ai-team/tasks`, {
+    const response = await fetchWithRetry(`${API_BASE}/admin/cache/clear`, {
       method: 'POST',
       headers,
-      body: JSON.stringify(task),
     });
     return response.json();
   },
 
-  async updateAITeamTask(taskId: string, updates: Record<string, any>) {
+  // ==================== DJ SESSIONS ====================
+
+  async getDJSessionCurrent() {
     const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/ai-team/tasks/${taskId}`, {
+    const response = await fetchWithRetry(`${API_BASE}/dj-sessions/current`, { headers });
+    return response.json();
+  },
+
+  async startDJSession(data: { dj_name: string; title: string; session_type?: string; source_app?: string }) {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/dj-sessions/start`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(data),
+    });
+    return response.json();
+  },
+
+  async endDJSession(sessionId: string) {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/dj-sessions/${sessionId}/end`, {
+      method: 'POST',
+      headers,
+    });
+    return response.json();
+  },
+
+  async updateDJSessionStats(data: { tracks_played?: number; callers_taken?: number; requests_played?: number }) {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/dj-sessions/stats`, {
       method: 'PUT',
       headers,
-      body: JSON.stringify(updates),
+      body: JSON.stringify(data),
     });
     return response.json();
   },
 
-  async deleteAITeamTask(taskId: string) {
+  async getDJSessionHistory() {
     const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/ai-team/tasks/${taskId}`, {
-      method: 'DELETE',
-      headers,
-    });
+    const response = await fetchWithRetry(`${API_BASE}/dj-sessions/history`, { headers });
     return response.json();
   },
 
-  async getAITeamChat(memberId: string) {
+  async getDJConnectionConfig() {
     const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/ai-team/chat/${memberId}`, { headers });
+    const response = await fetchWithRetry(`${API_BASE}/dj-sessions/connection-config`, { headers });
     return response.json();
   },
 
-  async sendAITeamChat(memberId: string, text: string) {
+  async saveDJConnectionConfig(config: Record<string, any>) {
     const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/ai-team/chat/${memberId}`, {
+    const response = await fetchWithRetry(`${API_BASE}/dj-sessions/connection-config`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ text }),
-    });
-    return response.json();
-  },
-
-  // SSE streaming version — returns raw Response for manual stream reading
-  async streamAITeamChat(memberId: string, text: string): Promise<Response> {
-    const headers = await getAuthHeaders();
-    return fetch(`${API_BASE}/ai-team/chat/${memberId}/stream`, {
-      method: 'POST',
-      headers: { ...headers, 'apikey': publicAnonKey },
-      body: JSON.stringify({ text }),
-    });
-  },
-
-  async getAITeamStats() {
-    const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/ai-team/stats`, { headers });
-    return response.json();
-  },
-
-  // ── Autopilot ─────────────────────────────────────────────────────
-
-  // ── Editorial Department (Эфирный Отдел) ─────────────────────────
-
-  async getEditorialSessions() {
-    const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/editorial/sessions`, { headers });
-    return response.json();
-  },
-
-  async getEditorialSession(id: string) {
-    const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/editorial/sessions/${id}`, { headers });
-    return response.json();
-  },
-
-  async runEditorialSession(type: string, topic?: string) {
-    const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/editorial/run-session`, {
-      method: 'POST', headers,
-      body: JSON.stringify({ type, topic }),
-    }, 1, 0, 45000);
-    return response.json();
-  },
-
-  async approveEditorialSession(id: string, feedback?: string) {
-    const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/editorial/sessions/${id}/approve`, {
-      method: 'POST', headers,
-      body: JSON.stringify({ feedback }),
-    });
-    return response.json();
-  },
-
-  async rejectEditorialSession(id: string, feedback?: string) {
-    const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/editorial/sessions/${id}/reject`, {
-      method: 'POST', headers,
-      body: JSON.stringify({ feedback }),
-    });
-    return response.json();
-  },
-
-  async deleteEditorialSession(id: string) {
-    const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/editorial/sessions/${id}`, {
-      method: 'DELETE', headers,
-    });
-    return response.json();
-  },
-
-  async getEditorialDeliverables() {
-    const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/editorial/deliverables`, { headers });
-    return response.json();
-  },
-
-  async approveDeliverable(id: string, feedback?: string) {
-    const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/editorial/deliverables/${id}/approve`, {
-      method: 'POST', headers,
-      body: JSON.stringify({ feedback }),
-    });
-    return response.json();
-  },
-
-  async rejectDeliverable(id: string, feedback?: string) {
-    const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/editorial/deliverables/${id}/reject`, {
-      method: 'POST', headers,
-      body: JSON.stringify({ feedback }),
-    });
-    return response.json();
-  },
-
-  async getEditorialStats() {
-    const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/editorial/stats`, { headers });
-    return response.json();
-  },
-
-  async clearAllEditorial() {
-    const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/editorial/clear-all`, {
-      method: 'POST', headers,
-    });
-    return response.json();
-  },
-
-  // ── Autopilot ─────────────────────────────────────────────────────
-
-  async getAutopilot() {
-    const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/editorial/autopilot`, { headers });
-    return response.json();
-  },
-
-  async saveAutopilot(config: any) {
-    const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/editorial/autopilot`, {
-      method: 'POST', headers,
       body: JSON.stringify(config),
     });
     return response.json();
   },
 
-  async autopilotTick() {
+  async getAzuraCastStreamers() {
     const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/editorial/autopilot/tick`, {
-      method: 'POST', headers,
-    }, 1, 0, 45000);
+    const response = await fetchWithRetry(`${API_BASE}/dj-sessions/azuracast-streamers`, { headers });
     return response.json();
   },
 
-  // ── Implementation Tasks ──────────────────────────────────────────
-
-  async sendToAssistant(sessionId: string) {
+  async createAzuraCastStreamer(data: { username: string; password: string; displayName?: string; comments?: string }) {
     const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/editorial/sessions/${sessionId}/send-to-assistant`, {
-      method: 'POST', headers,
-    }, 1, 0, 45000);
-    return response.json();
-  },
-
-  async getEditorialTasks() {
-    const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/editorial/tasks`, { headers });
-    return response.json();
-  },
-
-  async updateTaskStatus(taskId: string, body: any) {
-    const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/editorial/tasks/${taskId}/status`, {
-      method: 'POST', headers,
-      body: JSON.stringify(body),
+    const response = await fetchWithRetry(`${API_BASE}/dj-sessions/azuracast-streamers`, {
+      method: 'POST', headers, body: JSON.stringify(data),
     });
     return response.json();
   },
 
-  async deleteTask(taskId: string) {
+  async updateAzuraCastStreamer(id: number, data: { username?: string; password?: string; displayName?: string; isActive?: boolean }) {
     const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/editorial/tasks/${taskId}`, {
+    const response = await fetchWithRetry(`${API_BASE}/dj-sessions/azuracast-streamers/${id}`, {
+      method: 'PUT', headers, body: JSON.stringify(data),
+    });
+    return response.json();
+  },
+
+  async deleteAzuraCastStreamer(id: number) {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/dj-sessions/azuracast-streamers/${id}`, {
       method: 'DELETE', headers,
     });
     return response.json();
   },
 
-  // ── Telegram Integration ──────────────────────────────────────────
-
-  async getTelegramConfig() {
+  async getDJStationProfile() {
     const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/editorial/telegram`, { headers });
+    const response = await fetchWithRetry(`${API_BASE}/dj-sessions/station-profile`, { headers });
     return response.json();
   },
 
-  async saveTelegramConfig(config: any) {
+  async enableStreamers(enable: boolean) {
     const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/editorial/telegram`, {
-      method: 'POST', headers,
-      body: JSON.stringify(config),
+    const response = await fetchWithRetry(`${API_BASE}/dj-sessions/enable-streamers`, {
+      method: 'POST', headers, body: JSON.stringify({ enable }),
     });
     return response.json();
   },
 
-  async testTelegram() {
+  async checkDJPort() {
     const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/editorial/telegram/test`, {
-      method: 'POST', headers,
-    }, 1, 0, 15000);
-    return response.json();
-  },
-
-  async sendSessionToTelegram(sessionId: string) {
-    const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/editorial/sessions/${sessionId}/telegram`, {
-      method: 'POST', headers,
-    }, 1, 0, 15000);
-    return response.json();
-  },
-
-  // ── AI Providers CRUD ──────────────────────────────────────────────
-
-  async getAIProviders() {
-    const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/editorial/ai-providers`, { headers });
-    return response.json();
-  },
-
-  async getAgentAIConfig(agentId: string) {
-    const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/editorial/ai-providers/${agentId}`, { headers });
-    return response.json();
-  },
-
-  async updateAgentAIConfig(agentId: string, config: any) {
-    const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/editorial/ai-providers/${agentId}`, {
-      method: 'PUT', headers,
-      body: JSON.stringify(config),
-    });
-    return response.json();
-  },
-
-  async resetAgentAIConfig(agentId: string) {
-    const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/editorial/ai-providers/${agentId}`, {
-      method: 'DELETE', headers,
-    });
-    return response.json();
-  },
-
-  async resetAllAIConfigs() {
-    const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/editorial/ai-providers/reset-all`, {
-      method: 'POST', headers,
-    });
-    return response.json();
-  },
-
-  async testAgentAI(agentId: string) {
-    const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/editorial/ai-providers/${agentId}/test`, {
-      method: 'POST', headers,
-    }, 1, 0, 90000); // Extended timeout: thinking models + fallback chain
-    return response.json();
-  },
-
-  // ── Individual Agent Chats ─────────────────────────────────────────
-
-  async sendAgentChat(agentId: string, message: string) {
-    const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/editorial/agent-chat`, {
-      method: 'POST', headers,
-      body: JSON.stringify({ agentId, message }),
-    }, 1, 0, 90000); // Extended timeout: Gemini 2.5 Pro thinking + potential fallback chain
-    return response.json();
-  },
-
-  async getAgentChatHistory(agentId: string) {
-    const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/editorial/agent-chat/${agentId}`, { headers });
-    return response.json();
-  },
-
-  async clearAgentChats() {
-    const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/editorial/agent-chats`, {
-      method: 'DELETE', headers,
-    });
-    return response.json();
-  },
-
-  // ── Compiled Analysis ─────────────────────────────────────────────
-
-  async compileAnalysis() {
-    const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/editorial/compile-analysis`, {
-      method: 'POST', headers,
-    }, 1, 0, 120000);
-    return response.json();
-  },
-
-  async getLatestAnalysis() {
-    const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/editorial/latest-analysis`, { headers });
+    const response = await fetchWithRetry(`${API_BASE}/dj-sessions/port-check`, { headers });
     return response.json();
   },
 

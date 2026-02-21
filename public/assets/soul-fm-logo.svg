@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="glow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00d9ff"/>
+      <stop offset="100%" stop-color="#00ffaa"/>
+    </linearGradient>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0a1628"/>
+      <stop offset="100%" stop-color="#0d2435"/>
+    </linearGradient>
+    <filter id="neon">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <!-- Background circle -->
+  <circle cx="256" cy="256" r="248" fill="url(#bg)" stroke="url(#glow)" stroke-width="4"/>
+  <!-- Inner ring -->
+  <circle cx="256" cy="256" r="220" fill="none" stroke="url(#glow)" stroke-width="1.5" opacity="0.3"/>
+  <!-- Sound waves left -->
+  <g filter="url(#neon)" opacity="0.8">
+    <path d="M130 200 Q110 256 130 312" stroke="#00d9ff" stroke-width="3" fill="none" stroke-linecap="round"/>
+    <path d="M110 180 Q82 256 110 332" stroke="#00d9ff" stroke-width="2.5" fill="none" stroke-linecap="round" opacity="0.6"/>
+    <path d="M92 162 Q58 256 92 350" stroke="#00d9ff" stroke-width="2" fill="none" stroke-linecap="round" opacity="0.3"/>
+  </g>
+  <!-- Sound waves right -->
+  <g filter="url(#neon)" opacity="0.8">
+    <path d="M382 200 Q402 256 382 312" stroke="#00ffaa" stroke-width="3" fill="none" stroke-linecap="round"/>
+    <path d="M402 180 Q430 256 402 332" stroke="#00ffaa" stroke-width="2.5" fill="none" stroke-linecap="round" opacity="0.6"/>
+    <path d="M420 162 Q454 256 420 350" stroke="#00ffaa" stroke-width="2" fill="none" stroke-linecap="round" opacity="0.3"/>
+  </g>
+  <!-- Headphones arc -->
+  <path d="M170 260 Q170 160 256 140 Q342 160 342 260" stroke="url(#glow)" stroke-width="8" fill="none" stroke-linecap="round" filter="url(#neon)"/>
+  <!-- Left ear cup -->
+  <rect x="152" y="248" width="36" height="56" rx="10" fill="url(#glow)" opacity="0.9"/>
+  <!-- Right ear cup -->
+  <rect x="324" y="248" width="36" height="56" rx="10" fill="url(#glow)" opacity="0.9"/>
+  <!-- SOUL text -->
+  <text x="256" y="310" text-anchor="middle" font-family="'Righteous', 'Arial Black', sans-serif" font-size="62" font-weight="700" fill="white" letter-spacing="6">SOUL</text>
+  <!-- FM text -->
+  <text x="256" y="362" text-anchor="middle" font-family="'Righteous', 'Arial Black', sans-serif" font-size="36" fill="url(#glow)" letter-spacing="12">FM</text>
+  <!-- Frequency dot -->
+  <circle cx="256" cy="386" r="4" fill="#00ffaa" opacity="0.8"/>
+</svg>

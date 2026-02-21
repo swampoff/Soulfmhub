@@ -8,6 +8,7 @@ import { projectId, publicAnonKey } from '../../../utils/supabase/info';
 
 export function AdminSetup() {
   const [email, setEmail] = useState('');
+  const [secretKey, setSecretKey] = useState('');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
 
@@ -24,7 +25,7 @@ export function AdminSetup() {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${publicAnonKey}`,
           },
-          body: JSON.stringify({ email }),
+          body: JSON.stringify({ email, secretKey }),
         }
       );
 
@@ -69,7 +70,7 @@ export function AdminSetup() {
           <Input
             id="email"
             type="email"
-            placeholder="user@example.com"
+            placeholder="admin@soul-fm.com"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             disabled={loading}
@@ -79,9 +80,26 @@ export function AdminSetup() {
           </p>
         </div>
 
+        <div className="space-y-2">
+          <label htmlFor="secretKey" className="text-sm font-medium">
+            Setup Secret Key
+          </label>
+          <Input
+            id="secretKey"
+            type="password"
+            placeholder="ADMIN_SETUP_SECRET"
+            value={secretKey}
+            onChange={(e) => setSecretKey(e.target.value)}
+            disabled={loading}
+          />
+          <p className="text-xs text-muted-foreground">
+            Must match the ADMIN_SETUP_SECRET environment variable in Supabase
+          </p>
+        </div>
+
         <Button
           onClick={assignSuperAdmin}
-          disabled={loading || !email}
+          disabled={loading || !email || !secretKey}
           className="w-full"
         >
           {loading ? (
@@ -112,6 +130,7 @@ export function AdminSetup() {
           <ol className="list-decimal list-inside space-y-1 text-xs">
             <li>Make sure the user has signed up first</li>
             <li>Enter their email address above</li>
+            <li>Enter the setup secret key</li>
             <li>Click "Assign Super Admin Role"</li>
             <li>User can now log in with full admin access</li>
           </ol>

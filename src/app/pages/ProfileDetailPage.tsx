@@ -24,7 +24,7 @@ import {
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { api } from '../../lib/api';
-import nikoAvatar from 'figma:asset/2bcd2a7b9863e5b63f9a6dba11123e60aa992bd0.png';
+import { TEAM_PHOTOS } from '../../lib/assets';
 
 interface VoiceDescription {
   timber?: string;
@@ -80,7 +80,7 @@ export function ProfileDetailPage() {
       
       // Replace avatar URL for Niko
       if (response.profile && response.profile.slug === 'niko') {
-        response.profile.avatar_url = nikoAvatar;
+        response.profile.avatar_url = TEAM_PHOTOS.nico;
       }
       
       setProfile(response.profile);

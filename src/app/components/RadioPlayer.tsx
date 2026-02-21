@@ -4,7 +4,7 @@ import { Button } from './ui/button';
 import { Slider } from './ui/slider';
 import { useApp } from '../../context/AppContext';
 import { motion, AnimatePresence } from 'motion/react';
-import soulFmLogo from 'figma:asset/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png';
+import { SOUL_FM_LOGO } from '../../lib/assets';
 import { RealtimeIndicator } from './RealtimeIndicator';
 import { api } from '../../lib/api';
 import { supabase } from '../../lib/supabase';
@@ -199,9 +199,15 @@ export function RadioPlayer() {
   // ─── Fetch stream info ──────────────────────────────────────────
   const fetchCurrentStream = useCallback(async (): Promise<StreamState | null> => {
     try {
-      return (await api.getCurrentStream()) as StreamState;
-    } catch (err) {
-      console.error('[Player] fetch stream error:', err);
+      const result = await api.getCurrentStream();
+      // Validate the response shape
+      if (!result || typeof result !== 'object') {
+        console.warn('[Player] fetchCurrentStream got invalid response:', result);
+        return null;
+      }
+      return result as StreamState;
+    } catch (err: any) {
+      console.warn('[Player] fetchCurrentStream failed:', err?.message || err);
       return null;
     }
   }, []);
@@ -221,6 +227,12 @@ export function RadioPlayer() {
       const current = activeDeck();
       const next = inactiveDeck();
       const ctx = getCtx();
+
+      // ── Ensure AudioContext is running before crossfade ──
+      if (ctx.state !== 'running') {
+        try { await ctx.resume(); } catch { /* non-critical */ }
+      }
+
       wireDeck(next);
 
       // Prepare next deck
@@ -338,10 +350,24 @@ export function RadioPlayer() {
     return () => clearInterval(interval);
   }, [isPlaying, activeDeck, executeCrossfade]);
 
+  // Track play-retry attempts to prevent infinite loops
+  const playRetryCountRef = useRef(0);
+  const MAX_PLAY_RETRIES = 2;
+
   // ─── Main play action ──────────────────────────────────────────
   const startPlayback = useCallback(
     async (state: StreamState) => {
-      if (!state.audioUrl || !state.track) return;
+      if (!state.audioUrl || !state.track) {
+        console.warn('[Player] startPlayback called with no audioUrl or track — skipping');
+        return;
+      }
+
+      // Validate audioUrl looks like a proper URL
+      if (!state.audioUrl.startsWith('http')) {
+        console.warn('[Player] Invalid audioUrl:', state.audioUrl?.slice(0, 80));
+        setConnectionStatus('error');
+        return;
+      }
 
       // Same track already playing
       if (currentTrackIdRef.current === state.track.id) {
@@ -352,9 +378,27 @@ export function RadioPlayer() {
       setIsBuffering(true);
       setConnectionStatus('connecting');
 
+      // ── Stop any lingering Icecast audio (defensive cleanup) ──
+      if (icecastAudioRef.current) {
+        icecastAudioRef.current.pause();
+        icecastAudioRef.current.src = '';
+      }
+
       ensureDecks();
       const deck = activeDeck();
       const ctx = getCtx();
+
+      // ── Ensure AudioContext is fully running before wiring audio ──
+      // ctx.resume() returns a Promise; not awaiting it causes crackling
+      // because audio flows through a suspended graph.
+      if (ctx.state !== 'running') {
+        try {
+          await ctx.resume();
+        } catch (e) {
+          console.warn('[Player] AudioContext resume failed:', e);
+        }
+      }
+
       wireDeck(deck);
 
       // Stop inactive deck
@@ -368,27 +412,38 @@ export function RadioPlayer() {
       crossfadingRef.current = false;
       setCrossfadeActive(false);
 
+      // ── Set gain BEFORE loading audio to avoid 0-gain window ──
+      deck.gain!.gain.cancelScheduledValues(ctx.currentTime);
+      deck.gain!.gain.setValueAtTime(masterVolume.current, ctx.currentTime);
+
       // Handlers
       const onCanPlay = () => {
         setIsBuffering(false);
         setConnectionStatus('connected');
-        // Seek to sync position
-        if (state.seekPosition > 2 && deck.audio.duration && state.seekPosition < deck.audio.duration) {
-          deck.audio.currentTime = state.seekPosition;
-        }
+        playRetryCountRef.current = 0;
+        // Seek is done before play() — no seek here to avoid repeated jumps
       };
       const onPlaying = () => {
         setIsBuffering(false);
         setConnectionStatus('connected');
+        playRetryCountRef.current = 0;
       };
       const onWaiting = () => setIsBuffering(true);
       const onError = () => {
+        console.warn('[Player] Audio element error — signed URL may have expired');
         setConnectionStatus('error');
         setIsBuffering(false);
+        // Auto-retry: re-fetch stream to get a fresh signed URL
+        if (playRetryCountRef.current < MAX_PLAY_RETRIES) {
+          playRetryCountRef.current++;
+          console.log(`[Player] Auto-retrying playback (${playRetryCountRef.current}/${MAX_PLAY_RETRIES})...`);
+          setTimeout(() => hardLoadNextRef.current(), 2000);
+        }
       };
       const onEnded = () => {
         console.log('[Player] Track ended naturally');
         currentTrackIdRef.current = null;
+        playRetryCountRef.current = 0;
         hardLoadNextRef.current();
       };
 
@@ -400,23 +455,55 @@ export function RadioPlayer() {
       a.onerror = onError;
       a.onended = onEnded;
 
+      // ── Set src and pre-seek BEFORE play() ──────────────────────
+      // Setting currentTime before play() tells the browser to load from
+      // that position directly, avoiding the "play from 0 then jump" stutter.
       a.src = state.audioUrl;
       deck.trackId = state.track.id;
       currentTrackIdRef.current = state.track.id;
 
-      // Set gain to full
-      deck.gain!.gain.cancelScheduledValues(ctx.currentTime);
-      deck.gain!.gain.setValueAtTime(masterVolume.current, ctx.currentTime);
+      if (state.seekPosition > 2) {
+        try {
+          a.currentTime = state.seekPosition;
+        } catch {
+          // Some browsers need metadata first — will be fine on canplay
+          console.log('[Player] Pre-seek deferred (metadata not ready)');
+        }
+      }
 
       setStreamState(state);
 
       try {
         await a.play();
       } catch (err: any) {
-        if (err.name !== 'AbortError') {
-          console.error('[Player] play() failed:', err);
+        if (err.name === 'AbortError') return;
+
+        console.error('[Player] play() failed:', err?.name, err?.message);
+        setIsBuffering(false);
+
+        // NotSupportedError = source failed to load (expired URL, bad format, etc.)
+        // Try to re-fetch the stream for a fresh signed URL
+        if (
+          (err.name === 'NotSupportedError' || err.name === 'NotAllowedError') &&
+          playRetryCountRef.current < MAX_PLAY_RETRIES
+        ) {
+          playRetryCountRef.current++;
+          console.log(`[Player] Refetching stream for fresh URL (retry ${playRetryCountRef.current}/${MAX_PLAY_RETRIES})...`);
+          setConnectionStatus('connecting');
+          setTimeout(async () => {
+            try {
+              const freshState = await fetchCurrentStream();
+              if (freshState?.playing && freshState.audioUrl) {
+                await startPlayback(freshState);
+              } else {
+                setConnectionStatus('error');
+              }
+            } catch {
+              setConnectionStatus('error');
+            }
+          }, 1500);
+        } else {
           setConnectionStatus('error');
-          setIsBuffering(false);
         }
         return;
       }
@@ -430,7 +517,7 @@ export function RadioPlayer() {
       // Also start preload scheduling (will re-fetch when appropriate)
       scheduleNextTrackPreload();
     },
-    [ensureDecks, activeDeck, inactiveDeck, getCtx, wireDeck, scheduleNextTrackPreload],
+    [ensureDecks, activeDeck, inactiveDeck, getCtx, wireDeck, scheduleNextTrackPreload, fetchCurrentStream],
   );
 
   // Hard-load next (no crossfade — used as fallback when track ends abruptly)
@@ -482,10 +569,21 @@ export function RadioPlayer() {
   useEffect(() => {
     if (isPlaying) {
       (async () => {
+        setConnectionStatus('connecting');
+        setIsBuffering(true);
+
         const state = await fetchCurrentStream();
-        if (!state?.playing) {
+        if (!state) {
+          // Server unreachable — don't crash, show offline
+          console.warn('[Player] Could not reach server — showing offline');
+          setConnectionStatus('offline');
+          setIsBuffering(false);
+          return;
+        }
+        if (!state.playing) {
           setConnectionStatus('offline');
           setStreamState(state);
+          setIsBuffering(false);
           return;
         }
 
@@ -498,9 +596,12 @@ export function RadioPlayer() {
         }
 
         // ── Check for Icecast mode ──
+        // ONLY use Icecast when there's NO valid audioUrl for direct playback.
+        // If audioUrl is present, prefer the crossfade engine (signed URL mode).
+        // Icecast is for live DJ broadcasting or when internal Auto DJ can't serve audio.
         const streamWithIcecast = state as StreamState & { icecastUrl?: string; azuracastNowPlaying?: any };
-        if (streamWithIcecast.icecastUrl) {
-          console.log('[Player] AzuraCast/Icecast mode detected:', streamWithIcecast.icecastUrl);
+        if (streamWithIcecast.icecastUrl && !state.audioUrl) {
+          console.log('[Player] AzuraCast/Icecast mode detected (no audioUrl available):', streamWithIcecast.icecastUrl);
           setIcecastMode(true);
           setIcecastUrl(streamWithIcecast.icecastUrl);
 
@@ -540,7 +641,22 @@ export function RadioPlayer() {
           ice.oncanplay = () => { setIsBuffering(false); setConnectionStatus('connected'); };
           ice.onplaying = () => { setIsBuffering(false); setConnectionStatus('connected'); };
           ice.onwaiting = () => setIsBuffering(true);
-          ice.onerror = () => { setConnectionStatus('error'); setIsBuffering(false); };
+          ice.onerror = () => {
+            console.warn('[Player/Icecast] Stream error — Icecast may not be broadcasting');
+            setConnectionStatus('error');
+            setIsBuffering(false);
+            // Fallback: if we have audioUrl from the server, try crossfade mode
+            if (state.audioUrl) {
+              console.log('[Player/Icecast] Falling back to crossfade mode with audioUrl');
+              setIcecastMode(false);
+              setIcecastUrl(null);
+              if (icecastAudioRef.current) {
+                icecastAudioRef.current.pause();
+                icecastAudioRef.current.src = '';
+              }
+              startPlayback(state);
+            }
+          };
 
           // Append cache-buster to avoid browser caching the stream
           const separator = streamWithIcecast.icecastUrl.includes('?') ? '&' : '?';
@@ -559,6 +675,10 @@ export function RadioPlayer() {
         }
 
         // ── Standard crossfade mode ──
+        // If icecastUrl was present but we also have audioUrl, log it and proceed with crossfade
+        if (streamWithIcecast.icecastUrl && state.audioUrl) {
+          console.log('[Player] Both icecastUrl and audioUrl available — preferring crossfade mode (signed URL)');
+        }
         setIcecastMode(false);
         setIcecastUrl(null);
         await startPlayback(state);
@@ -841,7 +961,7 @@ export function RadioPlayer() {
                   ) : (
                     <div className="w-full h-full bg-gradient-to-br from-[#0a1628] to-[#0d2435] flex items-center justify-center p-2">
                       <img
-                        src={soulFmLogo}
+                        src={SOUL_FM_LOGO}
                         alt="Soul FM"
                         className="w-full h-full object-cover rounded-full"
                         style={{ filter: 'drop-shadow(0 0 8px rgba(0,217,255,.6))' }}

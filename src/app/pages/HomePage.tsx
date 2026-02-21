@@ -6,7 +6,7 @@ import { Play } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { api } from '../../lib/api';
 import { motion, AnimatePresence } from 'motion/react';
-import soulFmLogo from 'figma:asset/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png';
+import { SOUL_FM_LOGO } from '../../lib/assets';
 import { FloatingParticles } from '../components/FloatingParticles';
 import { AnimatedBeach } from '../components/AnimatedBeach';
 import { AnimatedWaves } from '../components/AnimatedWaves';
@@ -31,7 +31,16 @@ export function HomePage() {
     const checkAndPlay = async () => {
       try {
         // Ask the backend whether Auto DJ is actually running
-        const stream = await api.getCurrentStream();
+        let stream: any = null;
+        try {
+          stream = await api.getCurrentStream();
+        } catch (fetchErr) {
+          // Server unreachable (cold-start / network) — don't crash, just skip autoplay
+          console.warn('[HomePage] Could not reach server, skipping autoplay:', fetchErr);
+          setStreamOnline(false);
+          return;
+        }
+
         if (!stream?.playing) {
           // Auto DJ is off — nothing to play
           console.log('[HomePage] Auto DJ is not running, skipping autoplay');
@@ -111,7 +120,7 @@ export function HomePage() {
                 }}
                 transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
               >
-                <img src={soulFmLogo} alt="Soul FM" className="w-40 h-40 md:w-52 md:h-52 rounded-full" />
+                <img src={SOUL_FM_LOGO} alt="Soul FM" className="w-40 h-40 md:w-52 md:h-52 rounded-full" />
               </motion.div>
 
               {/* Animated play ring */}
@@ -397,7 +406,7 @@ export function HomePage() {
                 {/* Круглый контейнер для логотипа */}
                 <div className="relative w-72 h-72 md:w-80 md:h-80 rounded-full overflow-hidden bg-gradient-to-br from-[#0a1628] to-[#0d2435] p-4 shadow-2xl">
                   <img 
-                    src={soulFmLogo} 
+                    src={SOUL_FM_LOGO} 
                     alt="Soul FM" 
                     className="w-full h-full object-cover rounded-full"
                     style={{

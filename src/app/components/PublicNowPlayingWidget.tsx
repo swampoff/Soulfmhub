@@ -33,21 +33,33 @@ export function PublicNowPlayingWidget() {
 
     console.log('🔌 [PublicNowPlaying] Setting up Realtime channel');
 
-    // Initial load
+    let retryCount = 0;
+    const MAX_INITIAL_RETRIES = 3;
+
+    // Initial load with retry for cold-start resilience
     const loadInitialData = async () => {
       try {
-        setLoading(true);
         const response = await api.getRadioStatus();
         if (response.nowPlaying && response.nowPlaying.track) {
           setNowPlaying(response.nowPlaying);
         }
+        retryCount = 0; // Reset on success
       } catch (err) {
         console.error('[PublicNowPlaying] Error loading initial data:', err);
+        // Auto-retry on initial load failure (cold-start)
+        if (retryCount < MAX_INITIAL_RETRIES) {
+          retryCount++;
+          const delay = 3000 * retryCount;
+          console.log(`[PublicNowPlaying] Retrying in ${delay}ms (${retryCount}/${MAX_INITIAL_RETRIES})...`);
+          setTimeout(loadInitialData, delay);
+          return; // Don't clear loading yet
+        }
       } finally {
         setLoading(false);
       }
     };
 
+    setLoading(true);
     loadInitialData();
 
     // Start polling as default fallback (will be cleared if realtime connects)

@@ -1,34 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import {
-  Radio, Mic2, Music, Headphones, Loader2, RefreshCw,
-  Calendar, Clock, Wifi, WifiOff, Circle, Volume2,
-  Megaphone, Bell, Newspaper, Podcast, ChevronDown, ChevronUp,
-  Sliders, TrendingUp, PenTool, Clapperboard,
-} from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
-import { toast } from 'sonner';
 import { api } from '../../../lib/api';
 import { AdminLayout } from '../../components/admin/AdminLayout';
-import { ImageWithFallback } from '../../components/figma/ImageWithFallback';
+import { TEAM_PHOTOS } from '../../../lib/assets';
 
-// Figma assets for broadcast team
-import sandraPhoto from 'figma:asset/e895abb63b9f55d693a63dd7c002a242a3192b85.png';
-import lianaPhoto from 'figma:asset/b588af1e64b5cf5211ec15bac00b66a0ac0e5986.png';
-import denPhoto from 'figma:asset/30c1c79a63080cd59ff8ce73c2d420b2a94316e6.png';
-import nicoPhoto from 'figma:asset/2bcd2a7b9863e5b63f9a6dba11123e60aa992bd0.png';
-import markPhoto from 'figma:asset/31a289e2e77360c47a1716aa8258585bf84fdc26.png';
-import maxPhoto from 'figma:asset/1acbab53f0d84ffe4dcfda26ea3acba417d76402.png';
-import stellaPhoto from 'figma:asset/110f38099480aa93fa51ce4d7cb3ddcf76695405.png';
-
-const FIGMA_PHOTOS: Record<string, string> = {
-  sandra: sandraPhoto,
-  liana: lianaPhoto,
-  den: denPhoto,
-  nico: nicoPhoto,
-  mark: markPhoto,
-  max: maxPhoto,
-  stella: stellaPhoto,
-};
+// Static team photos from /public/assets/team/
+const FIGMA_PHOTOS = TEAM_PHOTOS;
 
 interface BroadcastMember {
   id: string;
@@ -225,7 +200,7 @@ export function BroadcastTeamPage() {
                       {m.photoType === 'figma' && m.photoId && FIGMA_PHOTOS[m.photoId] ? (
                         <img src={FIGMA_PHOTOS[m.photoId]} alt={m.name} className="w-full h-full object-cover" />
                       ) : m.photoUrl ? (
-                        <ImageWithFallback src={m.photoUrl} alt={m.name} className="w-full h-full object-cover" />
+                        <img src={m.photoUrl} alt={m.name} className="w-full h-full object-cover" />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center text-lg" style={{ backgroundColor: `${m.color}20` }}>
                           {m.emoji}
@@ -278,7 +253,7 @@ export function BroadcastTeamPage() {
                     className="w-full h-full object-cover object-top"
                   />
                 ) : member.photoUrl ? (
-                  <ImageWithFallback
+                  <img
                     src={member.photoUrl}
                     alt={member.name}
                     className="w-full h-full object-cover object-top"

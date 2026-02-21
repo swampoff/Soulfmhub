@@ -4,7 +4,7 @@ import { Button } from './ui/button';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 import { getAccessToken } from '../../lib/api';
-import { projectId } from '../../../utils/supabase/info';
+import { projectId, publicAnonKey } from '../../../utils/supabase/info';
 
 interface ImageUploadProps {
   onUpload: (url: string) => void;
@@ -61,6 +61,7 @@ export function ImageUpload({
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${await getAccessToken()}`,
+            'apikey': publicAnonKey,
           },
           body: formData,
         }

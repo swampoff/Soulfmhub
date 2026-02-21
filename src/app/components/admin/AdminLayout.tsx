@@ -30,15 +30,13 @@ import {
   Archive,
   Palette,
   MessageSquare,
-  Bot,
-  Clapperboard,
   LogOut,
   User,
   CalendarDays,
   ShoppingBag,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import soulFmLogo from 'figma:asset/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png';
+import { SOUL_FM_LOGO } from '../../../lib/assets';
 import { useApp } from '../../../context/AppContext';
 import { supabase } from '../../../lib/supabase';
 
@@ -108,9 +106,7 @@ const MORE_GROUPS: NavGroup[] = [
       { id: 'backup',      label: 'Backup & Export', icon: Archive,     path: '/admin/backup' },
       { id: 'branding',    label: 'Branding',     icon: Palette,        path: '/admin/branding' },
       { id: 'feedback',    label: 'Feedback',     icon: MessageSquare,  path: '/admin/feedback' },
-      { id: 'ai-team',     label: 'AI Dev Team',  icon: Bot,            path: '/admin/ai-team' },
       { id: 'broadcast-team', label: 'Broadcast Team', icon: Radio,     path: '/admin/broadcast-team' },
-      { id: 'editorial',    label: 'Editorial Dept', icon: Clapperboard,  path: '/admin/editorial' },
       { id: 'system-test', label: 'System Test',  icon: TestTube,       path: '/admin/system-test' },
       { id: 'upload-test', label: 'Upload Test',  icon: FileAudio,      path: '/admin/upload-test' },
     ],
@@ -265,7 +261,7 @@ export function AdminLayout({ children, maxWidth = 'default' }: AdminLayoutProps
               <div className="relative w-10 h-10 sm:w-12 sm:h-12 lg:w-14 lg:h-14 rounded-full bg-gradient-to-br from-[#00d9ff] to-[#00ffaa] p-0.5 hover:scale-110 transition-transform duration-300">
                 <div className="w-full h-full rounded-full bg-[#0a0a0a] flex items-center justify-center overflow-hidden">
                   <img
-                    src={soulFmLogo}
+                    src={SOUL_FM_LOGO}
                     alt="Soul FM"
                     className="w-full h-full object-cover rounded-full"
                     style={{ filter: 'drop-shadow(0 0 8px rgba(0, 217, 255, 0.4))' }}

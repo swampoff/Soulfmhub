@@ -1,5 +1,5 @@
 // Metadata extraction utilities for tracks and jingles
-import { parseBuffer } from "npm:music-metadata@10";
+// NOTE: `parseBuffer` from music-metadata is loaded LAZILY (dynamic import) to keep cold-start fast.
 
 interface ExtractedMetadata {
   title: string;
@@ -53,6 +53,7 @@ export async function extractMetadata(
     const uint8Array = new Uint8Array(fileBuffer);
 
     // parseBuffer can hang on some files — enforce 8s timeout
+    const { parseBuffer } = await import("npm:music-metadata@10");
     const metadata = await withTimeout(
       parseBuffer(uint8Array, mimeType, { duration: true }),
       8000,

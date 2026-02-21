@@ -1,9 +1,5 @@
-import React from 'react';
-import { Link } from 'react-router';
-import { Button } from '../components/ui/button';
 import { Home, Radio, ArrowLeft, Headphones, Music } from 'lucide-react';
 import { motion } from 'motion/react';
-import soulFmLogo from 'figma:asset/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png';
 
 export function NotFoundPage() {
   return (

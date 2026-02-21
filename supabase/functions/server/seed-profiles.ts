@@ -21,7 +21,7 @@ export async function seedProfiles() {
         role: 'host',
         archetype: 'Философ ночи',
         show_name: 'Лабиринты вечности',
-        avatar_url: '/assets/niko-avatar.png',
+        avatar_url: 'https://images.unsplash.com/photo-1659682342865-c58cb5e069f9?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&w=400&q=80',
         bio: 'Нико — это ночь станции. Он не торопится. Его голос словно идёт сквозь пространство. Его задача — расширять сознание.',
         voice_description: {
           timber: 'Глубокий, спокойный, немного мистический',

@@ -82,14 +82,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const refreshNowPlaying = async () => {
     try {
       const data = await api.getNowPlaying();
-      if (data.nowPlaying) {
+      if (data?.nowPlaying) {
         setNowPlaying(data.nowPlaying);
       }
-      if (data.streamStatus) {
+      if (data?.streamStatus) {
         setStreamStatus(data.streamStatus);
       }
     } catch (error) {
-      console.error('[AppContext] Error fetching now playing:', error);
+      // Silently handle — server may be cold-starting or offline
+      // Don't spam console on initial page load
+      console.warn('[AppContext] Now playing fetch failed (server may be starting)');
     }
   };
 

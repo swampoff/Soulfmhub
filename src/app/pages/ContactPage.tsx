@@ -197,7 +197,7 @@ export function ContactPage() {
                   </div>
                   <div>
                     <div className="text-sm text-white/50">Email</div>
-                    <div className="text-white text-sm">hello@soulfmhub.com</div>
+                    <div className="text-white text-sm">hello@soul-fm.com</div>
                   </div>
                 </div>
                 <div className="flex items-start gap-3">

@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
 import { Shield, ArrowLeft, Lock, Eye, EyeOff, Radio, Headphones, Waves, Loader2, Mail, KeyRound } from 'lucide-react';
-import soulFmLogo from 'figma:asset/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png';
+import { SOUL_FM_LOGO } from '../../lib/assets';
 import { supabase } from '../../lib/supabase';
 import { api } from '../../lib/api';
 
@@ -230,7 +230,7 @@ export function AdminLoginPage({ onLogin }: AdminLoginPageProps) {
                   <div className="relative w-20 h-20 rounded-full bg-gradient-to-br from-[#00d9ff] to-[#00ffaa] p-[3px] group-hover:scale-110 transition-transform duration-300 shadow-lg shadow-[#00d9ff]/20 group-hover:shadow-[#00d9ff]/40">
                     <div className="w-full h-full rounded-full bg-[#0a1628] flex items-center justify-center overflow-hidden">
                       <img
-                        src={soulFmLogo}
+                        src={SOUL_FM_LOGO}
                         alt="Soul FM"
                         className="w-full h-full object-cover rounded-full"
                         style={{ filter: 'drop-shadow(0 0 12px rgba(0, 217, 255, 0.5))' }}

@@ -31,7 +31,7 @@ import { NotFoundPage } from './pages/NotFoundPage';
 // ── Standalone Pages (no public layout) ──────────────────────────────
 import { PublicPlayer } from './pages/PublicPlayer';
 import { AdminSetupPage } from './pages/AdminSetupPage';
-import BeachCarDemo from './pages/BeachCarDemo';
+// BeachCarDemo removed from production routes (file kept for reference)
 
 // ── Dashboard / Protected ────────────────────────────────────────────
 import { ListenerDashboard } from './pages/dashboards/ListenerDashboard';
@@ -63,9 +63,7 @@ import { LogsAuditPage } from './pages/admin/LogsAuditPage';
 import { BackupExportPage } from './pages/admin/BackupExportPage';
 import { BrandingPage } from './pages/admin/BrandingPage';
 import { FeedbackManagement } from './pages/admin/FeedbackManagement';
-import { AIDevTeamPage } from './pages/admin/AIDevTeamPage';
 import { BroadcastTeamPage } from './pages/admin/BroadcastTeamPage';
-import { EditorialDepartmentPage } from './pages/admin/EditorialDepartmentPage';
 import { EventsManagement } from './pages/admin/EventsManagement';
 import { MerchManagement } from './pages/admin/MerchManagement';
 import { CommunityManagement } from './pages/admin/CommunityManagement';
@@ -113,7 +111,6 @@ export const router = createBrowserRouter([
 
       // ═══════════════════ Standalone Pages (no layout) ═══════════════════
       { path: 'play/:uniqueId', Component: PublicPlayer },
-      { path: 'demo/beach-car', Component: BeachCarDemo },
     ],
   },
 
@@ -165,14 +162,8 @@ export const router = createBrowserRouter([
       { path: 'branding', Component: BrandingPage },
       { path: 'feedback', Component: FeedbackManagement },
 
-      // AI Dev Team
-      { path: 'ai-team', Component: AIDevTeamPage },
-
       // Broadcast Team
       { path: 'broadcast-team', Component: BroadcastTeamPage },
-
-      // Editorial Department (Эфирный Отдел)
-      { path: 'editorial', Component: EditorialDepartmentPage },
 
       // Admin-side interactive views
       { path: 'request-song', Component: RequestSongPage },

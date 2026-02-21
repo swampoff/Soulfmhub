@@ -3,12 +3,12 @@ import { Hono } from "npm:hono@4";
 import { cors } from "npm:hono/cors";
 import { logger } from "npm:hono/logger";
 import * as kv from "./kv_store.tsx";
-import * as profiles from "./profiles.ts";
-import * as podcasts from "./podcasts.ts";
+// All podcast/profile CRUD routes defined inline below. Seed data in separate files.
 import { seedProfiles } from "./seed-profiles.ts";
 import { seedPodcasts, seedShows } from "./seed-podcasts.ts";
 import { seedNewsInjectionData, createSampleRules } from "./seed-news-injection.ts";
-import { parseBuffer } from "npm:music-metadata@10";
+// NOTE: `parseBuffer` from music-metadata is loaded LAZILY (dynamic import) only in
+// upload/metadata endpoints to avoid penalizing cold-start time for all other routes.
 import { setupJinglesRoutes } from "./jingles.ts";
 import * as jingleRotation from "./jingle-rotation.ts";
 import * as autoDJHelper from "./auto-dj-helper.ts";
@@ -21,8 +21,6 @@ import { newsInjectionRoutes } from "./news-injection-routes.ts";
 import { announcementsRoutes } from "./announcements-routes.ts";
 import { setupPodcastContestRoutes } from "./podcast-contest-routes.ts";
 import { setupInteractiveRoutes } from "./interactive-routes.ts";
-import { setupEditorialRoutes } from "./editorial-department.ts";
-import { setupAIProviderRoutes, deleteAgentAIConfig, getAgentAIConfig } from "./ai-providers.ts";
 import { setupAzuraCastRoutes, getAzuraCastConfig } from "./azuracast-routes.ts";
 
 const app = new Hono();
@@ -32,14 +30,11 @@ const supabaseUrl = Deno.env.get('SUPABASE_URL');
 const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY');
 
-console.log('=== SUPABASE CONFIGURATION ===');
-console.log('SUPABASE_URL:', supabaseUrl ? 'SET' : 'NOT SET');
-console.log('SUPABASE_SERVICE_ROLE_KEY:', supabaseServiceKey ? `SET (length: ${supabaseServiceKey.length})` : 'NOT SET');
+console.log('[startup] SUPABASE_URL:', supabaseUrl ? 'SET' : 'NOT SET');
+console.log('[startup] SUPABASE_SERVICE_ROLE_KEY:', supabaseServiceKey ? 'SET' : 'NOT SET');
 
 if (!supabaseUrl || !supabaseServiceKey) {
-  console.error('ERROR: Missing Supabase configuration!');
-  console.error('SUPABASE_URL:', supabaseUrl || 'MISSING');
-  console.error('SUPABASE_SERVICE_ROLE_KEY:', supabaseServiceKey ? 'SET' : 'MISSING');
+  console.error('FATAL: Missing Supabase configuration — server will not function correctly');
 }
 
 const supabase = createClient(
@@ -109,11 +104,23 @@ async function initializeStorageBuckets() {
 // Enable logger
 app.use('*', logger(console.log));
 
-// Enable CORS for all routes and methods
+// Enable CORS — restricted to production domain and Vercel previews
 app.use(
   "/*",
   cors({
-    origin: "*",
+    origin: (origin) => {
+      if (!origin) return 'https://soul-fm.com'; // non-browser / same-origin
+      const allowed = [
+        'https://soul-fm.com',
+        'https://www.soul-fm.com',
+      ];
+      if (allowed.includes(origin)) return origin;
+      // Allow Vercel preview deployments
+      if (origin.endsWith('.vercel.app')) return origin;
+      // Allow local dev
+      if (origin.startsWith('http://localhost:')) return origin;
+      return 'https://soul-fm.com'; // deny by not matching
+    },
     allowHeaders: ["Content-Type", "Authorization", "apikey", "x-client-info"],
     allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     exposeHeaders: ["Content-Length"],
@@ -239,17 +246,11 @@ setupPodcastContestRoutes(app, requireAuth);
 // Setup Interactive Features routes (Live DJ, Requests, Shoutouts, Calls)
 setupInteractiveRoutes(app, requireAuth);
 
-// Setup Editorial Department routes (Эфирный Отдел)
-setupEditorialRoutes(app, requireAuth);
-
-// Setup AI Provider CRUD routes (Multi-provider system)
-setupAIProviderRoutes(app, requireAuth);
-
 // Setup AzuraCast Integration routes (Real streaming server)
 setupAzuraCastRoutes(app, requireAuth);
 
-// Seed endpoint for testing
-app.post('/make-server-06086aa3/seed-news-injection', async (c) => {
+// Seed endpoint for testing (ADMIN ONLY)
+app.post('/make-server-06086aa3/seed-news-injection', requireAuth, async (c) => {
   try {
     const result = await seedNewsInjectionData();
     await createSampleRules();
@@ -259,23 +260,39 @@ app.post('/make-server-06086aa3/seed-news-injection', async (c) => {
   }
 });
 
-// Seed all content (shows, podcasts, profiles)
-app.post('/make-server-06086aa3/seed-all', async (c) => {
+// Seed all content — shows, podcasts, profiles (ADMIN ONLY)
+app.post('/make-server-06086aa3/seed-all', requireAuth, async (c) => {
   try {
     console.log('🌱 Seeding all content...');
     await seedProfiles();
     await seedPodcasts();
     await seedShows();
+
+    // Seed default AzuraCast config if not already set
+    const existingAz = await kv.get('azuracast:config');
+    if (!existingAz) {
+      await kv.set('azuracast:config', {
+        enabled: true,
+        baseUrl: 'http://187.77.85.42',
+        stationId: 1,
+        stationShortName: 'soul_fm_',
+        streamUrlHttps: 'https://stream.soul-fm.com/soulfm',
+        streamUrlHttp: 'http://187.77.85.42:8000/soulfm',
+        updatedAt: new Date().toISOString(),
+      });
+      console.log('✅ Default AzuraCast config seeded');
+    }
+
     console.log('✅ All content seeded successfully');
-    return c.json({ success: true, message: 'Shows, podcasts, and profiles seeded' });
+    return c.json({ success: true, message: 'Shows, podcasts, profiles, and AzuraCast config seeded' });
   } catch (error: any) {
     console.error('Seed all error:', error);
     return c.json({ success: false, error: error.message }, 500);
   }
 });
 
-// Seed shows only
-app.post('/make-server-06086aa3/seed-shows', async (c) => {
+// Seed shows only (ADMIN ONLY)
+app.post('/make-server-06086aa3/seed-shows', requireAuth, async (c) => {
   try {
     await seedShows();
     return c.json({ success: true, message: 'Shows seeded' });
@@ -284,8 +301,8 @@ app.post('/make-server-06086aa3/seed-shows', async (c) => {
   }
 });
 
-// Seed podcasts only
-app.post('/make-server-06086aa3/seed-podcasts', async (c) => {
+// Seed podcasts only (ADMIN ONLY)
+app.post('/make-server-06086aa3/seed-podcasts', requireAuth, async (c) => {
   try {
     await seedPodcasts();
     return c.json({ success: true, message: 'Podcasts seeded' });
@@ -294,15 +311,12 @@ app.post('/make-server-06086aa3/seed-podcasts', async (c) => {
   }
 });
 
-// Health check endpoint
+// Health check endpoint (public, minimal — no secrets info)
 app.get("/make-server-06086aa3/health", (c) => {
   return c.json({ 
     status: "ok", 
     timestamp: new Date().toISOString(),
-    env: {
-      supabaseUrl: supabaseUrl ? 'SET' : 'MISSING',
-      supabaseServiceKey: supabaseServiceKey ? `SET (${supabaseServiceKey.length} chars)` : 'MISSING'
-    }
+    version: "2.2",
   });
 });
 
@@ -2481,8 +2495,8 @@ app.get("/make-server-06086aa3/stream/nowplaying", async (c) => {
   }
 });
 
-// Update now playing (admin only)
-app.post("/make-server-06086aa3/stream/nowplaying", async (c) => {
+// Update now playing (admin only — protected)
+app.post("/make-server-06086aa3/stream/nowplaying", requireAuth, async (c) => {
   try {
     const body = await c.req.json();
     const { track, show, startTime } = body;
@@ -2532,8 +2546,8 @@ app.get("/make-server-06086aa3/stream/history", async (c) => {
   }
 });
 
-// Update stream status
-app.post("/make-server-06086aa3/stream/status", async (c) => {
+// Update stream status (admin only — protected)
+app.post("/make-server-06086aa3/stream/status", requireAuth, async (c) => {
   try {
     const body = await c.req.json();
     const { status, listeners, bitrate, uptime } = body;
@@ -2957,9 +2971,10 @@ app.post("/make-server-06086aa3/tracks/:id/extract-metadata", requireAuth, async
     const arrayBuffer = await fileData.arrayBuffer();
     const uint8Array = new Uint8Array(arrayBuffer);
 
-    // Extract metadata
+    // Extract metadata (lazy-load music-metadata to keep cold-start fast)
     let extractedMetadata: any = {};
     try {
+      const { parseBuffer } = await import("npm:music-metadata@10");
       const metadata = await parseBuffer(uint8Array, fileData.type, { duration: true });
       
       if (metadata) {
@@ -4464,23 +4479,25 @@ app.get("/make-server-06086aa3/stream/:shortId", async (c) => {
 
 // ==================== ADMIN ROLE ASSIGNMENT ====================
 
-// Assign super_admin role by email (special endpoint for initial setup)
+// Assign super_admin role by email (REQUIRES secret key — no bypass)
 app.post("/make-server-06086aa3/admin/assign-super-admin", async (c) => {
   try {
     const { email, secretKey } = await c.req.json();
     
-    // Simple security check - require a secret key for this operation
-    // In production, you might want to use a proper admin token
-    const SETUP_SECRET = Deno.env.get('ADMIN_SETUP_SECRET') || 'soulfm-admin-setup-2024';
+    // ALWAYS require the setup secret — no bypass allowed
+    const SETUP_SECRET = Deno.env.get('ADMIN_SETUP_SECRET');
+    
+    if (!SETUP_SECRET) {
+      return c.json({ error: 'ADMIN_SETUP_SECRET env variable not configured. Set it in Supabase Edge Function secrets.' }, 500);
+    }
     
     if (!email) {
       return c.json({ error: 'Email is required' }, 400);
     }
     
-    // For initial setup, allow without secret key OR with correct secret key
-    // This makes it easier for first-time setup
-    if (secretKey && secretKey !== SETUP_SECRET) {
-      return c.json({ error: 'Invalid secret key' }, 403);
+    if (!secretKey || secretKey !== SETUP_SECRET) {
+      console.warn(`[SECURITY] Unauthorized assign-super-admin attempt for: ${email}`);
+      return c.json({ error: 'Invalid or missing secret key' }, 403);
     }
     
     // Find user by email in KV store (getByPrefix returns plain values)
@@ -4973,18 +4990,25 @@ app.post("/make-server-06086aa3/schedule", requireAuth, async (c) => {
       return c.json({ error: 'Missing required fields' }, 400);
     }
     
-    // Verify playlist exists
+    // Soft-verify playlist (warn but allow — reference may be stale/deleted)
+    let resolvedPlaylistId = playlistId;
     const playlist = await kv.get(`playlist:${playlistId}`);
     if (!playlist) {
-      console.error(`[schedule/create] Playlist not found: ${playlistId}`);
-      return c.json({ error: 'Playlist not found' }, 404);
+      const allPl = await kv.getByPrefix('playlist:');
+      const byName = allPl.find((p: any) => p?.name === playlistId || p?.id === playlistId);
+      if (byName) {
+        console.log(`[schedule/create] Playlist "${playlistId}" found by fallback (actual id: ${byName.id})`);
+        resolvedPlaylistId = byName.id;
+      } else {
+        console.warn(`[schedule/create] ⚠ Playlist "${playlistId}" not found — creating anyway (${allPl.length} playlists: ${allPl.slice(0, 5).map((p: any) => p?.id).join(', ')})`);
+      }
     }
     
     const scheduleId = `schedule_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     
     const schedule = {
       id: scheduleId,
-      playlistId,
+      playlistId: resolvedPlaylistId,
       dayOfWeek: dayOfWeek !== undefined && dayOfWeek !== null ? parseInt(dayOfWeek) : null,
       startTime,
       endTime,
@@ -5040,11 +5064,11 @@ app.put("/make-server-06086aa3/schedule/:id", requireAuth, async (c) => {
       return c.json({ error: 'Schedule not found' }, 404);
     }
     
-    // Verify playlist exists if changed
+    // Soft-check playlist if changed (warn but don't block)
     if (body.playlistId && body.playlistId !== schedule.playlistId) {
       const playlist = await kv.get(`playlist:${body.playlistId}`);
       if (!playlist) {
-        return c.json({ error: 'Playlist not found' }, 404);
+        console.warn(`[schedule/update] ⚠ Playlist "${body.playlistId}" not found — allowing update anyway`);
       }
     }
     
@@ -5113,16 +5137,25 @@ app.post("/make-server-06086aa3/schedule/slots", requireAuth, async (c) => {
       return c.json({ error: 'Missing required fields: playlistId, startTime, endTime, title' }, 400);
     }
     
+    // Soft-verify playlist (warn but allow — reference may be stale/deleted)
+    let resolvedSlotPlaylistId = playlistId;
     const playlist = await kv.get(`playlist:${playlistId}`);
     if (!playlist) {
-      return c.json({ error: 'Playlist not found' }, 404);
+      const allPl = await kv.getByPrefix('playlist:');
+      const byName = allPl.find((p: any) => p?.name === playlistId || p?.id === playlistId);
+      if (byName) {
+        console.log(`[schedule/slots/create] Playlist "${playlistId}" found by fallback (actual id: ${byName.id})`);
+        resolvedSlotPlaylistId = byName.id;
+      } else {
+        console.warn(`[schedule/slots/create] ⚠ Playlist "${playlistId}" not found — creating anyway (${allPl.length} playlists: ${allPl.slice(0, 5).map((p: any) => p?.id).join(', ')})`);
+      }
     }
     
     const slotId = `schedule_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     
     const slot = {
       id: slotId,
-      playlistId,
+      playlistId: resolvedSlotPlaylistId,
       dayOfWeek: dayOfWeek !== undefined && dayOfWeek !== null ? parseInt(dayOfWeek) : null,
       startTime,
       endTime,
@@ -5509,8 +5542,8 @@ app.post("/make-server-06086aa3/settings/stream", requireAuth, async (c) => {
 
 // ==================== UPLOAD ENDPOINTS ====================
 
-// Image upload endpoint (for covers, avatars, etc.)
-app.post("/make-server-06086aa3/upload/image", async (c) => {
+// Image upload endpoint (for covers, avatars, etc.) — requires auth
+app.post("/make-server-06086aa3/upload/image", requireAuth, async (c) => {
   try {
     const formData = await c.req.formData();
     const file = formData.get('file') as File;
@@ -5572,8 +5605,8 @@ app.post("/make-server-06086aa3/upload/image", async (c) => {
   }
 });
 
-// Audio upload endpoint (for podcast episodes, etc.)
-app.post("/make-server-06086aa3/upload/audio", async (c) => {
+// Audio upload endpoint (for podcast episodes, etc.) — requires auth
+app.post("/make-server-06086aa3/upload/audio", requireAuth, async (c) => {
   try {
     const formData = await c.req.formData();
     const file = formData.get('file') as File;
@@ -5621,6 +5654,7 @@ app.post("/make-server-06086aa3/upload/audio", async (c) => {
     if (extractMetadata) {
       try {
         const buffer = new Uint8Array(arrayBuffer);
+        const { parseBuffer } = await import("npm:music-metadata@10");
         const parsedMeta = await parseBuffer(buffer, file.type || 'audio/mpeg', { duration: true });
         if (parsedMeta) {
           metadata = {
@@ -5988,613 +6022,234 @@ app.get("/make-server-06086aa3/admin/dashboard-stats", requireAuth, async (c) =>
   }
 });
 
-// ==================== AI DEV TEAM ====================
+// ==================== RESOURCE USAGE (REAL DATA) ====================
 
-// Seed default AI team members (idempotent)
-async function seedAITeamMembers() {
+app.get("/make-server-06086aa3/admin/resource-usage", requireAuth, async (c) => {
   try {
-    const existing = await kv.getByPrefix('ai-team:member:');
-    if (existing.length > 0) return;
-
-    const members = [
-      {
-        id: 'aria',
-        name: 'ARIA',
-        fullName: 'AI Research & Integration Architect',
-        role: 'Team Lead',
-        avatar: 'A',
-        color: '#00d9ff',
-        specialties: ['Architecture', 'Code Review', 'Sprint Planning', 'Technical Decisions'],
-        status: 'online',
-        bio: 'Senior architect specializing in system design and team coordination. Leads sprint planning, reviews all PRs, and makes final architectural decisions for the platform.',
-        currentTask: null,
-        tasksCompleted: 0,
-        joinedAt: new Date().toISOString(),
-      },
-      {
-        id: 'pixel',
-        name: 'PIXEL',
-        fullName: 'Progressive Interface & Experience Lead',
-        role: 'Frontend Developer',
-        avatar: 'P',
-        color: '#00ffaa',
-        specialties: ['React', 'Tailwind CSS', 'Animations', 'Responsive Design', 'Accessibility'],
-        status: 'online',
-        bio: 'Frontend specialist focused on building beautiful, responsive UI components with React and Tailwind. Expert in motion design and micro-interactions.',
-        currentTask: null,
-        tasksCompleted: 0,
-        joinedAt: new Date().toISOString(),
-      },
-      {
-        id: 'nexus',
-        name: 'NEXUS',
-        fullName: 'Network & Exchange Unified System',
-        role: 'Backend Developer',
-        avatar: 'N',
-        color: '#9b59b6',
-        specialties: ['Hono API', 'Supabase', 'KV Store', 'Edge Functions', 'Data Modeling'],
-        status: 'online',
-        bio: 'Backend engineer specializing in Hono web server, Supabase Edge Functions, and KV store data patterns. Designs APIs and handles server-side logic.',
-        currentTask: null,
-        tasksCompleted: 0,
-        joinedAt: new Date().toISOString(),
-      },
-      {
-        id: 'forge',
-        name: 'FORGE',
-        fullName: 'Foundation Operations & Release Guardian Engine',
-        role: 'DevOps Engineer',
-        avatar: 'F',
-        color: '#ff8c00',
-        specialties: ['CI/CD', 'Deployment', 'Performance', 'Monitoring', 'Infrastructure'],
-        status: 'idle',
-        bio: 'DevOps engineer managing deployments, performance optimization, and infrastructure monitoring. Ensures smooth releases and platform stability.',
-        currentTask: null,
-        tasksCompleted: 0,
-        joinedAt: new Date().toISOString(),
-      },
-      {
-        id: 'sentinel',
-        name: 'SENTINEL',
-        fullName: 'System Evaluation & Testing Intelligence',
-        role: 'QA Engineer',
-        avatar: 'S',
-        color: '#e74c3c',
-        specialties: ['Testing', 'Bug Tracking', 'E2E Tests', 'Regression', 'Quality Metrics'],
-        status: 'online',
-        bio: 'Quality assurance specialist running automated test suites, tracking bugs, and ensuring code meets quality standards before deployment.',
-        currentTask: null,
-        tasksCompleted: 0,
-        joinedAt: new Date().toISOString(),
-      },
-      {
-        id: 'prism',
-        name: 'PRISM',
-        fullName: 'Pattern & Research Interface Strategy Module',
-        role: 'UX Designer',
-        avatar: 'R',
-        color: '#E040FB',
-        specialties: ['Design Systems', 'UX Patterns', 'Wireframes', 'User Research', 'Prototyping'],
-        status: 'idle',
-        bio: 'UX designer creating intuitive user experiences, maintaining the design system, and conducting user research to inform product decisions.',
-        currentTask: null,
-        tasksCompleted: 0,
-        joinedAt: new Date().toISOString(),
-      },
-    ];
-
-    for (const member of members) {
-      await kv.set(`ai-team:member:${member.id}`, member);
-    }
-    console.log('✅ AI team members seeded');
-  } catch (err: any) {
-    console.error('seedAITeamMembers error:', err?.message || err);
-  }
-}
-
-// GET /ai-team/members
-app.get("/make-server-06086aa3/ai-team/members", requireAuth, async (c) => {
-  try {
-    await seedAITeamMembers();
-    const members = await kv.getByPrefix('ai-team:member:');
-    return c.json({ members });
-  } catch (error: any) {
-    console.error('Get AI team members error:', error);
-    return c.json({ error: `Get AI team members error: ${error.message}` }, 500);
-  }
-});
-
-// PUT /ai-team/members/:id
-app.put("/make-server-06086aa3/ai-team/members/:id", requireAuth, async (c) => {
-  try {
-    const memberId = c.req.param('id');
-    const updates = await c.req.json();
-    const member = await kv.get(`ai-team:member:${memberId}`);
-    if (!member) return c.json({ error: 'Member not found' }, 404);
-    const updated = { ...member, ...updates, updatedAt: new Date().toISOString() };
-    await kv.set(`ai-team:member:${memberId}`, updated);
-    return c.json({ member: updated });
-  } catch (error: any) {
-    console.error('Update AI team member error:', error);
-    return c.json({ error: `Update AI team member error: ${error.message}` }, 500);
-  }
-});
-
-// GET /ai-team/tasks
-app.get("/make-server-06086aa3/ai-team/tasks", requireAuth, async (c) => {
-  try {
-    const tasks = await kv.getByPrefix('ai-team:task:');
-    tasks.sort((a: any, b: any) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-    return c.json({ tasks });
-  } catch (error: any) {
-    console.error('Get AI team tasks error:', error);
-    return c.json({ error: `Get AI team tasks error: ${error.message}` }, 500);
-  }
-});
-
-// POST /ai-team/tasks
-app.post("/make-server-06086aa3/ai-team/tasks", requireAuth, async (c) => {
-  try {
-    const body = await c.req.json();
-    const taskId = `task_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-    const task = {
-      id: taskId,
-      title: body.title || 'Untitled Task',
-      description: body.description || '',
-      status: body.status || 'backlog',
-      priority: body.priority || 'medium',
-      assigneeId: body.assigneeId || null,
-      labels: body.labels || [],
-      comments: [],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    await kv.set(`ai-team:task:${taskId}`, task);
-    await addAuditLog({ level: 'info', category: 'AI Dev Team', message: `Task created: "${task.title}"`, userId: c.get('userId') });
-    return c.json({ task }, 201);
-  } catch (error: any) {
-    console.error('Create AI team task error:', error);
-    return c.json({ error: `Create AI team task error: ${error.message}` }, 500);
-  }
-});
-
-// PUT /ai-team/tasks/:id
-app.put("/make-server-06086aa3/ai-team/tasks/:id", requireAuth, async (c) => {
-  try {
-    const taskId = c.req.param('id');
-    const updates = await c.req.json();
-    const task = await kv.get(`ai-team:task:${taskId}`);
-    if (!task) return c.json({ error: 'Task not found' }, 404);
-    const updated = { ...task, ...updates, updatedAt: new Date().toISOString() };
-    await kv.set(`ai-team:task:${taskId}`, updated);
-    return c.json({ task: updated });
-  } catch (error: any) {
-    console.error('Update AI team task error:', error);
-    return c.json({ error: `Update AI team task error: ${error.message}` }, 500);
-  }
-});
-
-// DELETE /ai-team/tasks/:id
-app.delete("/make-server-06086aa3/ai-team/tasks/:id", requireAuth, async (c) => {
-  try {
-    const taskId = c.req.param('id');
-    const task = await kv.get(`ai-team:task:${taskId}`);
-    if (!task) return c.json({ error: 'Task not found' }, 404);
-    await kv.del(`ai-team:task:${taskId}`);
-    await addAuditLog({ level: 'info', category: 'AI Dev Team', message: `Task deleted: "${task.title}"`, userId: c.get('userId') });
-    return c.json({ success: true });
-  } catch (error: any) {
-    console.error('Delete AI team task error:', error);
-    return c.json({ error: `Delete AI team task error: ${error.message}` }, 500);
-  }
-});
-
-// GET /ai-team/chat/:memberId
-app.get("/make-server-06086aa3/ai-team/chat/:memberId", requireAuth, async (c) => {
-  try {
-    const memberId = c.req.param('memberId');
-    const messages = await kv.getByPrefix(`ai-team:chat:${memberId}:`);
-    messages.sort((a: any, b: any) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime());
-    return c.json({ messages });
-  } catch (error: any) {
-    console.error('Get AI team chat error:', error);
-    return c.json({ error: `Get AI team chat error: ${error.message}` }, 500);
-  }
-});
-
-// POST /ai-team/chat/:memberId
-app.post("/make-server-06086aa3/ai-team/chat/:memberId", requireAuth, async (c) => {
-  try {
-    const memberId = c.req.param('memberId');
-    const body = await c.req.json();
-    const member = await kv.get(`ai-team:member:${memberId}`);
-    if (!member) return c.json({ error: 'Member not found' }, 404);
-
-    const userMsgId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
-    const userMsg = {
-      id: userMsgId,
-      memberId,
-      sender: 'admin',
-      text: body.text || '',
-      timestamp: new Date().toISOString(),
-    };
-    await kv.set(`ai-team:chat:${memberId}:${userMsgId}`, userMsg);
-
-    // ── Try Claude API, fallback to templates ──
-    let responseText: string;
-    let aiPowered = false;
-
-    const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
-    if (anthropicKey) {
-      try {
-        responseText = await callClaudeAPI(anthropicKey, member, memberId, body.text || '');
-        aiPowered = true;
-      } catch (claudeErr: any) {
-        console.error('Claude API error, falling back to templates:', claudeErr?.message || claudeErr);
-        responseText = generateAIResponse(member, body.text || '');
-      }
-    } else {
-      console.log('ANTHROPIC_API_KEY not set, using template responses');
-      responseText = generateAIResponse(member, body.text || '');
-    }
-
-    const aiMsgId = `msg_${Date.now() + 1}_${Math.random().toString(36).substr(2, 4)}`;
-    const aiMsg = {
-      id: aiMsgId,
-      memberId,
-      sender: memberId,
-      text: responseText,
-      timestamp: new Date(Date.now() + 500).toISOString(),
-      aiPowered,
-    };
-    await kv.set(`ai-team:chat:${memberId}:${aiMsgId}`, aiMsg);
-
-    return c.json({ userMessage: userMsg, aiResponse: aiMsg });
-  } catch (error: any) {
-    console.error('AI team chat error:', error);
-    return c.json({ error: `AI team chat error: ${error.message}` }, 500);
-  }
-});
-
-function generateAIResponse(member: any, userMessage: string): string {
-  const msg = userMessage.toLowerCase();
-  const name = member.name;
-  const role = member.role;
-
-  if (msg.includes('status') || msg.includes('прогресс') || msg.includes('как дела')) {
-    const statusResponses: Record<string, string[]> = {
-      'Team Lead': [
-        `All systems nominal. The team is performing well — sprint velocity is up 15% this iteration. I've reviewed 3 PRs today and have 2 more pending. Let me know if you need a detailed status report.`,
-        `Good news — we're on track for the sprint deadline. PIXEL is finishing the UI polish, NEXUS has the API endpoints ready, and SENTINEL is running regression tests. No blockers at the moment.`,
-      ],
-      'Frontend Developer': [
-        `Working on responsive layouts for the new admin panels. The glassmorphism components are looking sharp on all breakpoints. Currently optimizing animation performance — some motion elements were causing frame drops on mobile.`,
-        `I've completed the component refactor for the media library. The new list view with inline playback is live. Working on accessibility improvements next — adding ARIA labels and keyboard navigation.`,
-      ],
-      'Backend Developer': [
-        `API endpoints are stable. I've optimized the KV store queries — batch reads are now 40% faster. Currently working on caching strategies for frequently accessed data. The signed URL flow is performing well.`,
-        `Just finished implementing the new data validation layer. All endpoints now have proper input sanitization. Working on rate limiting next to prevent abuse.`,
-      ],
-      'DevOps Engineer': [
-        `Infrastructure is running smoothly. Edge Function cold starts are averaging 180ms. Storage buckets are properly configured with public access. I'm monitoring bandwidth usage — we're at 12% of our monthly limit.`,
-        `Deployment pipeline is green. Last deploy was clean with zero downtime. I've set up alerts for storage quota and bandwidth thresholds.`,
-      ],
-      'QA Engineer': [
-        `Test coverage is at 87%. I found 2 minor edge cases in the playlist management — filed them as low-priority bugs. The upload flow test suite is passing all 12 scenarios including the 50MB boundary test.`,
-        `Regression suite passed. The drag-and-drop schedule fix is working correctly in all tested browsers. I've added 5 new test cases for the audio metadata extraction flow.`,
-      ],
-      'UX Designer': [
-        `Working on the design system documentation. I've standardized the glassmorphism patterns across all admin panels. The cyan/mint gradient palette is consistent now. Preparing wireframes for the next feature sprint.`,
-        `User flow analysis is complete for the media library. The Spotify-style list view is testing well. I'm refining the micro-interactions for better feedback on drag-and-drop operations.`,
-      ],
-    };
-    const pool = statusResponses[role] || [`Everything is going well. I'm focused on my current assignments and making steady progress.`];
-    return pool[Math.floor(Math.random() * pool.length)];
-  }
-
-  if (msg.includes('task') || msg.includes('задач') || msg.includes('assign') || msg.includes('работа')) {
-    return `I'm ready to take on new tasks. Just create a task in the board and assign it to me. My current workload is manageable — I can handle ${Math.floor(Math.random() * 3) + 2} more items this sprint. What area should I focus on?`;
-  }
-
-  if (msg.includes('bug') || msg.includes('баг') || msg.includes('error') || msg.includes('ошибк')) {
-    const bugResponses: Record<string, string> = {
-      'Team Lead': `I'll prioritize this. Let me pull in the right team member to investigate. Can you share the error details or steps to reproduce?`,
-      'Frontend Developer': `On it. I'll check the component tree and event handlers. If you can tell me which page/component, I'll narrow it down quickly. Is it a rendering issue or a logic error?`,
-      'Backend Developer': `I'll check the server logs immediately. Could be a KV store read/write issue or an edge case in the API validation. What endpoint is affected?`,
-      'DevOps Engineer': `Checking infrastructure metrics now. Could be related to cold starts or timeout settings. I'll review the Edge Function logs for any anomalies.`,
-      'QA Engineer': `I'll create a bug report and add it to the regression suite. Let me try to reproduce it first. What browser/device were you using?`,
-      'UX Designer': `If it's a visual glitch, I'll audit the CSS cascade and responsive breakpoints. Could be a z-index or overflow issue. Which viewport size is affected?`,
-    };
-    return bugResponses[role] || `I'll investigate this bug right away. Let me gather more information to diagnose the issue.`;
-  }
-
-  if (msg.includes('deploy') || msg.includes('релиз') || msg.includes('release') || msg.includes('деплой')) {
-    return role === 'DevOps Engineer'
-      ? `Deployment checklist is ready. All tests are green, SENTINEL confirmed no regressions. I can initiate the deploy whenever you give the go-ahead. Estimated downtime: zero (rolling deployments).`
-      : `For deployment questions, FORGE (DevOps) is the right person. From my side, the ${role.toLowerCase()} work is ready for release. All changes are committed and reviewed.`;
-  }
-
-  if (msg.includes('hello') || msg.includes('привет') || msg.includes('hi') || msg.includes('hey')) {
-    return `Hey! ${name} here, your ${role}. I'm online and ready to help. What would you like me to work on? You can assign tasks, ask about progress, or discuss any technical challenges.`;
-  }
-
-  const defaults = [
-    `Understood. I'll analyze this from the ${role.toLowerCase()} perspective and get back to you with my recommendations. Is there a deadline I should be aware of?`,
-    `Good point. Let me think about this in the context of our current architecture. I'll draft a proposal and share it with the team for review.`,
-    `Got it. I'll prioritize this in my current sprint. Would you like me to coordinate with other team members on this, or should I handle it independently?`,
-    `Acknowledged. I'll break this down into actionable items and update the task board. Expect an update within the next sprint cycle.`,
-  ];
-  return defaults[Math.floor(Math.random() * defaults.length)];
-}
-
-// ── Claude SSE Streaming Endpoint ────────────────────────────────────────
-
-app.post("/make-server-06086aa3/ai-team/chat/:memberId/stream", requireAuth, async (c) => {
-  const memberId = c.req.param('memberId');
-  const body = await c.req.json();
-  const member = await kv.get(`ai-team:member:${memberId}`);
-  if (!member) return c.json({ error: 'Member not found' }, 404);
-
-  const userMsgId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
-  const userMsg = {
-    id: userMsgId, memberId, sender: 'admin',
-    text: body.text || '', timestamp: new Date().toISOString(),
-  };
-  await kv.set(`ai-team:chat:${memberId}:${userMsgId}`, userMsg);
-
-  const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
-  const aiMsgId = `msg_${Date.now() + 1}_${Math.random().toString(36).substr(2, 4)}`;
-  const encoder = new TextEncoder();
-  const sendSSE = (ctrl: ReadableStreamDefaultController, event: string, data: any) => {
-    ctrl.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
-  };
-
-  const stream = new ReadableStream({
-    async start(controller) {
-      try {
-        sendSSE(controller, 'user_message', userMsg);
-
-        if (!anthropicKey) {
-          const fallbackText = generateAIResponse(member, body.text || '');
-          const aiMsg = { id: aiMsgId, memberId, sender: memberId, text: fallbackText, timestamp: new Date(Date.now() + 500).toISOString(), aiPowered: false };
-          await kv.set(`ai-team:chat:${memberId}:${aiMsgId}`, aiMsg);
-          sendSSE(controller, 'done', aiMsg);
-          controller.close();
-          return;
-        }
-
-        const { systemPrompt, messages } = await buildClaudeContext(member, memberId, body.text || '');
-
-        const claudeResponse = await fetch('https://api.anthropic.com/v1/messages', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01' },
-          body: JSON.stringify({ model: 'claude-3-5-haiku-20241022', max_tokens: 1024, system: systemPrompt, messages, stream: true }),
-        });
-
-        if (!claudeResponse.ok) {
-          console.error(`Claude API error ${claudeResponse.status}:`, await claudeResponse.text());
-          const fallbackText = generateAIResponse(member, body.text || '');
-          const aiMsg = { id: aiMsgId, memberId, sender: memberId, text: fallbackText, timestamp: new Date(Date.now() + 500).toISOString(), aiPowered: false };
-          await kv.set(`ai-team:chat:${memberId}:${aiMsgId}`, aiMsg);
-          sendSSE(controller, 'done', aiMsg);
-          controller.close();
-          return;
-        }
-
-        let fullText = '';
-        const reader = claudeResponse.body!.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
-            const jsonStr = line.slice(6);
-            if (jsonStr === '[DONE]') continue;
-            try {
-              const evt = JSON.parse(jsonStr);
-              if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta') {
-                fullText += evt.delta.text;
-                sendSSE(controller, 'chunk', { text: evt.delta.text });
-              }
-            } catch { /* skip */ }
+    // 1. Try AzuraCast server stats (requires admin API key)
+    let azuraStorage: any = null;
+    let azuraListeners: any = null;
+    try {
+      const config = await kv.get('azuracast:config');
+      if (config?.enabled && config?.baseUrl) {
+        const apiKey = Deno.env.get('AZURACAST_API_KEY') || '';
+        
+        // Get server stats (disk usage)
+        if (apiKey) {
+          try {
+            const serverUrl = `${config.baseUrl.replace(/\/$/, '')}/api/admin/server/stats`;
+            const c1 = new AbortController();
+            const t1 = setTimeout(() => c1.abort(), 8000);
+            const sr = await fetch(serverUrl, {
+              headers: { 'X-API-Key': apiKey, 'Accept': 'application/json' },
+              signal: c1.signal,
+            });
+            clearTimeout(t1);
+            if (sr.ok) {
+              const ss = await sr.json();
+              azuraStorage = { disk: ss.disk, memory: ss.memory, cpu: ss.cpu };
+            }
+          } catch (e: any) {
+            console.warn('[ResourceUsage] AzuraCast server stats:', e?.message);
           }
         }
 
-        const aiMsg = { id: aiMsgId, memberId, sender: memberId, text: fullText, timestamp: new Date(Date.now() + 500).toISOString(), aiPowered: true };
-        await kv.set(`ai-team:chat:${memberId}:${aiMsgId}`, aiMsg);
-        sendSSE(controller, 'done', aiMsg);
-      } catch (err: any) {
-        console.error('Streaming chat error:', err);
+        // Get station details (media storage)
         try {
-          const fallbackText = generateAIResponse(member, body.text || '');
-          const aiMsg = { id: aiMsgId, memberId, sender: memberId, text: fallbackText, timestamp: new Date(Date.now() + 500).toISOString(), aiPowered: false };
-          await kv.set(`ai-team:chat:${memberId}:${aiMsgId}`, aiMsg);
-          sendSSE(controller, 'done', aiMsg);
-        } catch { /* exhausted */ }
-      } finally {
-        try { controller.close(); } catch { /* already closed */ }
+          const stUrl = `${config.baseUrl.replace(/\/$/, '')}/api/station/${config.stationId}`;
+          const c2 = new AbortController();
+          const t2 = setTimeout(() => c2.abort(), 8000);
+          const stR = await fetch(stUrl, {
+            headers: { 'X-API-Key': apiKey || '', 'Accept': 'application/json' },
+            signal: c2.signal,
+          });
+          clearTimeout(t2);
+          if (stR.ok) {
+            const stD = await stR.json();
+            if (stD.storage_available || stD.storage_used) {
+              azuraStorage = {
+                ...azuraStorage,
+                stationStorageUsed: stD.storage_used,
+                stationStorageAvailable: stD.storage_available,
+                stationStorageQuota: stD.storage_quota,
+              };
+            }
+          }
+        } catch (e: any) {
+          console.warn('[ResourceUsage] AzuraCast station info:', e?.message);
+        }
+
+        // Get live listeners from nowplaying (public)
+        try {
+          const npUrl = `${config.baseUrl.replace(/\/$/, '')}/api/nowplaying/${config.stationId}`;
+          const c3 = new AbortController();
+          const t3 = setTimeout(() => c3.abort(), 6000);
+          const npR = await fetch(npUrl, {
+            headers: { 'Accept': 'application/json' },
+            signal: c3.signal,
+          });
+          clearTimeout(t3);
+          if (npR.ok) {
+            const npD = await npR.json();
+            azuraListeners = npD.listeners || {};
+          }
+        } catch (e: any) {
+          console.warn('[ResourceUsage] AzuraCast nowplaying:', e?.message);
+        }
       }
-    },
-  });
-
-  return new Response(stream, {
-    headers: {
-      'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*',
-    },
-  });
-});
-
-// ── Claude API helpers ──────────────────────────────────────────────────
-
-async function buildClaudeContext(member: any, memberId: string, userMessage: string) {
-  const systemPrompt = buildMemberSystemPrompt(member);
-  const chatHistory = await kv.getByPrefix(`ai-team:chat:${memberId}:`);
-  chatHistory.sort((a: any, b: any) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime());
-  const recentHistory = chatHistory.slice(-20);
-
-  const allTasks = await kv.getByPrefix('ai-team:task:');
-  const memberTasks = allTasks.filter((t: any) => t.assigneeId === memberId);
-  const activeTasks = memberTasks.filter((t: any) => t.status === 'in-progress' || t.status === 'review');
-
-  const messages: Array<{ role: string; content: string }> = [];
-  if (activeTasks.length > 0) {
-    const taskContext = activeTasks.map((t: any) =>
-      `- [${t.status}] "${t.title}" (${t.priority} priority)${t.description ? ': ' + t.description : ''}`
-    ).join('\n');
-    messages.push({ role: 'user', content: `[SYSTEM CONTEXT — my current assigned tasks]\n${taskContext}` });
-    messages.push({ role: 'assistant', content: `Got it, I'm aware of my current assignments. How can I help you?` });
-  }
-  for (const msg of recentHistory) {
-    messages.push({ role: msg.sender === 'admin' ? 'user' : 'assistant', content: msg.text });
-  }
-  messages.push({ role: 'user', content: userMessage });
-  return { systemPrompt, messages };
-}
-
-async function callClaudeAPI(apiKey: string, member: any, memberId: string, userMessage: string): Promise<string> {
-  const { systemPrompt, messages } = await buildClaudeContext(member, memberId, userMessage);
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 25000);
-  try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: 'claude-3-5-haiku-20241022', max_tokens: 1024, system: systemPrompt, messages }),
-      signal: controller.signal,
-    });
-    if (!response.ok) {
-      const errBody = await response.text();
-      throw new Error(`Claude API returned ${response.status}: ${errBody}`);
+    } catch (e: any) {
+      console.warn('[ResourceUsage] AzuraCast fetch error:', e?.message);
     }
-    const data = await response.json();
-    if (data.content && data.content.length > 0) return data.content[0].text;
-    throw new Error('Empty response from Claude API');
-  } finally { clearTimeout(timeout); }
-}
 
-function buildMemberSystemPrompt(member: any): string {
-  const projectContext = `You are ${member.name} (${member.fullName}), a ${member.role} on the AI Dev Department of Soul FM Hub — an online radio station platform.
+    // 2. KV-based resource tracking
+    const kvUsage = await kv.get('system:resource-usage') || {};
 
-PROJECT CONTEXT:
-- Soul FM Hub is built with React + Tailwind CSS (frontend) and Hono on Supabase Edge Functions (backend)
-- Design theme: cyan/mint (#00d9ff, #00ffaa), glassmorphism, dark mode, font Righteous
-- Backend uses KV-store pattern on Supabase, with Storage for audio/images
-- Features: Auto DJ, media library, playlists, schedule management, live DJ console, song requests, shoutouts, podcasts, contests, news injection, jingle rotation, content automation
-- Admin panel with PIN-based auth (0000), multiple management pages
-- The platform has 6 AI team members: ARIA (Team Lead), PIXEL (Frontend), NEXUS (Backend), FORGE (DevOps), SENTINEL (QA), PRISM (UX)
-
-YOUR PERSONA:
-- Name: ${member.name}
-- Full Name: ${member.fullName}
-- Role: ${member.role}
-- Specialties: ${(member.specialties || []).join(', ')}
-- Bio: ${member.bio}
-- Status: ${member.status}
-
-BEHAVIORAL RULES:
-1. Stay in character as ${member.name} the ${member.role} at all times
-2. Respond with technical expertise relevant to your role
-3. Reference other team members by their names (ARIA, PIXEL, NEXUS, FORGE, SENTINEL, PRISM) when appropriate
-4. Be professional but friendly, with a slightly tech-savvy personality
-5. Keep responses concise (2-4 sentences typically, longer for complex technical discussions)
-6. You can discuss tasks, bugs, architecture, deployments, design decisions, testing strategies
-7. Support both English and Russian — respond in the same language the user writes in
-8. When discussing code, reference the actual tech stack (React, Tailwind, Hono, Supabase, KV store, Edge Functions)
-9. You can mention sprint progress, PR reviews, and other agile concepts naturally
-10. Never break character or mention that you are an AI language model`;
-
-  const roleSpecifics: Record<string, string> = {
-    'Team Lead': `\n\nAS TEAM LEAD, you additionally:
-- Coordinate between all team members and resolve blockers
-- Make architectural decisions and approve PRs
-- Track sprint progress and velocity
-- Resolve conflicts and prioritize work
-- Have visibility into all aspects of the project`,
-
-    'Frontend Developer': `\n\nAS FRONTEND DEVELOPER, you additionally:
-- Expert in React component architecture, hooks, and state management
-- Deep knowledge of Tailwind CSS v4, glassmorphism effects, animations (Motion library)
-- Handle responsive design, accessibility (ARIA), and performance optimization
-- Work with Radix UI primitives, Recharts, react-dnd, Sonner toasts
-- Implement the admin panel UI, media library, schedule management views`,
-
-    'Backend Developer': `\n\nAS BACKEND DEVELOPER, you additionally:
-- Expert in Hono web server running on Supabase Edge Functions (Deno runtime)
-- Design RESTful APIs with proper auth middleware (requireAuth, PIN-based + JWT)
-- Manage KV-store data patterns (prefixed keys, getByPrefix for collections)
-- Handle file uploads via signed URLs + Supabase Storage
-- Implement Auto DJ logic, schedule resolution, audio metadata extraction`,
-
-    'DevOps Engineer': `\n\nAS DEVOPS ENGINEER, you additionally:
-- Manage Supabase Edge Function deployments and infrastructure
-- Monitor performance, cold starts, bandwidth usage
-- Configure Storage buckets (public/private), CORS, and security headers
-- Handle CI/CD pipelines and release management
-- Track system health, error rates, and uptime metrics`,
-
-    'QA Engineer': `\n\nAS QA ENGINEER, you additionally:
-- Run automated test suites and regression testing
-- Track bugs, create detailed bug reports with reproduction steps
-- Validate upload flows (3-step signed URL architecture), drag-and-drop, audio playback
-- Test across browsers and devices, ensure responsive design works
-- Monitor test coverage and quality metrics`,
-
-    'UX Designer': `\n\nAS UX DESIGNER, you additionally:
-- Maintain the design system (cyan/mint palette, glassmorphism, Righteous font)
-- Create wireframes and prototypes for new features
-- Conduct user flow analysis and usability audits
-- Define micro-interactions, transitions, and motion design patterns
-- Ensure consistency across all admin pages and public-facing UI`,
-  };
-
-  return projectContext + (roleSpecifics[member.role] || '');
-}
-
-// GET /ai-team/stats
-app.get("/make-server-06086aa3/ai-team/stats", requireAuth, async (c) => {
-  try {
-    const [tasks, members] = await Promise.all([
-      kv.getByPrefix('ai-team:task:'),
-      kv.getByPrefix('ai-team:member:'),
+    // 3. Real KV data counts
+    const [tracks, playlists, schedules, shows, podcasts] = await Promise.all([
+      kv.getByPrefix('track:').catch(() => []),
+      kv.getByPrefix('playlist:').catch(() => []),
+      kv.getByPrefix('schedule:').catch(() => []),
+      kv.getByPrefix('show:').catch(() => []),
+      kv.getByPrefix('podcast:').catch(() => []),
     ]);
 
-    const byStatus = {
-      backlog: tasks.filter((t: any) => t.status === 'backlog').length,
-      'in-progress': tasks.filter((t: any) => t.status === 'in-progress').length,
-      review: tasks.filter((t: any) => t.status === 'review').length,
-      done: tasks.filter((t: any) => t.status === 'done').length,
-    };
+    // 4. Storage/bandwidth from AzuraCast or KV
+    let storageUsedGB = kvUsage.storageUsedGB ?? 0;
+    let storageTotalGB = kvUsage.storageTotalGB ?? 50;
+    let bandwidthUsedGB = kvUsage.bandwidthUsedGB ?? 0;
+    let bandwidthTotalGB = kvUsage.bandwidthTotalGB ?? 20;
 
-    const byPriority = {
-      critical: tasks.filter((t: any) => t.priority === 'critical').length,
-      high: tasks.filter((t: any) => t.priority === 'high').length,
-      medium: tasks.filter((t: any) => t.priority === 'medium').length,
-      low: tasks.filter((t: any) => t.priority === 'low').length,
+    if (azuraStorage?.disk) {
+      const d = azuraStorage.disk;
+      if (d.bytes_total) {
+        storageTotalGB = parseFloat((d.bytes_total / (1024 ** 3)).toFixed(2));
+        storageUsedGB = parseFloat((d.bytes_used / (1024 ** 3)).toFixed(2));
+      } else if (typeof d.total === 'string') {
+        storageTotalGB = parseFloat(d.total) || storageTotalGB;
+        storageUsedGB = parseFloat(d.used) || storageUsedGB;
+      }
+    }
+
+    // Listeners from AzuraCast (REAL)
+    const listenersNow = azuraListeners?.current ?? azuraListeners?.total ?? kvUsage.listenersNow ?? 0;
+    const listenersUnique = azuraListeners?.unique ?? kvUsage.listenersUnique ?? 0;
+    const listenersPeak = Math.max(kvUsage.listenersPeak ?? 0, listenersNow);
+
+    // 5. Save updated values
+    const updatedUsage = {
+      storageUsedGB, storageTotalGB, bandwidthUsedGB, bandwidthTotalGB,
+      listenersNow, listenersUnique, listenersPeak,
+      lastUpdated: new Date().toISOString(),
+      source: azuraStorage ? 'azuracast' : 'manual',
     };
+    await kv.set('system:resource-usage', updatedUsage).catch(() => {});
 
     return c.json({
-      totalTasks: tasks.length,
-      totalMembers: members.length,
-      onlineMembers: members.filter((m: any) => m.status === 'online').length,
-      byStatus,
-      byPriority,
-      sprintProgress: byStatus.done > 0 ? Math.round((byStatus.done / tasks.length) * 100) : 0,
+      storage: {
+        usedGB: storageUsedGB,
+        totalGB: storageTotalGB,
+        percentUsed: storageTotalGB > 0 ? parseFloat(((storageUsedGB / storageTotalGB) * 100).toFixed(1)) : 0,
+      },
+      bandwidth: {
+        usedGB: bandwidthUsedGB,
+        totalGB: bandwidthTotalGB,
+        percentUsed: bandwidthTotalGB > 0 ? parseFloat(((bandwidthUsedGB / bandwidthTotalGB) * 100).toFixed(1)) : 0,
+      },
+      listeners: {
+        current: listenersNow,
+        unique: listenersUnique,
+        peak: listenersPeak,
+      },
+      content: {
+        tracks: tracks.length,
+        playlists: playlists.length,
+        schedules: schedules.length,
+        shows: shows.length,
+        podcasts: podcasts.length,
+      },
+      azuracast: azuraStorage ? {
+        connected: true,
+        disk: azuraStorage.disk,
+        memory: azuraStorage.memory,
+        stationStorage: azuraStorage.stationStorageUsed ? {
+          used: azuraStorage.stationStorageUsed,
+          available: azuraStorage.stationStorageAvailable,
+        } : null,
+      } : { connected: false },
+      lastUpdated: updatedUsage.lastUpdated,
     });
   } catch (error: any) {
-    console.error('AI team stats error:', error);
-    return c.json({ error: `AI team stats error: ${error.message}` }, 500);
+    console.error('Resource usage error:', error);
+    return c.json({ error: `Resource usage error: ${error.message}` }, 500);
   }
 });
 
-// ═════════════════════════════════════════���════════════════════════════
+// PUT /admin/resource-usage — manually update resource limits/values
+app.put("/make-server-06086aa3/admin/resource-usage", requireAuth, async (c) => {
+  try {
+    const body = await c.req.json();
+    const existing = await kv.get('system:resource-usage') || {};
+    const updated = {
+      ...existing,
+      ...(body.storageUsedGB !== undefined && { storageUsedGB: parseFloat(body.storageUsedGB) }),
+      ...(body.storageTotalGB !== undefined && { storageTotalGB: parseFloat(body.storageTotalGB) }),
+      ...(body.bandwidthUsedGB !== undefined && { bandwidthUsedGB: parseFloat(body.bandwidthUsedGB) }),
+      ...(body.bandwidthTotalGB !== undefined && { bandwidthTotalGB: parseFloat(body.bandwidthTotalGB) }),
+      ...(body.listenersPeak !== undefined && { listenersPeak: parseInt(body.listenersPeak) }),
+      lastUpdated: new Date().toISOString(),
+      source: 'manual',
+    };
+    await kv.set('system:resource-usage', updated);
+    console.log('[ResourceUsage] Manual update:', JSON.stringify(updated));
+    return c.json({ success: true, usage: updated });
+  } catch (error: any) {
+    console.error('Update resource usage error:', error);
+    return c.json({ error: `Update resource usage error: ${error.message}` }, 500);
+  }
+});
+
+// POST /admin/cache/clear — flush all server-side caches
+app.post("/make-server-06086aa3/admin/cache/clear", requireAuth, async (c) => {
+  try {
+    const cleared: string[] = [];
+
+    // 1. In-memory AzuraCast file URL cache
+    const azuraCacheSize = azuraFileCache.size;
+    azuraFileCache.clear();
+    cleared.push(`azuraFileCache (${azuraCacheSize} entries)`);
+
+    // 2. KV: AzuraCast now-playing cache
+    try {
+      const np = await kv.get('azuracast:nowplaying-cache');
+      if (np) {
+        await kv.del('azuracast:nowplaying-cache');
+        cleared.push('azuracast:nowplaying-cache');
+      }
+    } catch { /* key may not exist */ }
+
+    // 3. KV: Icecast status cache
+    try {
+      const ice = await kv.get('icecast:status-cache');
+      if (ice) {
+        await kv.del('icecast:status-cache');
+        cleared.push('icecast:status-cache');
+      }
+    } catch { /* key may not exist */ }
+
+    console.log(`[CacheClear] Admin cleared caches: ${cleared.join(', ')}`);
+    return c.json({
+      success: true,
+      cleared,
+      message: `Cleared ${cleared.length} cache layer(s)`,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error: any) {
+    console.error('Cache clear error:', error);
+    return c.json({ error: `Cache clear error: ${error.message}` }, 500);
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════
 // ── BROADCAST TEAM (Отдел Эфира) ─────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════
 
@@ -7232,33 +6887,38 @@ async function checkGeneric(member: any): Promise<any> {
   };
 }
 
-// Run admin check on startup
+// ── NON-BLOCKING startup tasks ──────────────────────────────────────
+// Fire-and-forget: buckets, admin check, and migrations run in background
+// so the server starts accepting requests immediately (faster cold-start).
 console.log('🚀 Starting Soul FM Hub server...');
-await initializeStorageBuckets();
-await ensureSuperAdmin();
 
-// ── Migration: clear stale/broken configs (kimi 401 + invalid models + nico → Gemini 2.5 Pro) ──
-try {
-  const INVALID_MODELS = ["gemini-2.5-flash-preview-05-20", "gemini-2.5-pro-preview-06-05", "gemini-2.5-flash-preview-04-17", "claude-sonnet-4-6-20260210"];
-  // Include ALL agents including nico — nico's KV config might need migration
-  for (const agentId of ["nico", "liana", "mark", "den", "stella", "sandra", "max"]) {
-    const cfg = await getAgentAIConfig(agentId);
-    const needsReset =
-      cfg.provider === "kimi" ||
-      INVALID_MODELS.includes(cfg.model) ||
-      // Reset nico if still on old mistral or anthropic config → migrate to gemini/gemini-2.5-pro
-      (agentId === "nico" && cfg.provider === "mistral") ||
-      (agentId === "nico" && cfg.provider === "anthropic") ||
-      (agentId === "nico" && cfg.model === "mistral-agent");
-    if (needsReset) {
-      console.log(`🔄 Migration: resetting ${agentId} (${cfg.provider}/${cfg.model}) → default (${agentId === 'nico' ? 'gemini/gemini-2.5-pro' : 'gemini/gemini-2.0-flash'})`);
-      await deleteAgentAIConfig(agentId);
+(async () => {
+  try {
+    await initializeStorageBuckets();
+    await ensureSuperAdmin();
+
+    // Seed default resource usage if not set (Hostinger VPS: 50GB disk, 20GB bandwidth)
+    const existingUsage = await kv.get('system:resource-usage');
+    if (!existingUsage) {
+      await kv.set('system:resource-usage', {
+        storageUsedGB: 11,
+        storageTotalGB: 50,
+        bandwidthUsedGB: 0.67,
+        bandwidthTotalGB: 20,
+        listenersNow: 0,
+        listenersUnique: 0,
+        listenersPeak: 0,
+        lastUpdated: new Date().toISOString(),
+        source: 'seed',
+      });
+      console.log('📊 Seeded initial resource usage (11/50 GB storage, 0.67/20 GB bandwidth)');
     }
+
+    console.log('✅ Startup tasks completed (buckets, admin, migrations, resource-usage)');
+  } catch (e: any) {
+    console.error("Startup task error (non-fatal):", e.message);
   }
-  console.log('✅ AI provider migration check completed');
-} catch (e: any) {
-  console.error("Migration error (non-fatal):", e.message);
-}
+})();
 
 // ==================== EVENTS CRUD ====================
 
@@ -7611,6 +7271,342 @@ app.post("/make-server-06086aa3/community/seed", requireAuth, async (c) => {
     return c.json({ message: `Seeded ${seedMessages.length} community messages`, seeded: true });
   } catch (error: any) {
     return c.json({ error: `Seed community error: ${error.message}` }, 500);
+  }
+});
+
+// ==================== DJ SESSIONS & LIVE STREAMING ====================
+
+const DJ_SESSION_KEY = 'dj-session:current';
+const DJ_SESSION_HISTORY_PREFIX = 'dj-session-history:';
+const DJ_CONNECTION_CONFIG_KEY = 'dj-connection:config';
+
+// GET current DJ session
+app.get("/make-server-06086aa3/dj-sessions/current", async (c) => {
+  try {
+    const session = await kv.get(DJ_SESSION_KEY);
+    return c.json({
+      isLive: !!session && session.status === 'live',
+      session: session || null,
+    });
+  } catch (error: any) {
+    console.error('Get DJ session error:', error);
+    return c.json({ isLive: false, session: null });
+  }
+});
+
+// POST start DJ session (admin only)
+app.post("/make-server-06086aa3/dj-sessions/start", requireAuth, async (c) => {
+  try {
+    const body = await c.req.json();
+    const { dj_name, title, session_type, source_app } = body;
+
+    if (!dj_name?.trim() || !title?.trim()) {
+      return c.json({ error: 'DJ name and title are required' }, 400);
+    }
+
+    // Check if there's already an active session
+    const existing = await kv.get(DJ_SESSION_KEY);
+    if (existing && existing.status === 'live') {
+      return c.json({ error: `Session already active: "${existing.title}" by ${existing.dj_name}` }, 409);
+    }
+
+    const session = {
+      id: `djs_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      dj_name: dj_name.trim(),
+      title: title.trim(),
+      session_type: session_type || 'live_show',
+      source_app: source_app || 'direct',
+      started_at: new Date().toISOString(),
+      status: 'live',
+      tracks_played: 0,
+      callers_taken: 0,
+      requests_played: 0,
+    };
+
+    await kv.set(DJ_SESSION_KEY, session);
+    console.log(`[DJ] Session started: "${session.title}" by ${session.dj_name} (${session.source_app})`);
+
+    return c.json({ session });
+  } catch (error: any) {
+    console.error('Start DJ session error:', error);
+    return c.json({ error: `Failed to start DJ session: ${error.message}` }, 500);
+  }
+});
+
+// POST end DJ session
+app.post("/make-server-06086aa3/dj-sessions/:id/end", requireAuth, async (c) => {
+  try {
+    const id = c.req.param('id');
+    const session = await kv.get(DJ_SESSION_KEY);
+    
+    if (!session || (session.id !== id && id !== 'current')) {
+      return c.json({ error: 'No matching active session found' }, 404);
+    }
+
+    const endedSession = {
+      ...session,
+      status: 'ended',
+      ended_at: new Date().toISOString(),
+      duration_seconds: Math.floor((Date.now() - new Date(session.started_at).getTime()) / 1000),
+    };
+
+    // Save to history
+    await kv.set(`${DJ_SESSION_HISTORY_PREFIX}${session.id}`, endedSession);
+    // Clear current session
+    await kv.del(DJ_SESSION_KEY);
+    
+    console.log(`[DJ] Session ended: "${session.title}" by ${session.dj_name} — ${endedSession.duration_seconds}s`);
+    return c.json({ session: endedSession });
+  } catch (error: any) {
+    console.error('End DJ session error:', error);
+    return c.json({ error: `Failed to end DJ session: ${error.message}` }, 500);
+  }
+});
+
+// PUT update session stats (increment tracks, callers etc.)
+app.put("/make-server-06086aa3/dj-sessions/stats", requireAuth, async (c) => {
+  try {
+    const body = await c.req.json();
+    const session = await kv.get(DJ_SESSION_KEY);
+    if (!session || session.status !== 'live') {
+      return c.json({ error: 'No active session' }, 404);
+    }
+
+    const updated = {
+      ...session,
+      tracks_played: (session.tracks_played || 0) + (body.tracks_played || 0),
+      callers_taken: (session.callers_taken || 0) + (body.callers_taken || 0),
+      requests_played: (session.requests_played || 0) + (body.requests_played || 0),
+    };
+
+    await kv.set(DJ_SESSION_KEY, updated);
+    return c.json({ session: updated });
+  } catch (error: any) {
+    return c.json({ error: `Update stats error: ${error.message}` }, 500);
+  }
+});
+
+// GET DJ session history
+app.get("/make-server-06086aa3/dj-sessions/history", requireAuth, async (c) => {
+  try {
+    const sessions = await kv.getByPrefix(DJ_SESSION_HISTORY_PREFIX);
+    const sorted = (sessions || [])
+      .sort((a: any, b: any) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime())
+      .slice(0, 50);
+    return c.json({ sessions: sorted });
+  } catch (error: any) {
+    return c.json({ error: `Session history error: ${error.message}`, sessions: [] }, 500);
+  }
+});
+
+// ── DJ Connection Config (AzuraCast Streamer credentials) ───────
+// GET connection config
+app.get("/make-server-06086aa3/dj-sessions/connection-config", requireAuth, async (c) => {
+  try {
+    const config = await kv.get(DJ_CONNECTION_CONFIG_KEY);
+    const defaultConfig = {
+      server: '187.77.85.42',
+      port: 8005,
+      mountPoint: '/live',
+      protocol: 'icecast',
+      username: 'dj',
+      password: '',
+      streamFormat: 'mp3',
+      bitrate: 128,
+      sampleRate: 44100,
+      edjingGuide: true,
+      customApps: [],
+    };
+    return c.json({ config: config || defaultConfig });
+  } catch (error: any) {
+    return c.json({ error: `Get connection config error: ${error.message}` }, 500);
+  }
+});
+
+// POST save connection config
+app.post("/make-server-06086aa3/dj-sessions/connection-config", requireAuth, async (c) => {
+  try {
+    const body = await c.req.json();
+    const config = {
+      server: body.server || '187.77.85.42',
+      port: body.port || 8005,
+      mountPoint: body.mountPoint || '/live',
+      protocol: body.protocol || 'icecast',
+      username: body.username || 'dj',
+      password: body.password || '',
+      streamFormat: body.streamFormat || 'mp3',
+      bitrate: body.bitrate || 128,
+      sampleRate: body.sampleRate || 44100,
+      edjingGuide: body.edjingGuide ?? true,
+      customApps: body.customApps || [],
+      updatedAt: new Date().toISOString(),
+    };
+    await kv.set(DJ_CONNECTION_CONFIG_KEY, config);
+    return c.json({ success: true, config });
+  } catch (error: any) {
+    return c.json({ error: `Save connection config error: ${error.message}` }, 500);
+  }
+});
+
+// ── AzuraCast Streamers CRUD ─────────────────────────────────────
+async function azuraStreamerFetch(method: string, path: string, body?: any) {
+  const azConfig = await getAzuraCastConfig();
+  if (!azConfig?.enabled || !azConfig.baseUrl) throw new Error('AzuraCast not configured or disabled');
+  const apiKey = Deno.env.get('AZURACAST_API_KEY') || '';
+  if (!apiKey) throw new Error('AZURACAST_API_KEY not set');
+  const url = `${azConfig.baseUrl.replace(/\/$/, '')}/api${path}`;
+  console.log(`[DJ/AzuraCast] ${method} ${url}`);
+  const headers: Record<string, string> = { 'Accept': 'application/json', 'X-API-Key': apiKey };
+  if (body) headers['Content-Type'] = 'application/json';
+  const controller = new AbortController();
+  const tid = setTimeout(() => controller.abort(), 15000);
+  try {
+    const resp = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined, signal: controller.signal });
+    clearTimeout(tid);
+    const text = await resp.text();
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${text.slice(0, 300)}`);
+    return text ? JSON.parse(text) : { success: true };
+  } catch (e: any) { clearTimeout(tid); throw e; }
+}
+
+app.get("/make-server-06086aa3/dj-sessions/azuracast-streamers", requireAuth, async (c) => {
+  try {
+    const azConfig = await getAzuraCastConfig();
+    if (!azConfig?.enabled || !azConfig.baseUrl) return c.json({ streamers: [], configured: false, error: 'AzuraCast not configured' });
+    const data = await azuraStreamerFetch('GET', `/station/${azConfig.stationId}/streamers`);
+    const streamers = (Array.isArray(data) ? data : []).map((s: any) => ({
+      id: s.id, streamer_username: s.streamer_username || '', streamer_password: s.streamer_password || '',
+      display_name: s.display_name || '', is_active: s.is_active ?? true,
+      enforce_schedule: s.enforce_schedule ?? false, comments: s.comments || '',
+    }));
+    return c.json({ streamers, configured: true });
+  } catch (error: any) {
+    console.error('[DJ] AzuraCast streamers list error:', error);
+    return c.json({ streamers: [], configured: true, error: error.message });
+  }
+});
+
+app.post("/make-server-06086aa3/dj-sessions/azuracast-streamers", requireAuth, async (c) => {
+  try {
+    const body = await c.req.json();
+    const { username, password, displayName, comments } = body;
+    if (!username?.trim()) return c.json({ error: 'Username is required' }, 400);
+    if (!password?.trim() || password.length < 6) return c.json({ error: 'Password must be at least 6 characters' }, 400);
+    const azConfig = await getAzuraCastConfig();
+    if (!azConfig?.enabled) return c.json({ error: 'AzuraCast not configured' }, 400);
+    const payload = {
+      streamer_username: username.trim(), streamer_password: password.trim(),
+      display_name: (displayName || username).trim(), is_active: true, enforce_schedule: false,
+      comments: comments || `Created via Soul FM Hub on ${new Date().toISOString()}`,
+    };
+    const created = await azuraStreamerFetch('POST', `/station/${azConfig.stationId}/streamers`, payload);
+    console.log(`[DJ] Created AzuraCast streamer: ${username} (id: ${created?.id})`);
+    const connConfig = await kv.get(DJ_CONNECTION_CONFIG_KEY);
+    if (connConfig) {
+      await kv.set(DJ_CONNECTION_CONFIG_KEY, { ...connConfig, username: username.trim(), password: password.trim(), updatedAt: new Date().toISOString() });
+    }
+    return c.json({ success: true, streamer: created });
+  } catch (error: any) {
+    console.error('[DJ] Create streamer error:', error);
+    return c.json({ error: `Failed to create DJ account: ${error.message}` }, 500);
+  }
+});
+
+app.put("/make-server-06086aa3/dj-sessions/azuracast-streamers/:id", requireAuth, async (c) => {
+  try {
+    const streamerId = c.req.param('id');
+    const body = await c.req.json();
+    const azConfig = await getAzuraCastConfig();
+    if (!azConfig?.enabled) return c.json({ error: 'AzuraCast not configured' }, 400);
+    const payload: Record<string, any> = {};
+    if (body.username) payload.streamer_username = body.username.trim();
+    if (body.password) payload.streamer_password = body.password.trim();
+    if (body.displayName !== undefined) payload.display_name = body.displayName.trim();
+    if (body.isActive !== undefined) payload.is_active = body.isActive;
+    if (body.comments !== undefined) payload.comments = body.comments;
+    const updated = await azuraStreamerFetch('PUT', `/station/${azConfig.stationId}/streamer/${streamerId}`, payload);
+    console.log(`[DJ] Updated AzuraCast streamer ${streamerId}`);
+    return c.json({ success: true, streamer: updated });
+  } catch (error: any) {
+    console.error('[DJ] Update streamer error:', error);
+    return c.json({ error: `Failed to update DJ account: ${error.message}` }, 500);
+  }
+});
+
+app.delete("/make-server-06086aa3/dj-sessions/azuracast-streamers/:id", requireAuth, async (c) => {
+  try {
+    const streamerId = c.req.param('id');
+    const azConfig = await getAzuraCastConfig();
+    if (!azConfig?.enabled) return c.json({ error: 'AzuraCast not configured' }, 400);
+    await azuraStreamerFetch('DELETE', `/station/${azConfig.stationId}/streamer/${streamerId}`);
+    console.log(`[DJ] Deleted AzuraCast streamer ${streamerId}`);
+    return c.json({ success: true });
+  } catch (error: any) {
+    console.error('[DJ] Delete streamer error:', error);
+    return c.json({ error: `Failed to delete DJ account: ${error.message}` }, 500);
+  }
+});
+
+app.get("/make-server-06086aa3/dj-sessions/station-profile", requireAuth, async (c) => {
+  try {
+    const azConfig = await getAzuraCastConfig();
+    if (!azConfig?.enabled || !azConfig.baseUrl) return c.json({ profile: null, configured: false });
+    const station = await azuraStreamerFetch('GET', `/station/${azConfig.stationId}`);
+    let mounts: any[] = [];
+    try { mounts = await azuraStreamerFetch('GET', `/station/${azConfig.stationId}/mounts`); } catch { /* ok */ }
+    const profile = {
+      name: station?.name || '', shortcode: station?.shortcode || '',
+      description: station?.description || '', backend: station?.backend_config || {},
+      frontend: station?.frontend_config || {},
+      enable_streamers: station?.enable_streamers ?? false,
+      is_streamer_live: station?.is_streamer_live ?? false,
+      mounts: (Array.isArray(mounts) ? mounts : []).map((m: any) => ({
+        id: m.id, name: m.name, display_name: m.display_name, is_default: m.is_default,
+        url: m.url, listeners_unique: m.listeners_unique, listeners_total: m.listeners_total,
+      })),
+    };
+    return c.json({ profile, configured: true });
+  } catch (error: any) {
+    console.error('[DJ] Station profile error:', error);
+    return c.json({ profile: null, configured: true, error: error.message });
+  }
+});
+
+app.post("/make-server-06086aa3/dj-sessions/enable-streamers", requireAuth, async (c) => {
+  try {
+    const azConfig = await getAzuraCastConfig();
+    if (!azConfig?.enabled) return c.json({ error: 'AzuraCast not configured' }, 400);
+    const body = await c.req.json();
+    const enable = body.enable !== false;
+    await azuraStreamerFetch('PUT', `/station/${azConfig.stationId}`, { enable_streamers: enable });
+    console.log(`[DJ] Streamers ${enable ? 'enabled' : 'disabled'} on station ${azConfig.stationId}`);
+    return c.json({ success: true, enable_streamers: enable });
+  } catch (error: any) {
+    console.error('[DJ] Enable streamers error:', error);
+    return c.json({ error: `Failed to toggle streamers: ${error.message}` }, 500);
+  }
+});
+
+app.get("/make-server-06086aa3/dj-sessions/port-check", requireAuth, async (c) => {
+  try {
+    const connConfig = await kv.get(DJ_CONNECTION_CONFIG_KEY);
+    const host = connConfig?.server || '187.77.85.42';
+    const port = connConfig?.port || 8005;
+    const controller = new AbortController();
+    const tid = setTimeout(() => controller.abort(), 5000);
+    try {
+      const resp = await fetch(`http://${host}:${port}/status-json.xsl`, { signal: controller.signal, headers: { 'Accept': 'application/json' } });
+      clearTimeout(tid);
+      return c.json({ host, port, open: true, status: resp.status, message: `Port ${port} is reachable (HTTP ${resp.status})` });
+    } catch (fetchErr: any) {
+      clearTimeout(tid);
+      if (fetchErr.name === 'AbortError') return c.json({ host, port, open: false, message: `Port ${port} timed out after 5s — likely blocked by firewall` });
+      if (fetchErr.message?.includes('Connection refused') || fetchErr.message?.includes('ECONNREFUSED'))
+        return c.json({ host, port, open: false, message: `Port ${port} connection refused — service not running or port blocked` });
+      return c.json({ host, port, open: 'unknown', message: `Port ${port} response unclear: ${fetchErr.message}` });
+    }
+  } catch (error: any) {
+    return c.json({ error: `Port check error: ${error.message}` }, 500);
   }
 });
 

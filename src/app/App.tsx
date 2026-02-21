@@ -3,7 +3,7 @@ import { RouterProvider } from 'react-router';
 import { AppProvider } from '../context/AppContext';
 import { router } from './routes';
 import { Button } from './components/ui/button';
-import soulFmLogo from 'figma:asset/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png';
+import { SOUL_FM_LOGO } from '../lib/assets';
 
 // ── Error Boundary Component ─────────────────────────────────────────
 class ErrorBoundary extends Component<
@@ -32,7 +32,7 @@ class ErrorBoundary extends Component<
         <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-[#0a1628] via-[#0d1a2d] to-[#0a1628]">
           <div className="text-center max-w-md px-6">
             <img
-              src={soulFmLogo}
+              src={SOUL_FM_LOGO}
               alt="Soul FM"
               className="h-20 w-auto mx-auto mb-6"
               style={{

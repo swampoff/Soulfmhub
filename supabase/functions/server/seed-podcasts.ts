@@ -53,7 +53,7 @@ export async function seedPodcasts() {
         title: 'The Midnight Session',
         description: 'Late-night philosophical conversations about music, life, and everything in between. Hosted by Niko from Labyrinth of Eternity.',
         host: 'Niko',
-        hostAvatar: '/assets/niko-avatar.png',
+        hostAvatar: 'https://images.unsplash.com/photo-1659682342865-c58cb5e069f9?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&w=400&q=80',
         coverImage: '/assets/podcast-midnight-session.jpg',
         category: 'culture',
         totalListeners: 32100,

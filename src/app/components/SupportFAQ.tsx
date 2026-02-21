@@ -47,7 +47,7 @@ const FAQ_ITEMS: FAQItem[] = [
   {
     question: 'Do you accept corporate sponsorships?',
     answer:
-      'Yes! We offer corporate sponsorship packages for businesses interested in supporting Soul FM Hub. Please contact us at sponsors@soulfmhub.com for more information.',
+      'Yes! We offer corporate sponsorship packages for businesses interested in supporting Soul FM Hub. Please contact us at sponsors@soul-fm.com for more information.',
   },
 ];
 
@@ -105,7 +105,7 @@ export function SupportFAQ() {
       <div className="mt-8 text-center">
         <p className="text-white/60 mb-4">Still have questions?</p>
         <a
-          href="mailto:support@soulfmhub.com"
+          href="mailto:support@soul-fm.com"
           className="inline-block px-6 py-3 bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] text-[#0a1628] font-semibold rounded-lg hover:opacity-90 transition-opacity"
         >
           Contact Support
