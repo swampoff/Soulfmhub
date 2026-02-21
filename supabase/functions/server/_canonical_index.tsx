@@ -480,20 +480,39 @@ app.delete("/make-server-06086aa3/tracks/:id", requireAdminPin, async (c) => {
 
 // ==================== PLAYLISTS ====================
 
+// camelCase ↔ snake_case helpers for playlists
+function playlistToDb(body: any): any {
+  const d: any = {};
+  if (body.name !== undefined) d.name = body.name;
+  if (body.description !== undefined) d.description = body.description;
+  if (body.color !== undefined) d.color = body.color;
+  if (body.genre !== undefined) d.genre = body.genre;
+  if (body.trackIds !== undefined) d.track_ids = body.trackIds;
+  if (body.track_ids !== undefined) d.track_ids = body.track_ids;
+  if (body.isPublic !== undefined) d.is_public = body.isPublic;
+  if (body.is_public !== undefined) d.is_public = body.is_public;
+  if (body.azuracastPlaylistId !== undefined) d.azuracast_playlist_id = body.azuracastPlaylistId;
+  if (body.azuracast_playlist_id !== undefined) d.azuracast_playlist_id = body.azuracast_playlist_id;
+  return d;
+}
+function playlistFromDb(p: any): any {
+  return { ...p, trackIds: p.track_ids || [], isPublic: p.is_public, createdAt: p.created_at, updatedAt: p.updated_at, azuracastPlaylistId: p.azuracast_playlist_id };
+}
+
 app.get("/make-server-06086aa3/playlists", async (c) => {
   try {
     const { data, error } = await supabase.from('playlists').select('*').order('name');
     if (error) throw error;
-    return c.json({ playlists: data || [] });
+    return c.json({ playlists: (data || []).map(playlistFromDb) });
   } catch (e: any) { return c.json({ error: e.message }, 500); }
 });
 
 app.post("/make-server-06086aa3/playlists", requireAdminPin, async (c) => {
   try {
     const body = await c.req.json();
-    const { data, error } = await supabase.from('playlists').insert(body).select().single();
+    const { data, error } = await supabase.from('playlists').insert(playlistToDb(body)).select().single();
     if (error) throw error;
-    return c.json({ playlist: data }, 201);
+    return c.json({ playlist: playlistFromDb(data) }, 201);
   } catch (e: any) { return c.json({ error: e.message }, 500); }
 });
 
@@ -501,9 +520,9 @@ app.put("/make-server-06086aa3/playlists/:id", requireAdminPin, async (c) => {
   try {
     const id = c.req.param('id');
     const body = await c.req.json();
-    const { data, error } = await supabase.from('playlists').update({ ...body, updated_at: new Date().toISOString() }).eq('id', id).select().single();
+    const { data, error } = await supabase.from('playlists').update({ ...playlistToDb(body), updated_at: new Date().toISOString() }).eq('id', id).select().single();
     if (error) throw error;
-    return c.json({ playlist: data });
+    return c.json({ playlist: playlistFromDb(data) });
   } catch (e: any) { return c.json({ error: e.message }, 500); }
 });
 
@@ -520,13 +539,16 @@ app.delete("/make-server-06086aa3/playlists/:id", requireAdminPin, async (c) => 
 app.post("/make-server-06086aa3/playlists/:id/tracks", requireAdminPin, async (c) => {
   try {
     const id = c.req.param('id');
-    const { trackId } = await c.req.json();
+    const { trackId, position } = await c.req.json();
     const { data: pl } = await supabase.from('playlists').select('track_ids').eq('id', id).single();
     const trackIds = [...(pl?.track_ids || [])];
-    if (!trackIds.includes(trackId)) trackIds.push(trackId);
+    if (!trackIds.includes(trackId)) {
+      if (position === 'start') trackIds.unshift(trackId);
+      else trackIds.push(trackId);
+    }
     const { data, error } = await supabase.from('playlists').update({ track_ids: trackIds, updated_at: new Date().toISOString() }).eq('id', id).select().single();
     if (error) throw error;
-    return c.json({ playlist: data });
+    return c.json({ playlist: playlistFromDb(data) });
   } catch (e: any) { return c.json({ error: e.message }, 500); }
 });
 
