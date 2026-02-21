@@ -1,4 +1,5 @@
 import { createBrowserRouter } from 'react-router';
+// Routes configuration - v2.1 (merch & community migrated to API)
 import { RootLayout, PublicLayout, AdminAccessLayout } from './layouts';
 
 // ── Public Pages ─────────────────────────────────────────────────────
@@ -65,6 +66,9 @@ import { FeedbackManagement } from './pages/admin/FeedbackManagement';
 import { AIDevTeamPage } from './pages/admin/AIDevTeamPage';
 import { BroadcastTeamPage } from './pages/admin/BroadcastTeamPage';
 import { EditorialDepartmentPage } from './pages/admin/EditorialDepartmentPage';
+import { EventsManagement } from './pages/admin/EventsManagement';
+import { MerchManagement } from './pages/admin/MerchManagement';
+import { CommunityManagement } from './pages/admin/CommunityManagement';
 
 // ── Router ───────────────────────────────────────────────────────────
 export const router = createBrowserRouter([
@@ -130,6 +134,9 @@ export const router = createBrowserRouter([
       { path: 'schedule', Component: ScheduleManagement },
       { path: 'shows', Component: ShowsPodcastsManagement },
       { path: 'news', Component: NewsManagement },
+      { path: 'events', Component: EventsManagement },
+      { path: 'merch', Component: MerchManagement },
+      { path: 'community', Component: CommunityManagement },
 
       // Radio & DJ
       { path: 'automation', Component: ContentAutomationDashboard },

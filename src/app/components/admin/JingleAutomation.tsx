@@ -3,8 +3,21 @@ import { Settings, Zap, Calendar, List } from 'lucide-react';
 import { JingleRuleEditor } from './JingleRuleEditor';
 import { AutomationPresets } from './AutomationPresets';
 import { JingleTimeline } from './JingleTimeline';
-import { projectId } from '../../../../utils/supabase/info';
+import { projectId, publicAnonKey } from '../../../../utils/supabase/info';
 import { getAccessToken } from '../../../lib/api';
+
+const API_BASE = `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3`;
+
+/** Helper: fetch with apikey + auth headers */
+async function apiFetch(url: string, opts: RequestInit = {}): Promise<Response> {
+  const token = await getAccessToken();
+  const headers: Record<string, string> = {
+    'apikey': publicAnonKey,
+    'Authorization': `Bearer ${token}`,
+    ...(opts.headers as Record<string, string> || {}),
+  };
+  return fetch(url, { ...opts, headers });
+}
 
 type TabView = 'rules' | 'presets' | 'timeline';
 
@@ -13,18 +26,11 @@ export function JingleAutomation() {
 
   async function handleApplyPreset(preset: any) {
     try {
-      const token = await getAccessToken();
-      
       // Create rules from preset
       for (const presetRule of preset.rules) {
         // Find jingles matching this category
-        const jinglesResponse = await fetch(
-          `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/jingles?category=${presetRule.category}&active=true`,
-          {
-            headers: {
-              'Authorization': `Bearer ${token}`,
-            },
-          }
+        const jinglesResponse = await apiFetch(
+          `${API_BASE}/jingles?category=${presetRule.category}&active=true`
         );
 
         if (!jinglesResponse.ok) continue;
@@ -63,24 +69,18 @@ export function JingleAutomation() {
           rulePayload.daysOfWeek = presetRule.config.daysOfWeek;
         }
 
-        const createResponse = await fetch(
-          `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/jingle-rules`,
-          {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(rulePayload),
-          }
-        );
+        const createResponse = await apiFetch(`${API_BASE}/jingle-rules`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(rulePayload),
+        });
 
         if (!createResponse.ok) {
           console.error(`Failed to create rule for ${presetRule.category}`);
         }
       }
 
-      alert(`✅ Preset "${preset.name}" applied successfully!\n\nCreated ${preset.rules.length} automation rules.`);
+      alert(`Preset "${preset.name}" applied successfully!\n\nCreated ${preset.rules.length} automation rules.`);
       
       // Switch to rules tab to see results
       setActiveTab('rules');

@@ -45,39 +45,43 @@ export function AnalyticsPage() {
   const loadAnalytics = async () => {
     setLoading(true);
     try {
-      // Simulate analytics data
-      const mockData: AnalyticsData = {
-        totalListeners: 12456,
-        peakListeners: 342,
-        averageListenTime: 24,
-        totalTracks: 1250,
-        tracksPlayed: 456,
-        topGenres: [
-          { genre: 'Soul', count: 145 },
-          { genre: 'Funk', count: 128 },
-          { genre: 'Jazz', count: 98 },
-          { genre: 'Disco', count: 85 },
-        ],
-        topTracks: [
-          { title: 'Superstition', artist: 'Stevie Wonder', plays: 234 },
-          { title: "Let's Groove", artist: 'Earth, Wind & Fire', plays: 198 },
-          { title: 'Ain\'t No Mountain High Enough', artist: 'Marvin Gaye', plays: 187 },
-          { title: 'September', artist: 'Earth, Wind & Fire', plays: 165 },
-          { title: 'I Want You Back', artist: 'The Jackson 5', plays: 142 },
-        ],
-        listenersByHour: Array.from({ length: 24 }, (_, i) => ({
-          hour: i,
-          count: Math.floor(Math.random() * 200) + 50,
-        })),
-        listenersByDay: Array.from({ length: 7 }, (_, i) => ({
-          day: format(subDays(new Date(), 6 - i), 'EEE'),
-          count: Math.floor(Math.random() * 1000) + 500,
-        })),
-      };
-
-      setData(mockData);
+      const res = await api.getAnalytics({ startDate: dateRange.start, endDate: dateRange.end });
+      if (res.analytics) {
+        setData(res.analytics);
+      } else {
+        // No data yet — show zeroed state
+        setData({
+          totalListeners: 0,
+          peakListeners: 0,
+          averageListenTime: 0,
+          totalTracks: 0,
+          tracksPlayed: 0,
+          topGenres: [],
+          topTracks: [],
+          listenersByHour: Array.from({ length: 24 }, (_, i) => ({ hour: i, count: 0 })),
+          listenersByDay: Array.from({ length: 7 }, (_, i) => ({
+            day: format(subDays(new Date(), 6 - i), 'EEE'),
+            count: 0,
+          })),
+        });
+      }
     } catch (error) {
       console.error('Error loading analytics:', error);
+      // Show zeroed state on error
+      setData({
+        totalListeners: 0,
+        peakListeners: 0,
+        averageListenTime: 0,
+        totalTracks: 0,
+        tracksPlayed: 0,
+        topGenres: [],
+        topTracks: [],
+        listenersByHour: Array.from({ length: 24 }, (_, i) => ({ hour: i, count: 0 })),
+        listenersByDay: Array.from({ length: 7 }, (_, i) => ({
+          day: format(subDays(new Date(), 6 - i), 'EEE'),
+          count: 0,
+        })),
+      });
     } finally {
       setLoading(false);
     }

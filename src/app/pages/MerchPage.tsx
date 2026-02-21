@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -8,12 +8,14 @@ import {
   Truck,
   Package,
   Heart,
-  Eye,
   Tag,
   Zap,
+  Loader2,
+  RefreshCw,
 } from 'lucide-react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
+import { api } from '../../lib/api';
 
 interface MerchItem {
   id: string;
@@ -29,100 +31,49 @@ interface MerchItem {
   badge?: string;
   gradient: string;
   emoji: string;
+  image?: string;
+  inStock?: boolean;
 }
-
-const MERCH: MerchItem[] = [
-  {
-    id: '1',
-    name: 'Soul FM Classic Tee',
-    description: 'Premium cotton tee with iconic Soul FM logo. Soft, breathable, and perfect for everyday vibes.',
-    price: 29.99,
-    category: 'Apparel',
-    colors: ['Black', 'White', 'Navy'],
-    sizes: ['S', 'M', 'L', 'XL', 'XXL'],
-    rating: 4.8,
-    reviews: 156,
-    badge: 'Bestseller',
-    gradient: 'from-[#00d9ff] to-[#0088cc]',
-    emoji: '👕',
-  },
-  {
-    id: '2',
-    name: 'Groove Master Hoodie',
-    description: 'Stay warm in style. Heavyweight hoodie with embroidered logo and kangaroo pocket.',
-    price: 59.99,
-    originalPrice: 79.99,
-    category: 'Apparel',
-    colors: ['Black', 'Charcoal', 'Forest Green'],
-    sizes: ['S', 'M', 'L', 'XL'],
-    rating: 4.9,
-    reviews: 89,
-    badge: 'Sale',
-    gradient: 'from-[#00ffaa] to-[#00cc88]',
-    emoji: '🧥',
-  },
-  {
-    id: '3',
-    name: 'Vinyl Vibes Snapback',
-    description: 'Structured snapback cap with Soul FM wave embroidery. One size fits all.',
-    price: 24.99,
-    category: 'Accessories',
-    colors: ['Black', 'White'],
-    sizes: ['One Size'],
-    rating: 4.7,
-    reviews: 67,
-    gradient: 'from-[#FF8C42] to-[#FF6B1A]',
-    emoji: '🧢',
-  },
-  {
-    id: '4',
-    name: 'Soul FM Tote Bag',
-    description: 'Eco-friendly canvas tote. Carry your records, groceries, or good vibes.',
-    price: 19.99,
-    category: 'Accessories',
-    colors: ['Natural', 'Black'],
-    sizes: ['One Size'],
-    rating: 4.6,
-    reviews: 42,
-    gradient: 'from-[#E91E63] to-[#C2185B]',
-    emoji: '👜',
-  },
-  {
-    id: '5',
-    name: 'Frequency Mug',
-    description: 'Ceramic mug with heat-reactive Soul FM waveform. Changes color with hot drinks!',
-    price: 16.99,
-    category: 'Accessories',
-    colors: ['Black/Cyan'],
-    sizes: ['11oz', '15oz'],
-    rating: 4.9,
-    reviews: 203,
-    badge: 'New',
-    gradient: 'from-[#9C27B0] to-[#7B1FA2]',
-    emoji: '☕',
-  },
-  {
-    id: '6',
-    name: 'Wave Rider Sticker Pack',
-    description: '10 premium vinyl stickers featuring Soul FM designs. Waterproof and UV resistant.',
-    price: 9.99,
-    category: 'Accessories',
-    colors: ['Multi'],
-    sizes: ['One Size'],
-    rating: 4.8,
-    reviews: 312,
-    gradient: 'from-[#FFD700] to-[#FFA000]',
-    emoji: '🎨',
-  },
-];
 
 const CATEGORIES = ['All', 'Apparel', 'Accessories'];
 
 export function MerchPage() {
   const [category, setCategory] = useState('All');
   const [wishlist, setWishlist] = useState<Set<string>>(new Set());
+  const [items, setItems] = useState<MerchItem[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const filteredMerch = category === 'All' ? MERCH : MERCH.filter((m) => m.category === category);
+  useEffect(() => {
+    loadMerch();
+  }, []);
+
+  const loadMerch = async () => {
+    setLoading(true);
+    try {
+      const res = await api.getMerch();
+      const data = Array.isArray(res?.items) ? res.items : [];
+      if (data.length === 0) {
+        // Auto-seed if empty
+        console.log('[MerchPage] No merch items — seeding defaults...');
+        try {
+          await api.seedMerch();
+          const retry = await api.getMerch();
+          setItems(Array.isArray(retry?.items) ? retry.items : []);
+        } catch (seedErr) {
+          console.error('[MerchPage] Seed failed:', seedErr);
+        }
+      } else {
+        setItems(data);
+      }
+    } catch (error) {
+      console.error('[MerchPage] Load error:', error);
+      toast.error('Failed to load merch catalog');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const filteredMerch = category === 'All' ? items : items.filter((m) => m.category === category);
 
   const toggleWishlist = (id: string) => {
     setWishlist((prev) => {
@@ -209,85 +160,126 @@ export function MerchPage() {
               {cat}
             </Button>
           ))}
+          <div className="flex-1" />
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={loadMerch}
+            disabled={loading}
+            className="text-white/40 hover:text-white"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          </Button>
         </div>
 
-        {/* Products Grid */}
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredMerch.map((item, i) => (
-            <motion.div
-              key={item.id}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.05 }}
-            >
-              <Card className="bg-white/5 border-white/10 overflow-hidden hover:border-white/20 transition-all group">
-                {/* Product Image Placeholder */}
-                <div className={`relative h-52 bg-gradient-to-br ${item.gradient} flex items-center justify-center`}>
-                  <span className="text-7xl">{item.emoji}</span>
-                  {item.badge && (
-                    <Badge
-                      className={`absolute top-3 left-3 ${
-                        item.badge === 'Sale'
-                          ? 'bg-red-500/90 text-white'
-                          : item.badge === 'New'
-                          ? 'bg-[#00ffaa]/90 text-slate-900'
-                          : 'bg-[#FFD700]/90 text-slate-900'
-                      }`}
-                    >
-                      {item.badge}
-                    </Badge>
-                  )}
-                  <button
-                    onClick={() => toggleWishlist(item.id)}
-                    className="absolute top-3 right-3 w-8 h-8 rounded-full bg-black/30 backdrop-blur-sm flex items-center justify-center hover:bg-black/50 transition-colors"
-                  >
-                    <Heart
-                      className={`w-4 h-4 ${wishlist.has(item.id) ? 'text-red-400 fill-red-400' : 'text-white/70'}`}
-                    />
-                  </button>
-                </div>
-
-                {/* Product Info */}
-                <div className="p-4">
-                  <div className="flex items-center gap-1 mb-1">
-                    {[...Array(5)].map((_, si) => (
-                      <Star
-                        key={si}
-                        className={`w-3 h-3 ${si < Math.floor(item.rating) ? 'text-[#FFD700] fill-[#FFD700]' : 'text-white/20'}`}
-                      />
-                    ))}
-                    <span className="text-xs text-white/40 ml-1">({item.reviews})</span>
-                  </div>
-                  <h3 className="text-white font-bold mb-1 group-hover:text-[#00d9ff] transition-colors">
-                    {item.name}
-                  </h3>
-                  <p className="text-sm text-white/40 line-clamp-2 mb-3">{item.description}</p>
-                  <div className="flex flex-wrap gap-1 mb-3">
-                    {item.colors.map((c) => (
-                      <span key={c} className="text-[10px] text-white/30 bg-white/5 px-1.5 py-0.5 rounded">{c}</span>
-                    ))}
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-baseline gap-2">
-                      <span className="text-lg font-bold text-white">${item.price.toFixed(2)}</span>
-                      {item.originalPrice && (
-                        <span className="text-sm text-white/30 line-through">${item.originalPrice.toFixed(2)}</span>
+        {/* Loading */}
+        {loading ? (
+          <div className="flex items-center justify-center h-64">
+            <Loader2 className="size-8 text-cyan-400 animate-spin" />
+          </div>
+        ) : filteredMerch.length === 0 ? (
+          <Card className="p-12 bg-white/5 border-white/10 text-center">
+            <ShoppingBag className="size-16 text-white/10 mx-auto mb-4" />
+            <h3 className="text-xl font-semibold text-white mb-2">No Items</h3>
+            <p className="text-white/40 mb-4">
+              {category === 'All'
+                ? 'The merch store is empty. Check back soon!'
+                : `No ${category.toLowerCase()} items available.`}
+            </p>
+          </Card>
+        ) : (
+          /* Products Grid */
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            <AnimatePresence mode="popLayout">
+              {filteredMerch.map((item, i) => (
+                <motion.div
+                  key={item.id}
+                  layout
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.9 }}
+                  transition={{ delay: i * 0.05 }}
+                >
+                  <Card className="bg-white/5 border-white/10 overflow-hidden hover:border-white/20 transition-all group">
+                    {/* Product Image Placeholder */}
+                    <div className={`relative h-52 bg-gradient-to-br ${item.gradient || 'from-[#00d9ff] to-[#00ffaa]'} flex items-center justify-center`}>
+                      {item.image ? (
+                        <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
+                      ) : (
+                        <span className="text-7xl">{item.emoji || '🎵'}</span>
                       )}
+                      {item.badge && (
+                        <Badge
+                          className={`absolute top-3 left-3 ${
+                            item.badge === 'Sale'
+                              ? 'bg-red-500/90 text-white'
+                              : item.badge === 'New'
+                              ? 'bg-[#00ffaa]/90 text-slate-900'
+                              : 'bg-[#FFD700]/90 text-slate-900'
+                          }`}
+                        >
+                          {item.badge}
+                        </Badge>
+                      )}
+                      {item.inStock === false && (
+                        <Badge className="absolute top-3 left-3 bg-gray-600/90 text-white">
+                          Out of Stock
+                        </Badge>
+                      )}
+                      <button
+                        onClick={() => toggleWishlist(item.id)}
+                        className="absolute top-3 right-3 w-8 h-8 rounded-full bg-black/30 backdrop-blur-sm flex items-center justify-center hover:bg-black/50 transition-colors"
+                      >
+                        <Heart
+                          className={`w-4 h-4 ${wishlist.has(item.id) ? 'text-red-400 fill-red-400' : 'text-white/70'}`}
+                        />
+                      </button>
                     </div>
-                    <Button
-                      size="sm"
-                      className="bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] text-slate-900 font-bold text-xs gap-1"
-                      onClick={() => toast.success(`${item.name} added to cart!`)}
-                    >
-                      <ShoppingBag className="w-3.5 h-3.5" />
-                      Add
-                    </Button>
-                  </div>
-                </div>
-              </Card>
-            </motion.div>
-          ))}
-        </div>
+
+                    {/* Product Info */}
+                    <div className="p-4">
+                      <div className="flex items-center gap-1 mb-1">
+                        {[...Array(5)].map((_, si) => (
+                          <Star
+                            key={si}
+                            className={`w-3 h-3 ${si < Math.floor(item.rating || 0) ? 'text-[#FFD700] fill-[#FFD700]' : 'text-white/20'}`}
+                          />
+                        ))}
+                        <span className="text-xs text-white/40 ml-1">({item.reviews || 0})</span>
+                      </div>
+                      <h3 className="text-white font-bold mb-1 group-hover:text-[#00d9ff] transition-colors">
+                        {item.name}
+                      </h3>
+                      <p className="text-sm text-white/40 line-clamp-2 mb-3">{item.description}</p>
+                      <div className="flex flex-wrap gap-1 mb-3">
+                        {(item.colors || []).map((c) => (
+                          <span key={c} className="text-[10px] text-white/30 bg-white/5 px-1.5 py-0.5 rounded">{c}</span>
+                        ))}
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-lg font-bold text-white">${(item.price || 0).toFixed(2)}</span>
+                          {item.originalPrice && (
+                            <span className="text-sm text-white/30 line-through">${item.originalPrice.toFixed(2)}</span>
+                          )}
+                        </div>
+                        <Button
+                          size="sm"
+                          className="bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] text-slate-900 font-bold text-xs gap-1"
+                          disabled={item.inStock === false}
+                          onClick={() => toast.success(`${item.name} added to cart!`)}
+                        >
+                          <ShoppingBag className="w-3.5 h-3.5" />
+                          Add
+                        </Button>
+                      </div>
+                    </div>
+                  </Card>
+                </motion.div>
+              ))}
+            </AnimatePresence>
+          </div>
+        )}
       </div>
     </div>
   );

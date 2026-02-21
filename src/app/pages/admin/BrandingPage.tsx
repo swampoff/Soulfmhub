@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '../../../lib/api';
-const soulFmLogo = '/favicon.ico'; // Automatically fixed figma asset import
+import soulFmLogo from 'figma:asset/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png';
 
 interface BrandSettings {
   stationName: string;

@@ -26,10 +26,21 @@ import {
   Tv,
   Upload,
   Users,
-  Antenna,
+  FileText,
+  Archive,
+  Palette,
+  MessageSquare,
+  Bot,
+  Clapperboard,
+  LogOut,
+  User,
+  CalendarDays,
+  ShoppingBag,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import soulFmLogo from 'figma:asset/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png';
+import { useApp } from '../../../context/AppContext';
+import { supabase } from '../../../lib/supabase';
 
 // ── All admin navigation items, organized by group ──────────────────
 
@@ -48,15 +59,23 @@ interface NavGroup {
 
 const PRIMARY_TABS: NavItem[] = [
   { id: 'home',      label: 'Home',      icon: Home,     path: '/admin' },
-  { id: 'broadcast', label: 'Эфир',      icon: Antenna,  path: '/admin/broadcast' },
-  { id: 'media',     label: 'Треки',     icon: Music,    path: '/admin/tracks' },
+  { id: 'media',     label: 'Media',     icon: Music,    path: '/admin/media' },
   { id: 'playlists', label: 'Playlists', icon: ListMusic, path: '/admin/playlists' },
   { id: 'schedule',  label: 'Schedule',  icon: Calendar, path: '/admin/schedule' },
   { id: 'shows',     label: 'Shows',     icon: Tv,       path: '/admin/shows' },
   { id: 'news',      label: 'News',      icon: Newspaper, path: '/admin/news' },
+  { id: 'events',    label: 'Events',    icon: CalendarDays, path: '/admin/events' },
 ];
 
 const MORE_GROUPS: NavGroup[] = [
+  {
+    id: 'content',
+    label: 'Content',
+    items: [
+      { id: 'merch',       label: 'Merch Store',   icon: ShoppingBag, path: '/admin/merch' },
+      { id: 'community',   label: 'Community',     icon: Users,       path: '/admin/community' },
+    ],
+  },
   {
     id: 'radio',
     label: 'Radio & DJ',
@@ -83,10 +102,17 @@ const MORE_GROUPS: NavGroup[] = [
     id: 'system',
     label: 'System',
     items: [
-      { id: 'analytics',   label: 'Analytics',    icon: BarChart3, path: '/admin/analytics' },
-      { id: 'users',       label: 'Users',        icon: Users,     path: '/admin/users' },
-      { id: 'system-test', label: 'System Test',  icon: TestTube,  path: '/admin/system-test' },
-      { id: 'upload-test', label: 'Upload Test',  icon: FileAudio, path: '/admin/upload-test' },
+      { id: 'analytics',   label: 'Analytics',    icon: BarChart3,      path: '/admin/analytics' },
+      { id: 'users',       label: 'Users',        icon: Users,          path: '/admin/users' },
+      { id: 'logs',        label: 'Logs & Audit', icon: FileText,       path: '/admin/logs' },
+      { id: 'backup',      label: 'Backup & Export', icon: Archive,     path: '/admin/backup' },
+      { id: 'branding',    label: 'Branding',     icon: Palette,        path: '/admin/branding' },
+      { id: 'feedback',    label: 'Feedback',     icon: MessageSquare,  path: '/admin/feedback' },
+      { id: 'ai-team',     label: 'AI Dev Team',  icon: Bot,            path: '/admin/ai-team' },
+      { id: 'broadcast-team', label: 'Broadcast Team', icon: Radio,     path: '/admin/broadcast-team' },
+      { id: 'editorial',    label: 'Editorial Dept', icon: Clapperboard,  path: '/admin/editorial' },
+      { id: 'system-test', label: 'System Test',  icon: TestTube,       path: '/admin/system-test' },
+      { id: 'upload-test', label: 'Upload Test',  icon: FileAudio,      path: '/admin/upload-test' },
     ],
   },
 ];
@@ -189,12 +215,39 @@ export function AdminLayout({ children, maxWidth = 'default' }: AdminLayoutProps
   const navigate = useNavigate();
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const { user, signOut: appSignOut } = useApp();
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close user menu on outside click
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) setUserMenuOpen(false);
+    }
+    if (userMenuOpen) document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [userMenuOpen]);
+
+  // Derive display info from authenticated user or session
+  const displayName = user?.name || user?.email?.split('@')[0] || 'Admin';
+  const displayRole = user?.role === 'super_admin' ? 'Super Admin' : (user?.role || 'Admin');
+  const displayInitial = (user?.name?.[0] || user?.email?.[0] || 'A').toUpperCase();
 
   const getMaxWidthClass = () => {
     switch (maxWidth) {
       case 'wide':  return 'max-w-[1600px]';
       case 'full':  return 'max-w-full';
       default:      return 'max-w-7xl';
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await appSignOut();
+      sessionStorage.removeItem('soul-fm-admin');
+      navigate('/');
+    } catch (error) {
+      console.error('Error logging out:', error);
     }
   };
 
@@ -270,13 +323,68 @@ export function AdminLayout({ children, maxWidth = 'default' }: AdminLayoutProps
                 <span>Site</span>
               </Link>
 
-              {/* User */}
-              <div className="hidden sm:block text-right">
-                <div className="text-xs sm:text-sm font-medium">Admin</div>
-                <div className="text-[10px] sm:text-xs text-white/40">Super Admin</div>
-              </div>
-              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-gradient-to-br from-[#00d9ff] to-[#00ffaa] flex items-center justify-center text-xs sm:text-sm font-bold text-black">
-                A
+              {/* User Info & Menu */}
+              <div ref={userMenuRef} className="relative">
+                <button
+                  onClick={() => setUserMenuOpen(o => !o)}
+                  className="flex items-center gap-2 hover:bg-white/5 rounded-lg px-2 py-1 transition-colors"
+                >
+                  <div className="hidden sm:block text-right">
+                    <div className="text-xs sm:text-sm font-medium truncate max-w-[120px]">{displayName}</div>
+                    <div className="text-[10px] sm:text-xs text-white/40">{displayRole}</div>
+                  </div>
+                  <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-gradient-to-br from-[#00d9ff] to-[#00ffaa] flex items-center justify-center text-xs sm:text-sm font-bold text-black flex-shrink-0">
+                    {displayInitial}
+                  </div>
+                </button>
+
+                <AnimatePresence>
+                  {userMenuOpen && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -4, scale: 0.97 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -4, scale: 0.97 }}
+                      transition={{ duration: 0.12 }}
+                      className="absolute right-0 top-full mt-2 w-56 bg-[#141414] border border-white/10 rounded-xl shadow-2xl shadow-black/60 overflow-hidden z-50"
+                    >
+                      {/* User info */}
+                      <div className="px-4 py-3 border-b border-white/5">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-[#00d9ff] to-[#00ffaa] flex items-center justify-center text-sm font-bold text-black flex-shrink-0">
+                            {displayInitial}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-white truncate">{displayName}</p>
+                            <p className="text-[10px] text-white/40 truncate">{user?.email || 'No email'}</p>
+                          </div>
+                        </div>
+                        {user && (
+                          <div className="mt-2 flex items-center gap-1.5">
+                            <div className="w-1.5 h-1.5 rounded-full bg-[#00ffaa] animate-pulse" />
+                            <span className="text-[10px] text-[#00ffaa]/70">Authenticated via Supabase Auth</span>
+                          </div>
+                        )}
+                        {!user && (
+                          <div className="mt-2 flex items-center gap-1.5">
+                            <div className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                            <span className="text-[10px] text-amber-400/70">Preview mode (no session)</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Actions */}
+                      <div className="p-1.5">
+                        <button
+                          onClick={() => { setUserMenuOpen(false); handleLogout(); }}
+                          className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-red-400/80 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-colors"
+                        >
+                          <LogOut className="size-4" />
+                          <span>Sign Out</span>
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             </div>
           </div>
@@ -345,6 +453,19 @@ export function AdminLayout({ children, maxWidth = 'default' }: AdminLayoutProps
                     })}
                   </div>
                 ))}
+
+                {/* Sign Out in mobile menu */}
+                <div className="border-t border-white/5 pt-2 mt-2">
+                  <button
+                    onClick={() => { setMobileMenuOpen(false); handleLogout(); }}
+                    className="w-full flex items-center justify-between p-3 rounded-lg text-red-400/70 hover:text-red-400 hover:bg-red-400/10 transition-all"
+                  >
+                    <div className="flex items-center gap-3">
+                      <LogOut className="size-5" />
+                      <span className="text-sm font-medium">Sign Out</span>
+                    </div>
+                  </button>
+                </div>
               </div>
             </motion.div>
           )}

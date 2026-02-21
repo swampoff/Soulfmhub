@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Play, Pause, Upload, Plus, Filter, Grid3x3, List, Trash2, Edit2, Volume2 } from 'lucide-react';
-import { projectId } from '../../../../utils/supabase/info';
+import { Play, Pause, Upload, Plus, Filter, Grid3x3, List, Trash2, Edit2, Volume2, RefreshCw } from 'lucide-react';
+import { projectId, publicAnonKey } from '../../../../utils/supabase/info';
 import { getAccessToken } from '../../../lib/api';
 import { JingleUploadButton } from './JingleUploadButton';
 import { JINGLE_CATEGORIES, getCategoryInfo, CATEGORY_GROUPS } from './jingle-categories';
+
+const API_BASE = `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3`;
 
 interface Jingle {
   id: string;
@@ -18,6 +20,17 @@ interface Jingle {
   tags: string[];
   storageFilename: string | null;
   createdAt: string;
+}
+
+/** Helper: fetch with apikey + auth headers */
+async function apiFetch(url: string, opts: RequestInit = {}): Promise<Response> {
+  const token = await getAccessToken();
+  const headers: Record<string, string> = {
+    'apikey': publicAnonKey,
+    'Authorization': `Bearer ${token}`,
+    ...(opts.headers as Record<string, string> || {}),
+  };
+  return fetch(url, { ...opts, headers });
 }
 
 export function JinglesLibrary() {
@@ -40,18 +53,12 @@ export function JinglesLibrary() {
       if (filterCategory) params.append('category', filterCategory);
       if (filterActive !== null) params.append('active', filterActive.toString());
 
-      const token = await getAccessToken();
-      const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/jingles?${params}`,
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-          },
-        }
-      );
+      const response = await apiFetch(`${API_BASE}/jingles?${params}`);
 
       if (!response.ok) {
-        throw new Error('Failed to load jingles');
+        const errText = await response.text().catch(() => response.statusText);
+        console.error('Failed to load jingles:', response.status, errText);
+        throw new Error(`Failed to load jingles (${response.status})`);
       }
 
       const data = await response.json();
@@ -67,19 +74,11 @@ export function JinglesLibrary() {
     if (!confirm('Are you sure you want to delete this jingle?')) return;
 
     try {
-      const token = await getAccessToken();
-      const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/jingles/${id}`,
-        {
-          method: 'DELETE',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-          },
-        }
-      );
+      const response = await apiFetch(`${API_BASE}/jingles/${id}`, { method: 'DELETE' });
 
       if (!response.ok) {
-        throw new Error('Failed to delete jingle');
+        const errText = await response.text().catch(() => response.statusText);
+        throw new Error(`Failed to delete jingle (${response.status}): ${errText}`);
       }
 
       await loadJingles();
@@ -91,18 +90,11 @@ export function JinglesLibrary() {
 
   async function toggleActive(jingle: Jingle) {
     try {
-      const token = await getAccessToken();
-      const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/jingles/${jingle.id}`,
-        {
-          method: 'PUT',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ active: !jingle.active }),
-        }
-      );
+      const response = await apiFetch(`${API_BASE}/jingles/${jingle.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active: !jingle.active }),
+      });
 
       if (!response.ok) {
         throw new Error('Failed to update jingle');
@@ -130,25 +122,18 @@ export function JinglesLibrary() {
       }
 
       // Get signed URL for audio
-      const token = await getAccessToken();
-      const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/jingles/${jingle.id}/audio`,
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-          },
-        }
-      );
+      const response = await apiFetch(`${API_BASE}/jingles/${jingle.id}/audio`);
 
       if (!response.ok) {
-        throw new Error('Failed to get audio URL');
+        const errText = await response.text().catch(() => response.statusText);
+        throw new Error(`Failed to get audio URL (${response.status}): ${errText}`);
       }
 
       const { audioUrl } = await response.json();
 
       // Create and play audio
       const audio = new Audio(audioUrl);
-      audio.volume = 0.7; // Set volume to 70%
+      audio.volume = 0.7;
       
       audio.onended = () => {
         setPlayingId(null);
@@ -184,6 +169,7 @@ export function JinglesLibrary() {
   }, [audioElement]);
 
   function formatDuration(seconds: number): string {
+    if (!seconds || seconds <= 0) return '0:00';
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
@@ -211,6 +197,15 @@ export function JinglesLibrary() {
         </div>
 
         <div className="flex items-center gap-3">
+          {/* Refresh */}
+          <button
+            onClick={loadJingles}
+            className="p-2 bg-white/5 text-gray-400 rounded-lg hover:text-cyan-400 hover:bg-white/10 transition-colors"
+            title="Refresh"
+          >
+            <RefreshCw className="w-5 h-5" />
+          </button>
+
           {/* View Mode Toggle */}
           <div className="flex items-center gap-2 bg-white/5 rounded-lg p-1">
             <button
@@ -236,7 +231,7 @@ export function JinglesLibrary() {
       </div>
 
       {/* Filters */}
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-4 flex-wrap">
         <div className="flex items-center gap-2">
           <Filter className="w-5 h-5 text-gray-400" />
           <select
@@ -307,7 +302,7 @@ export function JinglesLibrary() {
                 </div>
 
                 {/* Title */}
-                <h3 className="text-lg font-bold text-white mb-1 truncate">{jingle.title}</h3>
+                <h3 className="text-lg font-bold text-white mb-1 truncate">{jingle.title || 'Untitled'}</h3>
                 {jingle.description && (
                   <p className="text-gray-400 text-sm mb-3 line-clamp-2">{jingle.description}</p>
                 )}
@@ -315,42 +310,46 @@ export function JinglesLibrary() {
                 {/* Stats */}
                 <div className="flex items-center justify-between text-sm text-gray-400 mb-4">
                   <span>{formatDuration(jingle.duration)}</span>
-                  <span>{jingle.playCount} plays</span>
+                  <span>{jingle.playCount || 0} plays</span>
                 </div>
+
+                {/* File status */}
+                {!jingle.storageFilename && (
+                  <div className="text-xs text-amber-400/80 mb-3 flex items-center gap-1.5">
+                    <div className="w-2 h-2 bg-amber-400 rounded-full" />
+                    No audio file
+                  </div>
+                )}
 
                 {/* Actions */}
                 <div className="flex items-center gap-2">
-                  <button className="flex-1 px-3 py-2 bg-cyan-500/20 text-cyan-400 rounded-lg hover:bg-cyan-500/30 transition-colors flex items-center justify-center gap-2">
-                    <Play className="w-4 h-4" />
-                    Play
+                  <button
+                    onClick={() => playPreview(jingle)}
+                    disabled={!jingle.storageFilename}
+                    className={`flex-1 px-3 py-2 rounded-lg transition-colors flex items-center justify-center gap-2 ${
+                      !jingle.storageFilename
+                        ? 'bg-gray-500/20 text-gray-500 cursor-not-allowed'
+                        : playingId === jingle.id
+                        ? 'bg-[#00d9ff]/20 text-[#00d9ff] hover:bg-[#00d9ff]/30'
+                        : 'bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30'
+                    }`}
+                    title={!jingle.storageFilename ? 'No audio file uploaded' : 'Play preview'}
+                  >
+                    {playingId === jingle.id ? (
+                      <><Pause className="w-4 h-4" /> Stop</>
+                    ) : (
+                      <><Play className="w-4 h-4" /> Play</>
+                    )}
                   </button>
                   <button
                     onClick={() => toggleActive(jingle)}
-                    className={`px-3 py-2 rounded-lg transition-colors ${
+                    className={`px-3 py-2 rounded-lg transition-colors text-sm ${
                       jingle.active
                         ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30'
                         : 'bg-gray-500/20 text-gray-400 hover:bg-gray-500/30'
                     }`}
                   >
-                    {jingle.active ? 'Active' : 'Inactive'}
-                  </button>
-                  <button
-                    onClick={() => playPreview(jingle)}
-                    disabled={!jingle.storageFilename}
-                    className={`px-3 py-2 rounded-lg transition-colors ${
-                      !jingle.storageFilename
-                        ? 'bg-gray-500/20 text-gray-500 cursor-not-allowed'
-                        : playingId === jingle.id
-                        ? 'bg-[#00d9ff]/20 text-[#00d9ff] hover:bg-[#00d9ff]/30'
-                        : 'bg-blue-500/20 text-blue-400 hover:bg-blue-500/30'
-                    }`}
-                    title={!jingle.storageFilename ? 'No audio file uploaded' : 'Play preview'}
-                  >
-                    {playingId === jingle.id ? (
-                      <Pause className="w-4 h-4" />
-                    ) : (
-                      <Play className="w-4 h-4" />
-                    )}
+                    {jingle.active ? 'On' : 'Off'}
                   </button>
                   <button
                     onClick={() => deleteJingle(jingle.id)}
@@ -392,8 +391,8 @@ export function JinglesLibrary() {
                 </button>
 
                 <div className="flex-1 min-w-0">
-                  <h3 className="font-bold text-white truncate">{jingle.title}</h3>
-                  <p className="text-sm text-gray-400">{formatDuration(jingle.duration)} • {jingle.playCount} plays</p>
+                  <h3 className="font-bold text-white truncate">{jingle.title || 'Untitled'}</h3>
+                  <p className="text-sm text-gray-400">{formatDuration(jingle.duration)} • {jingle.playCount || 0} plays</p>
                 </div>
 
                 <span className={`${categoryInfo.color} text-white text-xs font-semibold px-3 py-1 rounded-full flex-shrink-0`}>

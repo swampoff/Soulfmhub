@@ -63,33 +63,51 @@ export default function ContentAutomationDashboard() {
   const loadData = async () => {
     setLoading(true);
     try {
-      // Mock stats for now
-      setStats({
-        total: 156,
-        today: 12,
-        pending: 3,
-        generating: 1,
-        generated: 8,
-        broadcast: 144,
-        failed: 2,
-        successRate: 98.7,
-        activeScheduleItems: 15,
-        activeVoices: 5
-      });
-
-      // Mock recent content
-      setRecentContent([
-        {
-          id: '1',
-          scheduleId: 'sch-1',
-          broadcastDate: new Date().toISOString().split('T')[0],
-          broadcastTime: '10:00',
-          contentType: 'jingle',
-          status: 'generated',
-          scriptText: 'Welcome to Soul FM Hub, your non-stop groove station!',
-          createdAt: new Date().toISOString()
+      // Load real stats from automation API
+      try {
+        const headers = await getAuthHeaders();
+        const statsRes = await fetch(
+          `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/automation/stats`,
+          { headers }
+        );
+        if (statsRes.ok) {
+          const statsData = await statsRes.json();
+          setStats(statsData.stats || {
+            total: 0, today: 0, pending: 0, generating: 0,
+            generated: 0, broadcast: 0, failed: 0, successRate: 0,
+            activeScheduleItems: 0, activeVoices: 0
+          });
+        } else {
+          setStats({
+            total: 0, today: 0, pending: 0, generating: 0,
+            generated: 0, broadcast: 0, failed: 0, successRate: 0,
+            activeScheduleItems: 0, activeVoices: 0
+          });
         }
-      ]);
+      } catch {
+        setStats({
+          total: 0, today: 0, pending: 0, generating: 0,
+          generated: 0, broadcast: 0, failed: 0, successRate: 0,
+          activeScheduleItems: 0, activeVoices: 0
+        });
+      }
+
+      // Load recent content from API
+      try {
+        const headers = await getAuthHeaders();
+        const contentRes = await fetch(
+          `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/automation/recent`,
+          { headers }
+        );
+        if (contentRes.ok) {
+          const contentData = await contentRes.json();
+          setRecentContent(contentData.content || []);
+        } else {
+          setRecentContent([]);
+        }
+      } catch {
+        setRecentContent([]);
+      }
     } catch (error) {
       console.error('Load data error:', error);
       toast.error('Ошибка загрузки данных');

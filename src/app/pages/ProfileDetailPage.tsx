@@ -24,7 +24,7 @@ import {
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { api } from '../../lib/api';
-const nikoAvatar = '/favicon.ico'; // Updated to avoid Vercel build break
+import nikoAvatar from 'figma:asset/2bcd2a7b9863e5b63f9a6dba11123e60aa992bd0.png';
 
 interface VoiceDescription {
   timber?: string;

@@ -1,10 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Trash2, Clock, Hash, Calendar, Radio, Save, X, Zap, Copy } from 'lucide-react';
-import { projectId } from '../../../../utils/supabase/info';
+import { projectId, publicAnonKey } from '../../../../utils/supabase/info';
 import { getAccessToken } from '../../../lib/api';
 import { JINGLE_CATEGORIES, getCategoryInfo } from './jingle-categories';
 import { AutomationPresets } from './AutomationPresets';
 import { JingleTimeline } from './JingleTimeline';
+
+const API_BASE = `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3`;
+
+/** Helper: fetch with apikey + auth headers */
+async function apiFetch(url: string, opts: RequestInit = {}): Promise<Response> {
+  const token = await getAccessToken();
+  const headers: Record<string, string> = {
+    'apikey': publicAnonKey,
+    'Authorization': `Bearer ${token}`,
+    ...(opts.headers as Record<string, string> || {}),
+  };
+  return fetch(url, { ...opts, headers });
+}
 
 interface Jingle {
   id: string;
@@ -68,15 +81,7 @@ export function JingleRuleEditor() {
 
   async function loadJingles() {
     try {
-      const token = await getAccessToken();
-      const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/jingles?active=true`,
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-          },
-        }
-      );
+      const response = await apiFetch(`${API_BASE}/jingles?active=true`);
 
       if (!response.ok) throw new Error('Failed to load jingles');
 
@@ -89,15 +94,7 @@ export function JingleRuleEditor() {
 
   async function loadRules() {
     try {
-      const token = await getAccessToken();
-      const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/jingle-rules`,
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-          },
-        }
-      );
+      const response = await apiFetch(`${API_BASE}/jingle-rules`);
 
       if (!response.ok) throw new Error('Failed to load rules');
 
@@ -115,28 +112,21 @@ export function JingleRuleEditor() {
     }
 
     try {
-      const token = await getAccessToken();
-      const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/jingle-rules`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            jingleId: selectedJingle,
-            ruleType,
-            intervalMinutes: ruleType === 'interval' ? intervalMinutes : null,
-            specificTimes: ruleType === 'time_based' ? specificTimes : [],
-            daysOfWeek: daysOfWeek.length > 0 ? daysOfWeek : null,
-            trackInterval: ruleType === 'track_count' ? trackInterval : null,
-            position: 'before_track',
-            minGapMinutes,
-            active: true,
-          }),
-        }
-      );
+      const response = await apiFetch(`${API_BASE}/jingle-rules`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jingleId: selectedJingle,
+          ruleType,
+          intervalMinutes: ruleType === 'interval' ? intervalMinutes : null,
+          specificTimes: ruleType === 'time_based' ? specificTimes : [],
+          daysOfWeek: daysOfWeek.length > 0 ? daysOfWeek : null,
+          trackInterval: ruleType === 'track_count' ? trackInterval : null,
+          position: 'before_track',
+          minGapMinutes,
+          active: true,
+        }),
+      });
 
       if (!response.ok) throw new Error('Failed to create rule');
 
@@ -153,16 +143,7 @@ export function JingleRuleEditor() {
     if (!confirm('Delete this rule?')) return;
 
     try {
-      const token = await getAccessToken();
-      const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/jingle-rules/${id}`,
-        {
-          method: 'DELETE',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-          },
-        }
-      );
+      const response = await apiFetch(`${API_BASE}/jingle-rules/${id}`, { method: 'DELETE' });
 
       if (!response.ok) throw new Error('Failed to delete rule');
 
@@ -175,18 +156,11 @@ export function JingleRuleEditor() {
 
   async function toggleRuleActive(rule: JingleRule) {
     try {
-      const token = await getAccessToken();
-      const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/jingle-rules/${rule.id}`,
-        {
-          method: 'PUT',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ active: !rule.active }),
-        }
-      );
+      const response = await apiFetch(`${API_BASE}/jingle-rules/${rule.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active: !rule.active }),
+      });
 
       if (!response.ok) throw new Error('Failed to update rule');
 

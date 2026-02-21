@@ -37,6 +37,7 @@ import {
   Archive,
   Bot,
   Clapperboard,
+  ShoppingBag,
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { api } from '../../../lib/api';
@@ -71,6 +72,8 @@ const QUICK_LINKS = [
   { label: 'Schedule',         icon: Calendar,       path: '/admin/schedule',        color: '#ff8c00', desc: 'Show timetable' },
   { label: 'Shows & Podcasts', icon: Tv,             path: '/admin/shows',           color: '#9b59b6', desc: 'Shows, podcasts, episodes' },
   { label: 'News',             icon: Newspaper,      path: '/admin/news',            color: '#2ecc71', desc: 'Articles & announcements' },
+  { label: 'Merch Store',      icon: ShoppingBag,    path: '/admin/merch',           color: '#E91E63', desc: 'Products & catalog' },
+  { label: 'Community',        icon: Users,          path: '/admin/community',       color: '#00ffaa', desc: 'Moderate chat & messages' },
   { label: 'Automation',       icon: Sparkles,       path: '/admin/automation',      color: '#e67e22', desc: 'Jingles, rules, content' },
   { label: 'News Injection',   icon: Globe,          path: '/admin/news-injection',  color: '#16a085', desc: 'Voiceovers & inject rules' },
   { label: 'Live DJ Console',  icon: Headphones,     path: '/admin/live-dj-console', color: '#e74c3c', desc: 'Go live on air' },
@@ -78,7 +81,7 @@ const QUICK_LINKS = [
   { label: 'Shoutouts',        icon: Heart,          path: '/admin/shoutouts',       color: '#e91e63', desc: 'Listener shoutouts' },
   { label: 'Call Queue',       icon: Phone,          path: '/admin/call-queue',      color: '#00bcd4', desc: 'Incoming caller queue' },
   { label: 'Feedback',         icon: MessageSquare,  path: '/admin/feedback',        color: '#FF6B6B', desc: 'Listener feedback & ratings' },
-  { label: 'Stream Settings',  icon: Settings,       path: '/admin/stream-settings', color: '#95a5a6', desc: 'Icecast & encoding' },
+  { label: 'Stream Settings',  icon: Settings,       path: '/admin/stream-settings', color: '#95a5a6', desc: 'AzuraCast & encoding' },
   { label: 'Branding',         icon: Palette,        path: '/admin/branding',        color: '#E040FB', desc: 'Colors, fonts, identity' },
   { label: 'Analytics',        icon: BarChart3,      path: '/admin/analytics',       color: '#8e44ad', desc: 'Listeners, stats, reports' },
   { label: 'Donations',        icon: DollarSign,     path: '/admin/donations',       color: '#f39c12', desc: 'Supporter contributions' },
@@ -114,6 +117,8 @@ export function AdminHomePage() {
     feedback: { total: number; new: number };
     logs: { total: number; errors: number; warnings: number; recent: any[] };
   } | null>(null);
+  const [icecastStatus, setIcecastStatus] = useState<any>(null);
+  const [azuraStatus, setAzuraStatus] = useState<any>(null);
 
   useEffect(() => {
     loadData();
@@ -188,6 +193,18 @@ export function AdminHomePage() {
         console.error('Dashboard stats load error (non-critical):', dsErr);
       }
 
+      // Load Icecast status
+      try {
+        const ice = await api.getIcecastStatus();
+        setIcecastStatus(ice);
+      } catch { /* non-critical */ }
+
+      // Load AzuraCast status
+      try {
+        const az = await api.getAzuraCastStatus();
+        setAzuraStatus(az);
+      } catch { /* non-critical */ }
+
       setLastUpdate(new Date());
     } catch (error) {
       console.error('Error loading admin home data:', error);
@@ -225,8 +242,8 @@ export function AdminHomePage() {
   };
 
   const streamUrls = [
-    { id: 'main', label: 'Main Stream', url: 'https://stream.soulfm.radio/main', bitrate: '128kbps' },
-    { id: 'hq', label: 'High Quality', url: 'https://stream.soulfm.radio/hq', bitrate: '320kbps' },
+    { id: 'main', label: 'Main Stream (HTTPS)', url: azuraStatus?.streamUrls?.https || icecastStatus?.listenerUrl || 'https://stream.soul-fm.com/soulfm', bitrate: icecastStatus?.bitrate || '128kbps' },
+    { id: 'http', label: 'Direct IP Stream (HTTP)', url: azuraStatus?.streamUrls?.http || 'http://187.77.85.42:8000/soulfm', bitrate: '128kbps' },
   ];
 
   if (loading) {
@@ -554,26 +571,77 @@ export function AdminHomePage() {
           >
             <h2 className="text-base lg:text-lg font-semibold mb-4 flex items-center gap-2">
               <Server className="size-5 text-[#00d9ff]" />
-              Icecast Server
+              {azuraStatus?.configured ? 'AzuraCast Server' : 'Icecast Server'}
             </h2>
             <div className="space-y-3">
+              {/* Now Playing from AzuraCast */}
+              {azuraStatus?.nowPlaying && (
+                <div className="p-2.5 rounded-lg bg-gradient-to-r from-[#00d9ff]/10 to-[#00ffaa]/10 border border-[#00d9ff]/20">
+                  <div className="flex items-center gap-2">
+                    {azuraStatus.nowPlaying.art && (
+                      <img src={azuraStatus.nowPlaying.art} alt="" className="w-8 h-8 rounded object-cover flex-shrink-0" />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[10px] text-[#00d9ff]">Now Playing</p>
+                      <p className="text-xs text-white font-medium truncate">{azuraStatus.nowPlaying.artist} — {azuraStatus.nowPlaying.title}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
               <div>
                 <div className="text-xs text-white/40 mb-1">Server</div>
-                <div className="text-sm font-mono bg-white/5 p-2 rounded truncate">stream.soulfm.radio</div>
+                <div className="text-sm font-mono bg-white/5 p-2 rounded truncate">
+                  {azuraStatus?.station?.name || icecastStatus?.listenerUrl?.replace(/^https?:\/\//, '').split('/')[0] || 'Not configured'}
+                </div>
               </div>
               <div>
-                <div className="text-xs text-white/40 mb-1">Port</div>
-                <div className="text-sm font-mono bg-white/5 p-2 rounded">8000</div>
+                <div className="text-xs text-white/40 mb-1">{azuraStatus?.configured ? 'Stream URL' : 'Mount'}</div>
+                <div className="text-sm font-mono bg-white/5 p-2 rounded truncate">
+                  {azuraStatus?.streamUrls?.https || icecastStatus?.source?.mount || '/live'}
+                </div>
               </div>
               <div>
-                <div className="text-xs text-white/40 mb-1">Mount Point</div>
-                <div className="text-sm font-mono bg-white/5 p-2 rounded">/live</div>
+                <div className="text-xs text-white/40 mb-1">Listeners</div>
+                <div className="text-sm font-mono bg-white/5 p-2 rounded">
+                  {azuraStatus?.listeners?.total ?? icecastStatus?.listeners ?? 0}
+                  {(azuraStatus?.listeners?.unique != null && azuraStatus.listeners.unique !== azuraStatus.listeners.total) ? ` (${azuraStatus.listeners.unique} unique)` : ''}
+                  {icecastStatus?.peakListeners ? ` (peak: ${icecastStatus.peakListeners})` : ''}
+                </div>
               </div>
+              {/* Live DJ indicator */}
+              {azuraStatus?.live?.isLive && (
+                <div>
+                  <div className="text-xs text-white/40 mb-1">Live DJ</div>
+                  <div className="flex items-center gap-2 text-sm">
+                    <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                    <span className="text-red-400 font-medium">{azuraStatus.live.streamerName || 'Live'}</span>
+                  </div>
+                </div>
+              )}
               <div>
                 <div className="text-xs text-white/40 mb-1">Status</div>
                 <div className="flex items-center gap-2 text-sm">
-                  <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                  <span className="text-green-400">Connected</span>
+                  {(azuraStatus?.status === 'online' || icecastStatus?.status === 'online') ? (
+                    <>
+                      <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                      <span className="text-green-400">Online</span>
+                    </>
+                  ) : icecastStatus?.status === 'no_source' ? (
+                    <>
+                      <div className="w-2 h-2 rounded-full bg-yellow-500" />
+                      <span className="text-yellow-400">No Source</span>
+                    </>
+                  ) : (azuraStatus?.configured === false && icecastStatus?.configured === false) ? (
+                    <>
+                      <div className="w-2 h-2 rounded-full bg-gray-500" />
+                      <span className="text-white/40">Not Configured</span>
+                    </>
+                  ) : (
+                    <>
+                      <div className="w-2 h-2 rounded-full bg-red-500" />
+                      <span className="text-red-400">{azuraStatus?.status || icecastStatus?.status || 'Offline'}</span>
+                    </>
+                  )}
                 </div>
               </div>
             </div>

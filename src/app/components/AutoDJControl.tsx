@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { useNavigate } from 'react-router';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { api } from '../../lib/api';
@@ -31,6 +32,8 @@ import {
 } from 'lucide-react';
 
 export function AutoDJControl() {
+  const navigate = useNavigate();
+
   // ── audio engine ───────────────────────────────────────────────────
   const audioRef        = useRef<HTMLAudioElement | null>(null);
   const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -122,7 +125,7 @@ export function AutoDJControl() {
 
       if (!stream.audioUrl) {
         // Track exists but has no audio file in storage
-        setAudioError('Track has no audio file. Add tracks with audio to the Live Stream playlist.');
+        setAudioError('У трека нет аудиофайла. Загрузите MP3/FLAC файлы через Track Upload, затем добавьте треки в плейлист.');
         isLoadingAudio.current = false;
         return;
       }
@@ -316,27 +319,47 @@ export function AutoDJControl() {
       console.log('[AutoDJ UI] Starting Auto DJ...');
       const res = await api.startAutoDJ();
       console.log('[AutoDJ UI] Start response:', res);
-      if (res.error) { toast.error(res.error); setStartingDJ(false); return; }
-      
-      toast.success(`🎵 Auto DJ started! ${res.totalTracks} tracks from "${res.source}"`);
-      
-      if (!res.hasAudioFile) {
-        toast.warning('⚠️ First track has no audio file — upload tracks with audio!');
+      if (res.error) {
+        toast.error(res.error, { duration: 8000 });
+        // Show audio error banner with Track Upload link if it's an audio file issue
+        if (res.hasAudioFile === false || res.tracksWithAudio === 0) {
+          setAudioError(res.error);
+        }
+        setStartingDJ(false);
+        return;
       }
-
+      
       // Refresh hook state so UI updates (non-blocking)
       refresh().catch(() => {});
 
+      if (!res.hasAudioFile) {
+        // NO audio files at all — critical error
+        const withAudio = res.tracksWithAudio || 0;
+        if (withAudio === 0) {
+          toast.error(
+            `❌ Ни один трек (${res.totalTracks}) не имеет аудиофайла. Загрузите аудио через Track Upload.`,
+            { duration: 8000 }
+          );
+          setAudioError('Треки без аудиофайлов. Перейдите в Track Upload и загрузите MP3/FLAC файлы.');
+          setStartingDJ(false);
+          return;
+        } else {
+          toast.warning(
+            `⚠️ Первый трек без аудио. ${withAudio} из ${res.totalTracks} треков с аудио — они будут воспроизведены.`,
+            { duration: 6000 }
+          );
+        }
+      } else {
+        toast.success(`🎵 Auto DJ started! ${res.totalTracks} tracks from "${res.source}"`);
+      }
+
       // ── Use inline stream data from start response (bypasses KV latency) ──
-      // The server now returns a signed audio URL directly in the start response,
-      // so we don't need to poll /radio/status or /radio/current-stream.
       if (res.stream?.audioUrl) {
         console.log('[AutoDJ UI] Using inline stream data — skipping KV polling');
         await loadAndPlay(true, res.stream);
       } else {
         // Fallback: no inline stream data (track has no audio or URL generation failed)
         console.log('[AutoDJ UI] No inline audio URL — falling back to getCurrentStream polling');
-        // Give KV a moment to propagate before polling
         await new Promise(r => setTimeout(r, 1200));
         await loadAndPlay(true);
       }
@@ -532,6 +555,14 @@ export function AutoDJControl() {
                   className="mt-1.5 text-xs text-cyan-400 underline hover:text-cyan-300"
                 >
                   Click to resume playback
+                </button>
+              )}
+              {(audioError.includes('audio file') || audioError.includes('аудио')) && (
+                <button
+                  onClick={() => navigate('/admin/track-upload')}
+                  className="mt-1.5 px-3 py-1 rounded-md text-xs text-amber-300 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 transition-colors inline-flex items-center gap-1.5"
+                >
+                  📁 Перейти в Track Upload
                 </button>
               )}
             </div>

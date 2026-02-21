@@ -455,6 +455,15 @@ function ShowCardLarge({ show, index, navigate }: any) {
     return days[day.toLowerCase()] || day;
   };
 
+  // Safely parse schedule - it might be a JSON string from KV store
+  const schedule = Array.isArray(show.schedule)
+    ? show.schedule
+    : typeof show.schedule === 'string'
+      ? (() => { try { return JSON.parse(show.schedule); } catch { return []; } })()
+      : [];
+  const totalListeners = show.totalListeners ?? 0;
+  const averageRating = show.averageRating ?? 0;
+
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.95 }}
@@ -497,17 +506,17 @@ function ShowCardLarge({ show, index, navigate }: any) {
               <div className="flex flex-wrap gap-4 mb-4">
                 <div className="flex items-center gap-2 text-white/60 text-sm">
                   <Users className="w-4 h-4 text-[#00ffaa]" />
-                  {show.totalListeners.toLocaleString()} listeners
+                  {totalListeners.toLocaleString()} listeners
                 </div>
                 <div className="flex items-center gap-2 text-white/60 text-sm">
                   <Star className="w-4 h-4 text-[#FFD700]" />
-                  {show.averageRating.toFixed(1)}
+                  {averageRating.toFixed(1)}
                 </div>
               </div>
 
-              {show.schedule && show.schedule.length > 0 && (
+              {schedule.length > 0 && (
                 <div className="flex flex-wrap gap-2 mb-4">
-                  {show.schedule.slice(0, 3).map((sched: any, i: number) => (
+                  {schedule.slice(0, 3).map((sched: any, i: number) => (
                     <div key={i} className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-xs">
                       <span className="text-[#00d9ff] font-semibold">{getDayAbbrev(sched.day)}</span>
                       <span className="text-white/70 ml-2">{sched.startTime}</span>
@@ -536,6 +545,15 @@ function ShowCard({ show, index, navigate }: any) {
     const days: any = { monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 'Thu', friday: 'Fri', saturday: 'Sat', sunday: 'Sun' };
     return days[day.toLowerCase()] || day;
   };
+
+  // Safely parse schedule - it might be a JSON string from KV store
+  const schedule = Array.isArray(show.schedule)
+    ? show.schedule
+    : typeof show.schedule === 'string'
+      ? (() => { try { return JSON.parse(show.schedule); } catch { return []; } })()
+      : [];
+  const totalListeners = show.totalListeners ?? 0;
+  const averageRating = show.averageRating ?? 0;
 
   return (
     <motion.div
@@ -572,9 +590,9 @@ function ShowCard({ show, index, navigate }: any) {
             <p className="text-[#00ffaa] text-sm font-semibold mb-3">by {show.host}</p>
             <p className="text-white/70 text-sm mb-4 line-clamp-2">{show.description}</p>
 
-            {show.schedule && show.schedule.length > 0 && (
+            {schedule.length > 0 && (
               <div className="flex flex-wrap gap-2 mb-4">
-                {show.schedule.slice(0, 2).map((sched: any, i: number) => (
+                {schedule.slice(0, 2).map((sched: any, i: number) => (
                   <div key={i} className="px-2 py-1 rounded bg-white/5 border border-white/10 text-xs">
                     <span className="text-[#00d9ff] font-semibold">{getDayAbbrev(sched.day)}</span>
                     <span className="text-white/70 ml-1">{sched.startTime}</span>
@@ -586,11 +604,11 @@ function ShowCard({ show, index, navigate }: any) {
             <div className="flex flex-wrap gap-3 text-xs text-white/60">
               <span className="flex items-center gap-1">
                 <Users className="w-3 h-3 text-[#00ffaa]" />
-                {(show.totalListeners / 1000).toFixed(1)}k
+                {(totalListeners / 1000).toFixed(1)}k
               </span>
               <span className="flex items-center gap-1">
                 <Star className="w-3 h-3 text-[#FFD700]" />
-                {show.averageRating.toFixed(1)}
+                {averageRating.toFixed(1)}
               </span>
             </div>
           </div>
@@ -611,6 +629,10 @@ function ShowCard({ show, index, navigate }: any) {
 
 // Podcast Card Components
 function PodcastCardLarge({ podcast, index, navigate, toggleSubscribe }: any) {
+  const totalListeners = podcast.totalListeners ?? 0;
+  const averageRating = podcast.averageRating ?? 0;
+  const episodeCount = podcast.episodeCount ?? 0;
+
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.95 }}
@@ -653,15 +675,15 @@ function PodcastCardLarge({ podcast, index, navigate, toggleSubscribe }: any) {
               <div className="flex flex-wrap gap-4 mb-4">
                 <div className="flex items-center gap-2 text-white/60 text-sm">
                   <Play className="w-4 h-4 text-[#00d9ff]" />
-                  {podcast.episodeCount} episodes
+                  {episodeCount} episodes
                 </div>
                 <div className="flex items-center gap-2 text-white/60 text-sm">
                   <Users className="w-4 h-4 text-[#00ffaa]" />
-                  {podcast.totalListeners.toLocaleString()} listeners
+                  {totalListeners.toLocaleString()} listeners
                 </div>
                 <div className="flex items-center gap-2 text-white/60 text-sm">
                   <Star className="w-4 h-4 text-[#FFD700]" />
-                  {podcast.averageRating.toFixed(1)}
+                  {averageRating.toFixed(1)}
                 </div>
               </div>
 
@@ -674,7 +696,7 @@ function PodcastCardLarge({ podcast, index, navigate, toggleSubscribe }: any) {
                   <div className="flex items-center gap-3 mt-2 text-xs text-white/60">
                     <span className="flex items-center gap-1">
                       <Clock className="w-3 h-3" />
-                      {Math.floor(podcast.latestEpisode.duration / 60)} min
+                      {Math.floor((podcast.latestEpisode.duration ?? 0) / 60)} min
                     </span>
                     <span className="flex items-center gap-1">
                       <Calendar className="w-3 h-3" />
@@ -713,6 +735,10 @@ function PodcastCardLarge({ podcast, index, navigate, toggleSubscribe }: any) {
 }
 
 function PodcastCard({ podcast, index, navigate, toggleSubscribe }: any) {
+  const totalListeners = podcast.totalListeners ?? 0;
+  const averageRating = podcast.averageRating ?? 0;
+  const episodeCount = podcast.episodeCount ?? 0;
+
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.95 }}
@@ -751,15 +777,15 @@ function PodcastCard({ podcast, index, navigate, toggleSubscribe }: any) {
             <div className="flex flex-wrap gap-3 mb-4 text-xs text-white/60">
               <span className="flex items-center gap-1">
                 <Play className="w-3 h-3 text-[#00d9ff]" />
-                {podcast.episodeCount} eps
+                {episodeCount} eps
               </span>
               <span className="flex items-center gap-1">
                 <Users className="w-3 h-3 text-[#00ffaa]" />
-                {(podcast.totalListeners / 1000).toFixed(1)}k
+                {(totalListeners / 1000).toFixed(1)}k
               </span>
               <span className="flex items-center gap-1">
                 <Star className="w-3 h-3 text-[#FFD700]" />
-                {podcast.averageRating.toFixed(1)}
+                {averageRating.toFixed(1)}
               </span>
             </div>
           </div>

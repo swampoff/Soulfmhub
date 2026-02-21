@@ -289,7 +289,7 @@ export function SongRequestsManagement() {
                       {/* Status Badge */}
                       <div className="flex items-center gap-3">
                         <span className={`px-3 py-1 rounded-full text-xs font-medium border ${statusColors[request.status as keyof typeof statusColors]}`}>
-                          {request.status.toUpperCase()}
+                          {(request.status || 'pending').toUpperCase()}
                         </span>
                         
                         {request.moderation_note && (

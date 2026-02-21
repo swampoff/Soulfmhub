@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
 import { Shield, ArrowLeft, Lock, Eye, EyeOff, Radio, Headphones, Waves, Loader2, Mail, KeyRound } from 'lucide-react';
-const soulFmLogo = '/favicon.ico'; // Automatically fixed figma asset import
+import soulFmLogo from 'figma:asset/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png';
 import { supabase } from '../../lib/supabase';
 import { api } from '../../lib/api';
 
@@ -40,8 +40,8 @@ function FloatingOrb({ delay, size, x, y }: { delay: number; size: number; x: st
 
 export function AdminLoginPage({ onLogin }: AdminLoginPageProps) {
   const navigate = useNavigate();
-  const [email, setEmail] = useState('niqbello@gmail.com');
-  const [password, setPassword] = useState('Nik4873835');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);

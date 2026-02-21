@@ -4,7 +4,7 @@ import { Button } from './ui/button';
 import { Slider } from './ui/slider';
 import { useApp } from '../../context/AppContext';
 import { motion, AnimatePresence } from 'motion/react';
-const soulFmLogo = '/favicon.ico'; // Updated to avoid Vercel build break
+import soulFmLogo from 'figma:asset/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png';
 import { RealtimeIndicator } from './RealtimeIndicator';
 import { api } from '../../lib/api';
 import { supabase } from '../../lib/supabase';
@@ -51,6 +51,9 @@ interface StreamState {
   crossfadeDuration: number;
   listeners: number;
   error?: string;
+  isExternal?: boolean;
+  retryAfterMs?: number;
+  icecastUrl?: string;
 }
 
 // ─── Deck abstraction ────────────────────────────────────────────────
@@ -104,6 +107,28 @@ export function RadioPlayer() {
   const [trackProgress, setTrackProgress] = useState(0);
   const [elapsed, setElapsed] = useState(0);
   const [crossfadeActive, setCrossfadeActive] = useState(false);
+
+  // ─── Icecast mode ────────────────────────────────────────────────
+  const [icecastMode, setIcecastMode] = useState(false);
+  const [icecastUrl, setIcecastUrl] = useState<string | null>(null);
+  const icecastAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Debounced buffering: avoid rapid icon flicker between Loader/Pause
+  const [showBuffering, setShowBuffering] = useState(false);
+  const bufferingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (isBuffering) {
+      // Only show spinner after 400ms of continuous buffering
+      bufferingTimerRef.current = setTimeout(() => setShowBuffering(true), 400);
+    } else {
+      if (bufferingTimerRef.current) clearTimeout(bufferingTimerRef.current);
+      bufferingTimerRef.current = null;
+      setShowBuffering(false);
+    }
+    return () => {
+      if (bufferingTimerRef.current) clearTimeout(bufferingTimerRef.current);
+    };
+  }, [isBuffering]);
 
   // ─── Helpers ─────────────────────────────────────────────────────
   const getCtx = useCallback((): AudioContext => {
@@ -412,7 +437,40 @@ export function RadioPlayer() {
   // Assigned to ref each render so startPlayback's onEnded closure always gets the latest version
   hardLoadNextRef.current = async () => {
     const stream = await fetchCurrentStream();
-    if (!stream?.playing || !stream.audioUrl) {
+    if (!stream?.playing) {
+      setConnectionStatus('offline');
+      setIsPlaying(false);
+      return;
+    }
+
+    // ── External track without audioUrl — backend is auto-advancing, retry after delay ──
+    if (stream.isExternal && !stream.audioUrl) {
+      console.log(`[Player] External track "${stream.track?.title}" — retrying in ${stream.retryAfterMs || 3000}ms`);
+      setStreamState(stream); // show track info in UI
+      setConnectionStatus('connecting');
+
+      // If backend returned an icecastUrl, switch to Icecast mode temporarily
+      if (stream.icecastUrl) {
+        console.log('[Player] Falling back to AzuraCast stream while external track resolves');
+        setIcecastMode(true);
+        setIcecastUrl(stream.icecastUrl);
+        if (!icecastAudioRef.current) {
+          icecastAudioRef.current = new Audio();
+          icecastAudioRef.current.preload = 'none';
+        }
+        const ice = icecastAudioRef.current;
+        ice.volume = masterVolume.current;
+        const sep = stream.icecastUrl.includes('?') ? '&' : '?';
+        ice.src = `${stream.icecastUrl}${sep}_t=${Date.now()}`;
+        try { await ice.play(); } catch { /* will retry */ }
+      }
+
+      // Retry after the suggested delay
+      setTimeout(() => hardLoadNextRef.current(), stream.retryAfterMs || 3000);
+      return;
+    }
+
+    if (!stream.audioUrl) {
       setConnectionStatus('offline');
       setIsPlaying(false);
       return;
@@ -430,10 +488,87 @@ export function RadioPlayer() {
           setStreamState(state);
           return;
         }
+
+        // ── External track without audioUrl — delegate to hardLoadNext retry logic ──
+        if (state.isExternal && !state.audioUrl) {
+          console.log(`[Player] Initial fetch got external track "${state.track?.title}" — delegating to retry`);
+          setStreamState(state);
+          hardLoadNextRef.current();
+          return;
+        }
+
+        // ── Check for Icecast mode ──
+        const streamWithIcecast = state as StreamState & { icecastUrl?: string; azuracastNowPlaying?: any };
+        if (streamWithIcecast.icecastUrl) {
+          console.log('[Player] AzuraCast/Icecast mode detected:', streamWithIcecast.icecastUrl);
+          setIcecastMode(true);
+          setIcecastUrl(streamWithIcecast.icecastUrl);
+
+          // Enrich state with AzuraCast now-playing metadata if available
+          const enrichedState = { ...state };
+          if (streamWithIcecast.azuracastNowPlaying) {
+            const azNp = streamWithIcecast.azuracastNowPlaying;
+            enrichedState.track = {
+              ...(state.track || { id: 'azuracast', title: '', artist: '', duration: 0 }),
+              title: azNp.title || state.track?.title || '',
+              artist: azNp.artist || state.track?.artist || '',
+              album: azNp.album || state.track?.album || '',
+              coverUrl: azNp.art || state.track?.coverUrl || null,
+              duration: azNp.duration || state.track?.duration || 0,
+            };
+          }
+          setStreamState(enrichedState);
+
+          // Stop crossfade engine decks if they were running
+          deckARef.current?.audio.pause();
+          deckBRef.current?.audio.pause();
+          if (crossfadeTimerRef.current) clearTimeout(crossfadeTimerRef.current);
+          crossfadingRef.current = false;
+          setCrossfadeActive(false);
+
+          // Start Icecast audio
+          if (!icecastAudioRef.current) {
+            icecastAudioRef.current = new Audio();
+            icecastAudioRef.current.preload = 'none';
+          }
+          const ice = icecastAudioRef.current;
+          ice.volume = masterVolume.current;
+
+          setIsBuffering(true);
+          setConnectionStatus('connecting');
+
+          ice.oncanplay = () => { setIsBuffering(false); setConnectionStatus('connected'); };
+          ice.onplaying = () => { setIsBuffering(false); setConnectionStatus('connected'); };
+          ice.onwaiting = () => setIsBuffering(true);
+          ice.onerror = () => { setConnectionStatus('error'); setIsBuffering(false); };
+
+          // Append cache-buster to avoid browser caching the stream
+          const separator = streamWithIcecast.icecastUrl.includes('?') ? '&' : '?';
+          ice.src = `${streamWithIcecast.icecastUrl}${separator}_t=${Date.now()}`;
+
+          try {
+            await ice.play();
+          } catch (err: any) {
+            if (err.name !== 'AbortError') {
+              console.error('[Player/Icecast] play() failed:', err);
+              setConnectionStatus('error');
+              setIsBuffering(false);
+            }
+          }
+          return;
+        }
+
+        // ── Standard crossfade mode ──
+        setIcecastMode(false);
+        setIcecastUrl(null);
         await startPlayback(state);
       })();
     } else {
-      // Pause both decks
+      // Pause everything — Icecast audio + both decks
+      if (icecastAudioRef.current) {
+        icecastAudioRef.current.pause();
+        icecastAudioRef.current.src = '';
+      }
       deckARef.current?.audio.pause();
       deckBRef.current?.audio.pause();
       if (crossfadeTimerRef.current) clearTimeout(crossfadeTimerRef.current);
@@ -444,6 +579,51 @@ export function RadioPlayer() {
       setIsBuffering(false);
     }
   }, [isPlaying]); // intentionally minimal deps — startPlayback is stable via refs
+
+  // ─── Icecast volume sync ─────────────────────────────────────────
+  useEffect(() => {
+    if (icecastAudioRef.current) {
+      icecastAudioRef.current.volume = isMuted ? 0 : volume;
+    }
+  }, [volume, isMuted]);
+
+  // ─── AzuraCast now-playing sync (when in Icecast mode) ──────────
+  useEffect(() => {
+    if (!isPlaying || !icecastMode) return;
+
+    const pollAzuraCast = async () => {
+      try {
+        const np = await api.getAzuraCastNowPlaying();
+        if (np?.now_playing?.song) {
+          const song = np.now_playing.song;
+          setStreamState(prev => prev ? {
+            ...prev,
+            track: {
+              id: song.id || prev.track?.id || 'azuracast',
+              title: song.title || prev.track?.title || '',
+              artist: song.artist || prev.track?.artist || '',
+              album: song.album || prev.track?.album || '',
+              duration: np.now_playing.duration || prev.track?.duration || 0,
+              coverUrl: song.art || prev.track?.coverUrl || null,
+            },
+          } : prev);
+          // Update elapsed time from AzuraCast
+          if (np.now_playing.elapsed != null) {
+            setElapsed(np.now_playing.elapsed);
+            const dur = np.now_playing.duration || 1;
+            setTrackProgress((np.now_playing.elapsed / dur) * 100);
+          }
+        }
+      } catch {
+        // silent — AzuraCast may not be configured
+      }
+    };
+
+    // Poll immediately then every 10s
+    pollAzuraCast();
+    const id = setInterval(pollAzuraCast, 10000);
+    return () => clearInterval(id);
+  }, [isPlaying, icecastMode]);
 
   // ─── Realtime track-changed ─────────────────────────────────────
   useEffect(() => {
@@ -488,6 +668,11 @@ export function RadioPlayer() {
       try {
         const stream = await fetchCurrentStream();
         if (!stream?.playing) return;
+        // Skip external tracks — the retry logic in hardLoadNext handles these
+        if (stream.isExternal && !stream.audioUrl) {
+          console.log('[Player] Poll: external track still pending, will retry via hardLoadNext');
+          return;
+        }
         if (stream.track && stream.track.id !== currentTrackIdRef.current && !crossfadingRef.current) {
           console.log('[Player] Poll detected track change:', stream.track.title);
           await startPlayback(stream);
@@ -541,6 +726,10 @@ export function RadioPlayer() {
     return () => {
       deckARef.current?.audio.pause();
       deckBRef.current?.audio.pause();
+      if (icecastAudioRef.current) {
+        icecastAudioRef.current.pause();
+        icecastAudioRef.current.src = '';
+      }
       if (crossfadeTimerRef.current) clearTimeout(crossfadeTimerRef.current);
       if (preloadTimerRef.current) clearTimeout(preloadTimerRef.current);
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
@@ -692,6 +881,7 @@ export function RadioPlayer() {
                   <span className="text-xs text-[#00d9ff] font-semibold uppercase tracking-wider">
                     {connectionStatus === 'offline' ? 'Offline' :
                      connectionStatus === 'error' ? 'Error' :
+                     icecastMode ? 'AzuraCast Live' :
                      isJingle ? 'Jingle' : 'Auto DJ'}
                   </span>
                   {crossfadeActive && (
@@ -733,12 +923,11 @@ export function RadioPlayer() {
                   size="icon" onClick={togglePlay}
                   className="w-12 h-12 rounded-full bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] hover:from-[#00b8dd] hover:to-[#00dd88] text-[#0a1628] shadow-lg shadow-[#00d9ff]/40 relative overflow-hidden"
                 >
-                  <motion.div
-                    className="absolute inset-0 bg-white/20"
-                    animate={{ scale: isPlaying ? [1, 1.8, 1.8] : 1, opacity: isPlaying ? [0.4, 0, 0] : 0 }}
-                    transition={{ duration: 2.2, repeat: isPlaying ? Infinity : 0, ease: 'easeOut' }}
-                  />
-                  {isBuffering ? (
+                  {/* Subtle static glow when playing — no blinking */}
+                  {isPlaying && (
+                    <div className="absolute inset-0 bg-white/10 rounded-full" />
+                  )}
+                  {showBuffering ? (
                     <Loader2 className="w-5 h-5 relative z-10 animate-spin" />
                   ) : isPlaying ? (
                     <Pause className="w-5 h-5 relative z-10" fill="currentColor" />
@@ -821,7 +1010,7 @@ export function RadioPlayer() {
                         <RealtimeIndicator size="sm" />
                       </div>
                       <div className="text-sm font-semibold text-[#00ffaa]">
-                        Crossfade &middot; {streamState?.listeners ?? 0} listeners
+                        {icecastMode ? 'Icecast Stream' : 'Crossfade'} &middot; {streamState?.listeners ?? 0} listeners
                       </div>
                       <div className="text-xs text-gray-400 mt-1">
                         Status:{' '}

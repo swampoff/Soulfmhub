@@ -3,7 +3,7 @@ import { RouterProvider } from 'react-router';
 import { AppProvider } from '../context/AppContext';
 import { router } from './routes';
 import { Button } from './components/ui/button';
-const soulFmLogo = '/favicon.ico'; // Updated to avoid Vercel build break
+import soulFmLogo from 'figma:asset/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png';
 
 // ── Error Boundary Component ─────────────────────────────────────────
 class ErrorBoundary extends Component<
@@ -63,6 +63,7 @@ class ErrorBoundary extends Component<
 }
 
 // ── App ──────────────────────────────────────────────────────────────
+// Soul FM Hub - Main Application Entry Point v2.1
 export default function App() {
   return (
     <ErrorBoundary>

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -6,20 +6,19 @@ import { Badge } from '../components/ui/badge';
 import {
   MessageCircle,
   Users,
-  ThumbsUp,
   Send,
   Hash,
   Heart,
   Music,
-  Radio,
   Headphones,
   Star,
-  Smile,
   TrendingUp,
-  Zap,
+  Loader2,
+  RefreshCw,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
+import { api } from '../../lib/api';
 
 interface ChatMessage {
   id: string;
@@ -27,9 +26,9 @@ interface ChatMessage {
   initial: string;
   color: string;
   message: string;
-  time: string;
+  createdAt: string;
   likes: number;
-  isLiked: boolean;
+  likedBy?: string[];
   channel: string;
 }
 
@@ -40,65 +39,133 @@ const CHANNELS = [
   { id: 'events', label: 'Events', icon: Star, color: '#E91E63' },
 ];
 
-const INITIAL_MESSAGES: ChatMessage[] = [
-  { id: '1', user: 'SoulSeeker42', initial: 'S', color: '#00d9ff', message: 'That last track was absolutely fire! Anyone know the artist?', time: '2 min ago', likes: 5, isLiked: false, channel: 'general' },
-  { id: '2', user: 'FunkMaster', initial: 'F', color: '#00ffaa', message: 'DJ SoulWave is killing it tonight! Best midnight groove session yet.', time: '5 min ago', likes: 12, isLiked: false, channel: 'general' },
-  { id: '3', user: 'VinylLover', initial: 'V', color: '#FF8C42', message: 'Just discovered this station yesterday and I\'m already hooked. The music selection is incredible!', time: '8 min ago', likes: 8, isLiked: false, channel: 'general' },
-  { id: '4', user: 'NeoSoulFan', initial: 'N', color: '#E91E63', message: 'Has anyone checked out the new Erykah Badu remix? It\'s giving me all the vibes.', time: '12 min ago', likes: 15, isLiked: false, channel: 'music-talk' },
-  { id: '5', user: 'GrooveRider', initial: 'G', color: '#9C27B0', message: 'The funk university episode about Parliament was educational and funky at the same time. Professor Funk is a legend!', time: '15 min ago', likes: 20, isLiked: false, channel: 'music-talk' },
-  { id: '6', user: 'BeatDropper', initial: 'B', color: '#FFD700', message: 'Anyone going to the Soul FM Summer Festival? I just got my tickets!', time: '20 min ago', likes: 7, isLiked: false, channel: 'events' },
-  { id: '7', user: 'MidnightJazz', initial: 'M', color: '#00BCD4', message: 'Late night jazz vibes hitting different. Perfect for coding at 2am.', time: '25 min ago', likes: 11, isLiked: false, channel: 'general' },
-  { id: '8', user: 'DJ Heritage', initial: 'D', color: '#00ffaa', message: 'Hey everyone! Thanks for tuning in to tonight\'s Vinyl Vault. Next week we\'re diving into rare Northern Soul 45s.', time: '30 min ago', likes: 32, isLiked: false, channel: 'dj-chat' },
-];
+// Generate a persistent anonymous ID for likes
+function getAnonymousId(): string {
+  let id = localStorage.getItem('soul-fm-anon-id');
+  if (!id) {
+    id = 'anon_' + Math.random().toString(36).substr(2, 12);
+    localStorage.setItem('soul-fm-anon-id', id);
+  }
+  return id;
+}
 
-const ONLINE_USERS = [
-  { name: 'SoulSeeker42', color: '#00d9ff' },
-  { name: 'FunkMaster', color: '#00ffaa' },
-  { name: 'VinylLover', color: '#FF8C42' },
-  { name: 'NeoSoulFan', color: '#E91E63' },
-  { name: 'GrooveRider', color: '#9C27B0' },
-  { name: 'BeatDropper', color: '#FFD700' },
-  { name: 'MidnightJazz', color: '#00BCD4' },
-  { name: 'DJ Heritage', color: '#00ffaa' },
-  { name: 'ChillWave', color: '#607D8B' },
-  { name: 'SoulSister', color: '#E91E63' },
-  { name: 'BasslineKing', color: '#FF8C42' },
-];
+function timeAgo(dateStr: string): string {
+  const now = Date.now();
+  const then = new Date(dateStr).getTime();
+  const diff = Math.max(0, now - then);
+  const seconds = Math.floor(diff / 1000);
+  if (seconds < 60) return 'Just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
 
 export function CommunityPage() {
   const [activeChannel, setActiveChannel] = useState('general');
-  const [messages, setMessages] = useState(INITIAL_MESSAGES);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [newMessage, setNewMessage] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
+  const [stats, setStats] = useState<{ totalMessages: number; todayMessages: number; channels: Record<string, number> } | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const anonId = useRef(getAnonymousId());
+
+  const loadMessages = useCallback(async (showSpinner = false) => {
+    if (showSpinner) setLoading(true);
+    try {
+      const [msgRes, statsRes] = await Promise.all([
+        api.getCommunityMessages(undefined, 100),
+        api.getCommunityStats(),
+      ]);
+      const data = Array.isArray(msgRes?.messages) ? msgRes.messages : [];
+      if (data.length === 0 && showSpinner) {
+        // Auto-seed
+        console.log('[Community] No messages — seeding defaults...');
+        try {
+          await api.seedCommunity();
+          const retry = await api.getCommunityMessages(undefined, 100);
+          setMessages(Array.isArray(retry?.messages) ? retry.messages : []);
+        } catch (seedErr) {
+          console.error('[Community] Seed error:', seedErr);
+        }
+      } else {
+        setMessages(data);
+      }
+      if (statsRes && !statsRes.error) {
+        setStats(statsRes);
+      }
+    } catch (error) {
+      console.error('[Community] Load error:', error);
+      if (showSpinner) toast.error('Failed to load community messages');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadMessages(true);
+    // Poll every 10 seconds for new messages
+    pollRef.current = setInterval(() => loadMessages(false), 10000);
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [loadMessages]);
 
   const filteredMessages = messages.filter((m) => m.channel === activeChannel);
 
-  const handleSend = () => {
-    if (!newMessage.trim()) return;
-    const msg: ChatMessage = {
-      id: Date.now().toString(),
-      user: 'You',
-      initial: 'Y',
-      color: '#00d9ff',
-      message: newMessage.trim(),
-      time: 'Just now',
-      likes: 0,
-      isLiked: false,
-      channel: activeChannel,
-    };
-    setMessages((prev) => [msg, ...prev]);
-    setNewMessage('');
-    toast.success('Message sent!');
+  const channelCounts = messages.reduce((acc, m) => {
+    const ch = m.channel || 'general';
+    acc[ch] = (acc[ch] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+
+  const handleSend = async () => {
+    if (!newMessage.trim() || sending) return;
+    setSending(true);
+    try {
+      const result = await api.postCommunityMessage({
+        user: 'You',
+        color: '#00d9ff',
+        message: newMessage.trim(),
+        channel: activeChannel,
+      });
+      if (result.error) {
+        toast.error(result.error);
+      } else {
+        // Optimistic add
+        if (result.message) {
+          setMessages((prev) => [result.message, ...prev]);
+        }
+        setNewMessage('');
+        toast.success('Message sent!');
+      }
+    } catch (err) {
+      console.error('[Community] Send error:', err);
+      toast.error('Failed to send message');
+    } finally {
+      setSending(false);
+    }
   };
 
-  const toggleLike = (id: string) => {
-    setMessages((prev) =>
-      prev.map((m) =>
-        m.id === id
-          ? { ...m, isLiked: !m.isLiked, likes: m.isLiked ? m.likes - 1 : m.likes + 1 }
-          : m
-      )
-    );
+  const toggleLike = async (msgId: string) => {
+    try {
+      const result = await api.likeCommunityMessage(msgId, anonId.current);
+      if (result.message) {
+        setMessages((prev) =>
+          prev.map((m) => (m.id === msgId ? { ...m, likes: result.message.likes, likedBy: result.message.likedBy } : m))
+        );
+      }
+    } catch (err) {
+      console.error('[Community] Like error:', err);
+    }
+  };
+
+  const isLiked = (msg: ChatMessage): boolean => {
+    return Array.isArray(msg.likedBy) && msg.likedBy.includes(anonId.current);
   };
 
   return (
@@ -137,35 +204,43 @@ export function CommunityPage() {
               <div className="flex items-center gap-2 text-white/60">
                 <div className="w-2 h-2 rounded-full bg-[#00ff88] animate-pulse" />
                 <Users className="w-4 h-4" />
-                <span><strong className="text-white">{ONLINE_USERS.length}</strong> online</span>
+                <span><strong className="text-white">Live</strong> chat</span>
               </div>
               <div className="flex items-center gap-2 text-white/60">
                 <MessageCircle className="w-4 h-4" />
-                <span><strong className="text-white">{messages.length}</strong> messages today</span>
+                <span><strong className="text-white">{stats?.todayMessages ?? messages.length}</strong> messages today</span>
               </div>
               <div className="flex items-center gap-2 text-white/60">
                 <TrendingUp className="w-4 h-4" />
-                <span><strong className="text-white">2.4K</strong> members</span>
+                <span><strong className="text-white">{stats?.totalMessages ?? messages.length}</strong> total</span>
               </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => loadMessages(true)}
+                disabled={loading}
+                className="text-white/30 hover:text-white h-7 px-2"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+              </Button>
             </div>
           </Card>
         </motion.div>
 
         <div className="grid lg:grid-cols-4 gap-6">
-          {/* Sidebar: Channels + Online */}
+          {/* Sidebar: Channels */}
           <motion.div
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: 0.15 }}
             className="lg:col-span-1 space-y-4"
           >
-            {/* Channels */}
             <Card className="bg-white/5 border-white/10 p-4">
               <h3 className="text-sm font-bold text-white/50 uppercase tracking-wider mb-3">Channels</h3>
               <div className="space-y-1">
                 {CHANNELS.map((ch) => {
                   const Icon = ch.icon;
-                  const msgCount = messages.filter((m) => m.channel === ch.id).length;
+                  const msgCount = channelCounts[ch.id] || 0;
                   return (
                     <button
                       key={ch.id}
@@ -184,29 +259,6 @@ export function CommunityPage() {
                     </button>
                   );
                 })}
-              </div>
-            </Card>
-
-            {/* Online Users */}
-            <Card className="bg-white/5 border-white/10 p-4 hidden lg:block">
-              <h3 className="text-sm font-bold text-white/50 uppercase tracking-wider mb-3">
-                Online — {ONLINE_USERS.length}
-              </h3>
-              <div className="space-y-2 max-h-60 overflow-y-auto">
-                {ONLINE_USERS.map((u) => (
-                  <div key={u.name} className="flex items-center gap-2">
-                    <div className="relative">
-                      <div
-                        className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white"
-                        style={{ backgroundColor: `${u.color}30` }}
-                      >
-                        {u.name[0]}
-                      </div>
-                      <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-[#00ff88] border-2 border-[#0a1628]" />
-                    </div>
-                    <span className="text-xs text-white/60 truncate">{u.name}</span>
-                  </div>
-                ))}
               </div>
             </Card>
           </motion.div>
@@ -235,43 +287,55 @@ export function CommunityPage() {
               {/* Messages */}
               <div className="flex-1 overflow-y-auto p-4 space-y-4 flex flex-col-reverse">
                 <div ref={chatEndRef} />
-                {filteredMessages.map((msg) => (
-                  <motion.div
-                    key={msg.id}
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    className="flex gap-3 group"
-                  >
-                    <div
-                      className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
-                      style={{ backgroundColor: `${msg.color}30`, color: msg.color }}
-                    >
-                      {msg.initial}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-0.5">
-                        <span className="text-sm font-medium" style={{ color: msg.color }}>{msg.user}</span>
-                        <span className="text-[10px] text-white/25">{msg.time}</span>
-                      </div>
-                      <p className="text-sm text-white/70 break-words">{msg.message}</p>
-                      <div className="flex items-center gap-3 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button
-                          onClick={() => toggleLike(msg.id)}
-                          className={`flex items-center gap-1 text-xs transition-colors ${
-                            msg.isLiked ? 'text-red-400' : 'text-white/30 hover:text-red-400'
-                          }`}
-                        >
-                          <Heart className={`w-3 h-3 ${msg.isLiked ? 'fill-red-400' : ''}`} />
-                          {msg.likes > 0 && msg.likes}
-                        </button>
-                      </div>
-                    </div>
-                  </motion.div>
-                ))}
-                {filteredMessages.length === 0 && (
+                {loading && messages.length === 0 ? (
+                  <div className="flex items-center justify-center h-full">
+                    <Loader2 className="size-8 text-cyan-400 animate-spin" />
+                  </div>
+                ) : filteredMessages.length === 0 ? (
                   <div className="flex items-center justify-center h-full text-white/30 text-sm">
                     No messages yet in this channel. Be the first!
                   </div>
+                ) : (
+                  <AnimatePresence initial={false}>
+                    {filteredMessages.map((msg) => (
+                      <motion.div
+                        key={msg.id}
+                        initial={{ opacity: 0, x: -10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: 10 }}
+                        className="flex gap-3 group"
+                      >
+                        <div
+                          className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
+                          style={{ backgroundColor: `${msg.color || '#00d9ff'}30`, color: msg.color || '#00d9ff' }}
+                        >
+                          {msg.initial || (msg.user || 'A')[0]}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-0.5">
+                            <span className="text-sm font-medium" style={{ color: msg.color || '#00d9ff' }}>
+                              {msg.user}
+                            </span>
+                            <span className="text-[10px] text-white/25">
+                              {msg.createdAt ? timeAgo(msg.createdAt) : ''}
+                            </span>
+                          </div>
+                          <p className="text-sm text-white/70 break-words">{msg.message}</p>
+                          <div className="flex items-center gap-3 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button
+                              onClick={() => toggleLike(msg.id)}
+                              className={`flex items-center gap-1 text-xs transition-colors ${
+                                isLiked(msg) ? 'text-red-400' : 'text-white/30 hover:text-red-400'
+                              }`}
+                            >
+                              <Heart className={`w-3 h-3 ${isLiked(msg) ? 'fill-red-400' : ''}`} />
+                              {(msg.likes || 0) > 0 && msg.likes}
+                            </button>
+                          </div>
+                        </div>
+                      </motion.div>
+                    ))}
+                  </AnimatePresence>
                 )}
               </div>
 
@@ -281,16 +345,18 @@ export function CommunityPage() {
                   <Input
                     value={newMessage}
                     onChange={(e) => setNewMessage(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+                    onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
                     placeholder={`Message #${CHANNELS.find((c) => c.id === activeChannel)?.label.toLowerCase()}...`}
                     className="bg-white/5 border-white/10 text-white placeholder:text-white/30"
+                    maxLength={500}
+                    disabled={sending}
                   />
                   <Button
                     onClick={handleSend}
-                    disabled={!newMessage.trim()}
+                    disabled={!newMessage.trim() || sending}
                     className="bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] text-slate-900 font-bold px-4"
                   >
-                    <Send className="w-4 h-4" />
+                    {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                   </Button>
                 </div>
               </div>

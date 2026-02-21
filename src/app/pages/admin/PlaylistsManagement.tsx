@@ -1,475 +1,1841 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { motion, AnimatePresence, Reorder } from 'motion/react';
 import { AdminLayout } from '../../components/admin/AdminLayout';
 import { Button } from '../../components/ui/button';
 import { Card } from '../../components/ui/card';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
+import { Badge } from '../../components/ui/badge';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../../components/ui/dialog';
+import { api } from '../../../lib/api';
 import { toast } from 'sonner';
-import { ListMusic, Plus, Trash2, Music, RefreshCw, X, Play, Zap, ZapOff, Search, ChevronRight, ArrowLeft, ExternalLink } from 'lucide-react';
-import { API_BASE } from '../../../lib/supabase';
-import { getAuthHeaders } from '../../../lib/api';
+import {
+  ListMusic,
+  Plus,
+  Edit,
+  Trash2,
+  Music,
+  Loader2,
+  Search,
+  ChevronLeft,
+  GripVertical,
+  Radio,
+  Shuffle,
+  Play,
+  Pause,
+  Clock,
+  ArrowUpDown,
+  Zap,
+  Check,
+  X,
+  Filter,
+  Hash,
+  LayoutGrid,
+  PlusCircle,
+  MinusCircle,
+  ArrowRight,
+  Volume2,
+  SkipForward,
+  Calendar,
+  ExternalLink,
+  AlertCircle,
+  Upload,
+  FileAudio,
+  Bell,
+  RotateCcw,
+  Settings2,
+  Repeat,
+} from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router';
 
-const AZURACAST_URL = 'http://187.77.85.42';
+// ==================== TYPES ====================
 
-// ── Types ──────────────────────────────────────────────────────────────
-interface AzuraPlaylist {
-  id: number;
-  name: string;
-  short_name: string;
-  is_enabled: boolean;
-  num_songs: number;
-  total_length: number;
-  type: string;
-  source: string;
-  order: string;
-  weight: number;
-  schedule_items?: { start_time: number; end_time: number; days: number[] }[];
-}
-
-interface AzuraTrack {
-  id: number;
+interface Track {
+  id: string;
   title: string;
   artist: string;
-  album: string;
-  length_text: string;
-  art: string;
-  path: string;
+  album?: string;
+  genre?: string;
+  duration: number;
+  tags?: string[];
+  coverUrl?: string;
+  audioUrl?: string;
+  bpm?: number;
+  storageFilename?: string;
+  storageBucket?: string;
 }
 
-// ── API helper ─────────────────────────────────────────────────────────
-async function azFetch(path: string, init?: RequestInit) {
-  const headers = await getAuthHeaders();
-  const res = await fetch(`${API_BASE}/azuracast${path}`, {
-    ...init,
-    headers: { ...headers, ...(init?.headers || {}) },
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.message || err.error || `HTTP ${res.status}`);
-  }
-  return res.json();
+interface Playlist {
+  id: string;
+  name: string;
+  description?: string;
+  color?: string;
+  genre?: string;
+  trackIds: string[];
+  isPublic?: boolean;
+  createdAt: string;
+  updatedAt?: string;
 }
 
-function formatDuration(seconds: number) {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  return h > 0 ? `${h}ч ${m}м` : `${m}м`;
+interface ScheduleSlot {
+  id: string;
+  playlistId: string;
+  dayOfWeek: number | null;
+  startTime: string;
+  endTime: string;
+  title: string;
+  isActive: boolean;
 }
 
-// ── Main Component ─────────────────────────────────────────────────────
+const DAYS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+// ==================== CONSTANTS ====================
+
+const COLORS = [
+  { value: '#00d9ff', label: 'Cyan' },
+  { value: '#00ffaa', label: 'Mint' },
+  { value: '#FF8C42', label: 'Sunset' },
+  { value: '#E91E63', label: 'Pink' },
+  { value: '#9C27B0', label: 'Purple' },
+  { value: '#2196F3', label: 'Blue' },
+  { value: '#4CAF50', label: 'Green' },
+  { value: '#FF5722', label: 'Red' },
+  { value: '#FFD700', label: 'Gold' },
+];
+
+const GENRES = ['all', 'soul', 'funk', 'jazz', 'disco', 'r&b', 'reggae', 'blues', 'afrobeat', 'house', 'lofi'];
+
+// ==================== MAIN COMPONENT ====================
+
 export function PlaylistsManagement() {
-  const [playlists, setPlaylists] = useState<AzuraPlaylist[]>([]);
+  // State
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const [allTracks, setAllTracks] = useState<Track[]>([]);
+  const [schedules, setSchedules] = useState<ScheduleSlot[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedPlaylist, setSelectedPlaylist] = useState<AzuraPlaylist | null>(null);
-  const [playlistTracks, setPlaylistTracks] = useState<AzuraTrack[]>([]);
-  const [allTracks, setAllTracks] = useState<AzuraTrack[]>([]);
-  const [tracksLoading, setTracksLoading] = useState(false);
+  const [selectedPlaylist, setSelectedPlaylist] = useState<Playlist | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
   const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [creating, setCreating] = useState(false);
-  const [search, setSearch] = useState('');
-  const [addSearch, setAddSearch] = useState('');
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [editPlaylist, setEditPlaylist] = useState<Playlist | null>(null);
+  const [jingleConfig, setJingleConfig] = useState<any>(null);
 
-  const loadPlaylists = useCallback(async () => {
+  // Load data
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  // Handle deep-link from Schedule: ?open=playlistId
+  useEffect(() => {
+    const openId = searchParams.get('open');
+    if (openId && playlists.length > 0) {
+      const pl = playlists.find(p => p.id === openId);
+      if (pl) setSelectedPlaylist(pl);
+    }
+  }, [searchParams, playlists]);
+
+  const loadData = async () => {
     setLoading(true);
     try {
-      const data = await azFetch('/playlists');
-      const list = (Array.isArray(data) ? data : []).filter((p: AzuraPlaylist) => p.name !== 'default');
-      setPlaylists(list);
-    } catch (e: any) {
-      toast.error('Ошибка: ' + e.message);
+      // Ensure the mandatory jingles playlist exists
+      await api.ensureJinglesPlaylist().catch((e: any) => console.warn('Ensure jingles playlist:', e));
+
+      const [playlistsRes, tracksRes, schedRes, jcRes] = await Promise.all([
+        api.getAllPlaylists(),
+        api.getTracks(),
+        api.getAllSchedules().catch(() => ({ schedules: [] })),
+        api.getJinglePlaylistConfig().catch(() => ({ config: { interval: 5, enabled: true, rotationIndex: 0, tracksSinceLastJingle: 0 } })),
+      ]);
+
+      // Sort: put jingles and livestream first
+      const allPl = playlistsRes.playlists || [];
+      const systemFirst = (p: any) => p.id === 'jingles' ? -2 : p.id === 'livestream' ? -1 : 0;
+      allPl.sort((a: any, b: any) => systemFirst(a) - systemFirst(b) || new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+      setPlaylists(allPl);
+      setAllTracks(tracksRes.tracks || []);
+      setSchedules(schedRes.schedules || []);
+      setJingleConfig(jcRes.config || { interval: 5, enabled: true, rotationIndex: 0, tracksSinceLastJingle: 0 });
+    } catch (error) {
+      console.error('Load error:', error);
+      toast.error('Failed to load data');
     } finally {
       setLoading(false);
     }
-  }, []);
-
-  useEffect(() => { loadPlaylists(); }, [loadPlaylists]);
-
-  const openPlaylist = async (pl: AzuraPlaylist) => {
-    setSelectedPlaylist(pl);
-    setPlaylistTracks([]);
-    setAllTracks([]);
-    setTracksLoading(true);
-    setAddSearch('');
-    try {
-      // Load all tracks to show what can be added
-      const [tracksData] = await Promise.all([
-        azFetch('/tracks'),
-      ]);
-      const all: AzuraTrack[] = tracksData.rows || [];
-      setAllTracks(all);
-      // Tracks in this playlist = those with this playlist in their playlists array
-      const inPlaylist = all.filter(t =>
-        (t as any).playlists?.some((p: any) => p.id === pl.id)
-      );
-      setPlaylistTracks(inPlaylist);
-    } catch (e: any) {
-      toast.error('Ошибка загрузки: ' + e.message);
-    } finally {
-      setTracksLoading(false);
-    }
   };
 
-  const handleToggle = async (pl: AzuraPlaylist, e: React.MouseEvent) => {
-    e.stopPropagation();
-    try {
-      await azFetch(`/playlists/${pl.id}/toggle`, { method: 'POST' });
-      setPlaylists(list => list.map(p => p.id === pl.id ? { ...p, is_enabled: !p.is_enabled } : p));
-      if (selectedPlaylist?.id === pl.id) {
-        setSelectedPlaylist(prev => prev ? { ...prev, is_enabled: !prev.is_enabled } : null);
+  // Get schedule slots for a given playlist
+  const getPlaylistSchedules = useCallback((playlistId: string) => {
+    return schedules.filter(s => s.playlistId === playlistId);
+  }, [schedules]);
+
+  // When a playlist is selected, keep it in sync with playlists array
+  useEffect(() => {
+    if (selectedPlaylist) {
+      const updated = playlists.find(p => p.id === selectedPlaylist.id);
+      if (updated) {
+        setSelectedPlaylist(updated);
       }
-      toast.success(pl.is_enabled ? 'Плейлист отключён' : 'Плейлист включён');
-    } catch (e: any) {
-      toast.error('Ошибка: ' + e.message);
     }
-  };
+  }, [playlists]);
 
-  const handleDelete = async (pl: AzuraPlaylist, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!confirm(`Удалить плейлист «${pl.name}»?`)) return;
-    try {
-      await azFetch(`/playlists/${pl.id}`, { method: 'DELETE' });
-      setPlaylists(list => list.filter(p => p.id !== pl.id));
-      if (selectedPlaylist?.id === pl.id) setSelectedPlaylist(null);
-      toast.success('Плейлист удалён');
-    } catch (e: any) {
-      toast.error('Ошибка: ' + e.message);
-    }
-  };
-
-  const handleCreate = async () => {
-    if (!newName.trim()) return;
-    setCreating(true);
-    try {
-      const data = await azFetch('/playlists', {
-        method: 'POST',
-        body: JSON.stringify({
-          name: newName.trim(),
-          type: 'default',
-          source: 'songs',
-          order: 'shuffle',
-          is_enabled: true,
-          weight: 3,
-          avoid_duplicates: true,
-          include_in_requests: true,
-          include_in_on_demand: false,
-        }),
-      });
-      setPlaylists(list => [...list, data]);
-      setNewName('');
-      setIsCreateOpen(false);
-      toast.success(`Плейлист «${data.name}» создан`);
-    } catch (e: any) {
-      toast.error('Ошибка: ' + e.message);
-    } finally {
-      setCreating(false);
-    }
-  };
-
-  const handleRemoveTrack = async (track: AzuraTrack) => {
-    if (!selectedPlaylist) return;
-    try {
-      // Get current track IDs in playlist, remove this one
-      const newIds = playlistTracks.filter(t => t.id !== track.id).map(t => t.id);
-      await azFetch(`/playlists/${selectedPlaylist.id}/tracks`, {
-        method: 'PUT',
-        body: JSON.stringify({ trackIds: newIds }),
-      });
-      setPlaylistTracks(list => list.filter(t => t.id !== track.id));
-      setPlaylists(list => list.map(p => p.id === selectedPlaylist.id
-        ? { ...p, num_songs: p.num_songs - 1 } : p));
-      toast.success('Трек удалён из плейлиста');
-    } catch (e: any) {
-      toast.error('Ошибка: ' + e.message);
-    }
-  };
-
-  const handleAddTrack = async (track: AzuraTrack) => {
-    if (!selectedPlaylist) return;
-    if (playlistTracks.find(t => t.id === track.id)) {
-      toast.info('Уже в плейлисте');
+  // Handlers
+  const handleDeletePlaylist = async (id: string) => {
+    if (id === 'livestream') {
+      toast.error('Cannot delete the Live Stream playlist');
       return;
     }
+    if (id === 'jingles') {
+      toast.error('Cannot delete the Jingles playlist — it is mandatory for rotation');
+      return;
+    }
+    if (!confirm('Delete this playlist? This cannot be undone.')) return;
     try {
-      const newIds = [...playlistTracks.map(t => t.id), track.id];
-      await azFetch(`/playlists/${selectedPlaylist.id}/tracks`, {
-        method: 'PUT',
-        body: JSON.stringify({ trackIds: newIds }),
-      });
-      setPlaylistTracks(list => [...list, track]);
-      setPlaylists(list => list.map(p => p.id === selectedPlaylist.id
-        ? { ...p, num_songs: p.num_songs + 1 } : p));
-      toast.success(`«${track.title}» добавлен`);
-    } catch (e: any) {
-      toast.error('Ошибка: ' + e.message);
+      await api.deletePlaylist(id);
+      setPlaylists(prev => prev.filter(p => p.id !== id));
+      if (selectedPlaylist?.id === id) setSelectedPlaylist(null);
+      toast.success('Playlist deleted');
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to delete');
     }
   };
 
-  const filteredPlaylists = playlists.filter(p =>
-    !search || p.name.toLowerCase().includes(search.toLowerCase())
-  );
+  const handleSetAsLiveStream = async (playlist: Playlist) => {
+    if (playlist.id === 'livestream') {
+      toast.info('This is already the Live Stream playlist');
+      return;
+    }
+    if (!confirm(`Copy all ${playlist.trackIds?.length || 0} tracks from "${playlist.name}" to the Live Stream playlist? This replaces the current Live Stream queue.`)) return;
 
-  const tracksNotInPlaylist = allTracks.filter(t =>
-    !playlistTracks.find(pt => pt.id === t.id) &&
-    (!addSearch || t.title?.toLowerCase().includes(addSearch.toLowerCase()) ||
-      t.artist?.toLowerCase().includes(addSearch.toLowerCase()))
-  );
+    try {
+      // Get or create livestream playlist
+      let livePlaylist: Playlist;
+      const existingLive = playlists.find(p => p.id === 'livestream');
+      if (existingLive) {
+        livePlaylist = existingLive;
+      } else {
+        const res = await api.createPlaylist({
+          id: 'livestream',
+          name: 'Live Stream',
+          description: 'Main broadcast playlist for Auto DJ',
+          trackIds: []
+        });
+        livePlaylist = res.playlist;
+      }
 
-  // ── Playlist detail view ──────────────────────────────────────────────
-  if (selectedPlaylist) {
+      // Copy tracks to livestream
+      await api.updatePlaylist('livestream', {
+        ...livePlaylist,
+        trackIds: [...(playlist.trackIds || [])],
+        description: `Loaded from: ${playlist.name}`
+      });
+
+      toast.success(`Loaded ${playlist.trackIds?.length || 0} tracks into Live Stream!`);
+      loadData();
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to set as live stream');
+    }
+  };
+
+  const isLiveStream = (id: string) => id === 'livestream';
+  const isJinglesPlaylist = (id: string) => id === 'jingles';
+  const isSystemPlaylist = (id: string) => id === 'livestream' || id === 'jingles';
+
+  // Stats
+  const totalTracks = playlists.reduce((sum, p) => sum + (p.trackIds?.length || 0), 0);
+  const livePlaylist = playlists.find(p => p.id === 'livestream');
+  const jinglesPlaylist = playlists.find(p => p.id === 'jingles');
+  const scheduledCount = new Set(schedules.map(s => s.playlistId)).size;
+
+  if (loading) {
     return (
       <AdminLayout>
-        <div className="space-y-6">
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-            className="flex items-center gap-4 flex-wrap">
-            <Button variant="ghost" onClick={() => setSelectedPlaylist(null)}
-              className="text-white/60 hover:text-white">
-              <ArrowLeft className="w-4 h-4 mr-2" /> Назад
-            </Button>
-            <div className="flex-1">
-              <h1 className="text-2xl font-righteous text-white">{selectedPlaylist.name}</h1>
-              <p className="text-white/40 text-sm">
-                {selectedPlaylist.num_songs} треков · {formatDuration(selectedPlaylist.total_length)} ·
-                <span className={`ml-2 ${selectedPlaylist.is_enabled ? 'text-green-400' : 'text-white/30'}`}>
-                  {selectedPlaylist.is_enabled ? 'Активен' : 'Отключён'}
-                </span>
-              </p>
-            </div>
-            <Button onClick={e => handleToggle(selectedPlaylist, e)}
-              className={selectedPlaylist.is_enabled
-                ? 'bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20'
-                : 'bg-green-500/10 border border-green-500/30 text-green-400 hover:bg-green-500/20'}>
-              {selectedPlaylist.is_enabled
-                ? <><ZapOff className="w-4 h-4 mr-2" />Отключить</>
-                : <><Zap className="w-4 h-4 mr-2" />Включить</>}
-            </Button>
-          </motion.div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Tracks in playlist */}
-            <Card className="bg-white/10 backdrop-blur-sm border-white/20 overflow-hidden">
-              <div className="p-4 border-b border-white/10">
-                <h2 className="text-white font-semibold flex items-center gap-2">
-                  <Music className="w-4 h-4 text-[#00d9ff]" />
-                  Треки в плейлисте ({playlistTracks.length})
-                </h2>
-              </div>
-              {tracksLoading ? (
-                <div className="flex items-center justify-center py-12 text-white/40">
-                  <RefreshCw className="w-5 h-5 animate-spin mr-2" /> Загрузка...
-                </div>
-              ) : playlistTracks.length === 0 ? (
-                <div className="text-center py-12 text-white/30">
-                  <Music className="w-10 h-10 mx-auto mb-2 opacity-30" />
-                  <p className="text-sm">Плейлист пуст</p>
-                </div>
-              ) : (
-                <div className="overflow-y-auto max-h-[500px]">
-                  {playlistTracks.map(track => (
-                    <div key={track.id} className="flex items-center gap-3 p-3 hover:bg-white/5 transition-colors group border-b border-white/5 last:border-0">
-                      {track.art ? (
-                        <img src={track.art} alt="" className="w-8 h-8 rounded object-cover shrink-0" />
-                      ) : (
-                        <div className="w-8 h-8 rounded bg-[#00d9ff]/10 flex items-center justify-center shrink-0">
-                          <Music className="w-4 h-4 text-[#00d9ff]" />
-                        </div>
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <div className="text-white text-sm font-medium truncate">{track.title || track.path}</div>
-                        <div className="text-white/40 text-xs truncate">{track.artist}</div>
-                      </div>
-                      <span className="text-white/30 text-xs font-mono shrink-0">{track.length_text}</span>
-                      <Button size="icon" variant="ghost"
-                        className="w-7 h-7 text-red-400 hover:bg-red-400/10 opacity-0 group-hover:opacity-100"
-                        onClick={() => handleRemoveTrack(track)}>
-                        <X className="w-3.5 h-3.5" />
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </Card>
-
-            {/* Add tracks */}
-            <Card className="bg-white/10 backdrop-blur-sm border-white/20 overflow-hidden">
-              <div className="p-4 border-b border-white/10">
-                <h2 className="text-white font-semibold flex items-center gap-2 mb-3">
-                  <Plus className="w-4 h-4 text-[#00ffaa]" />
-                  Добавить треки
-                </h2>
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30" />
-                  <Input value={addSearch} onChange={e => setAddSearch(e.target.value)}
-                    placeholder="Поиск..."
-                    className="pl-9 bg-white/5 border-white/20 text-white placeholder:text-white/30 h-8 text-sm" />
-                </div>
-              </div>
-              <div className="overflow-y-auto max-h-[500px]">
-                {tracksNotInPlaylist.length === 0 ? (
-                  <div className="text-center py-12 text-white/30 text-sm">Все треки уже в плейлисте</div>
-                ) : (
-                  tracksNotInPlaylist.map(track => (
-                    <button key={track.id}
-                      onClick={() => handleAddTrack(track)}
-                      className="w-full flex items-center gap-3 p-3 hover:bg-white/5 transition-colors text-left border-b border-white/5 last:border-0">
-                      {track.art ? (
-                        <img src={track.art} alt="" className="w-8 h-8 rounded object-cover shrink-0" />
-                      ) : (
-                        <div className="w-8 h-8 rounded bg-[#00ffaa]/10 flex items-center justify-center shrink-0">
-                          <Music className="w-4 h-4 text-[#00ffaa]" />
-                        </div>
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <div className="text-white text-sm font-medium truncate">{track.title || track.path}</div>
-                        <div className="text-white/40 text-xs truncate">{track.artist}</div>
-                      </div>
-                      <Plus className="w-4 h-4 text-[#00ffaa]/50 shrink-0" />
-                    </button>
-                  ))
-                )}
-              </div>
-            </Card>
-          </div>
+        <div className="flex items-center justify-center min-h-[500px]">
+          <Loader2 className="w-8 h-8 text-[#00d9ff] animate-spin" />
         </div>
       </AdminLayout>
     );
   }
 
-  // ── Playlists list view ────────────────────────────────────────────────
+  // ==================== DETAIL VIEW ====================
+  if (selectedPlaylist) {
+    return (
+      <AdminLayout maxWidth="wide">
+        <PlaylistDetail
+          playlist={selectedPlaylist}
+          allTracks={allTracks}
+          scheduleSlots={getPlaylistSchedules(selectedPlaylist.id)}
+          onBack={() => setSelectedPlaylist(null)}
+          onUpdate={(updated) => {
+            setPlaylists(prev => prev.map(p => p.id === updated.id ? updated : p));
+            setSelectedPlaylist(updated);
+          }}
+          onSetAsLive={() => handleSetAsLiveStream(selectedPlaylist)}
+          isLive={isLiveStream(selectedPlaylist.id)}
+          isJingles={isJinglesPlaylist(selectedPlaylist.id)}
+          jingleConfig={jingleConfig}
+          onJingleConfigUpdate={(cfg: any) => setJingleConfig(cfg)}
+          onViewSchedule={() => navigate(`/admin/schedule?highlight=${selectedPlaylist.id}`)}
+          onScheduleCreated={() => loadData()}
+        />
+      </AdminLayout>
+    );
+  }
+
+  // ==================== GRID VIEW ====================
+  const filteredPlaylists = playlists.filter(p =>
+    p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    p.genre?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    p.description?.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
   return (
-    <AdminLayout>
+    <AdminLayout maxWidth="wide">
       <div className="space-y-6">
         {/* Header */}
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-          className="flex items-center justify-between flex-wrap gap-3">
-          <div>
-            <h1 className="text-3xl font-righteous text-white mb-1">Плейлисты</h1>
-            <p className="text-white/50 text-sm">AzuraCast · {playlists.length} плейлистов</p>
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+        >
+          <div className="flex items-center gap-3">
+            <div className="p-3 bg-gradient-to-br from-[#00d9ff] to-[#00ffaa] rounded-xl">
+              <ListMusic className="w-7 h-7 text-[#0a1628]" />
+            </div>
+            <div>
+              <h1 className="text-2xl sm:text-3xl font-bold text-white" style={{ fontFamily: 'var(--font-family-display)' }}>
+                Playlists
+              </h1>
+              <p className="text-white/60 text-sm">Manage playlists and assign tracks to go on air</p>
+            </div>
           </div>
-          <div className="flex gap-2">
-            <Button onClick={loadPlaylists} variant="outline"
-              className="bg-white/5 border-white/20 text-white hover:bg-white/10">
-              <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-              Обновить
-            </Button>
-            <Button onClick={() => setIsCreateOpen(true)}
-              className="bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] text-[#0a1628] hover:opacity-90">
-              <Plus className="w-4 h-4 mr-2" /> Создать
-            </Button>
-            <Button onClick={() => window.open(`${AZURACAST_URL}/station/soul_fm_/playlists`, '_blank')}
-              variant="outline" className="bg-white/5 border-white/20 text-white/60 hover:bg-white/10">
-              <ExternalLink className="w-4 h-4" />
-            </Button>
-          </div>
+
+          <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+            <DialogTrigger asChild>
+              <Button className="bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] text-[#0a1628] font-semibold">
+                <Plus className="w-4 h-4 mr-2" />
+                New Playlist
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="bg-[#0f1c2e] border-[#00d9ff]/30 text-white max-w-md">
+              <DialogHeader>
+                <DialogTitle>Create Playlist</DialogTitle>
+              </DialogHeader>
+              <CreatePlaylistForm
+                onSuccess={(newPl) => {
+                  setPlaylists(prev => [newPl, ...prev]);
+                  setIsCreateOpen(false);
+                }}
+                onCancel={() => setIsCreateOpen(false)}
+              />
+            </DialogContent>
+          </Dialog>
         </motion.div>
 
-        {/* Search */}
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40" />
-          <Input value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Поиск плейлиста..."
-            className="pl-10 bg-white/5 border-white/20 text-white placeholder:text-white/40" />
+        {/* Stats Bar */}
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+          <StatCard
+            icon={<ListMusic className="w-5 h-5" />}
+            label="Playlists"
+            value={playlists.length}
+            color="#00d9ff"
+          />
+          <StatCard
+            icon={<Music className="w-5 h-5" />}
+            label="Total Tracks"
+            value={totalTracks}
+            color="#00ffaa"
+          />
+          <StatCard
+            icon={<Radio className="w-5 h-5" />}
+            label="On Air"
+            value={livePlaylist ? `${livePlaylist.trackIds?.length || 0} tracks` : 'None'}
+            color="#FF8C42"
+          />
+          <StatCard
+            icon={<Bell className="w-5 h-5" />}
+            label="Jingles"
+            value={jinglesPlaylist ? `${jinglesPlaylist.trackIds?.length || 0} / ${jingleConfig?.interval || 5} songs` : 'N/A'}
+            color="#FFD700"
+          />
+          <StatCard
+            icon={<Calendar className="w-5 h-5" />}
+            label="Scheduled"
+            value={`${scheduledCount} of ${playlists.length}`}
+            color="#9C27B0"
+          />
         </div>
 
-        {/* Playlists Grid */}
-        {loading ? (
-          <div className="flex items-center justify-center py-20 text-white/50">
-            <RefreshCw className="w-6 h-6 animate-spin mr-3" /> Загрузка из AzuraCast...
+        {/* Search */}
+        <Card className="bg-[#0f1c2e]/90 border-[#00d9ff]/20 p-4">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40" />
+            <Input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search playlists..."
+              className="pl-10 bg-[#0a1628] border-white/10 text-white"
+            />
           </div>
+        </Card>
+
+        {/* Playlists Grid */}
+        {filteredPlaylists.length === 0 ? (
+          <Card className="bg-[#0f1c2e]/90 border-[#00d9ff]/20 p-12 text-center">
+            <ListMusic className="w-16 h-16 mx-auto mb-4 text-white/20" />
+            <h3 className="text-xl font-semibold text-white mb-2">
+              {searchQuery ? 'No results' : 'No Playlists Yet'}
+            </h3>
+            <p className="text-white/50 mb-6">
+              {searchQuery ? 'Try a different search' : 'Create your first playlist and add tracks for Auto DJ'}
+            </p>
+          </Card>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredPlaylists.map((pl, idx) => (
-              <motion.div key={pl.id}
-                initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: idx * 0.03 }}>
-                <Card
-                  onClick={() => openPlaylist(pl)}
-                  className="bg-white/10 backdrop-blur-sm border-white/20 p-5 cursor-pointer hover:bg-white/15 transition-all hover:border-white/30 group">
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${pl.is_enabled ? 'bg-green-400' : 'bg-white/20'}`} />
-                      <h3 className="text-white font-semibold truncate">{pl.name}</h3>
-                    </div>
-                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ml-2">
-                      <button
-                        onClick={e => handleToggle(pl, e)}
-                        className={`w-7 h-7 rounded flex items-center justify-center transition-colors
-                          ${pl.is_enabled ? 'text-green-400 hover:bg-green-400/10' : 'text-white/30 hover:bg-white/10'}`}
-                        title={pl.is_enabled ? 'Отключить' : 'Включить'}>
-                        {pl.is_enabled ? <Zap className="w-3.5 h-3.5" /> : <ZapOff className="w-3.5 h-3.5" />}
-                      </button>
-                      <button
-                        onClick={e => handleDelete(pl, e)}
-                        className="w-7 h-7 rounded flex items-center justify-center text-red-400 hover:bg-red-400/10 transition-colors">
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-white/50">{pl.num_songs} треков</span>
-                    <div className="flex items-center gap-1 text-white/30 group-hover:text-white/60 transition-colors">
-                      <span className="text-xs">Открыть</span>
-                      <ChevronRight className="w-3.5 h-3.5" />
-                    </div>
-                  </div>
-                  {pl.total_length > 0 && (
-                    <div className="text-white/30 text-xs mt-1">{formatDuration(pl.total_length)}</div>
-                  )}
-                  {pl.schedule_items && pl.schedule_items.length > 0 && (
-                    <div className="text-[#00d9ff]/50 text-xs mt-2">
-                      По расписанию
-                    </div>
-                  )}
-                </Card>
-              </motion.div>
-            ))}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            <AnimatePresence>
+              {filteredPlaylists.map((playlist, i) => (
+                <PlaylistCard
+                  key={playlist.id}
+                  playlist={playlist}
+                  index={i}
+                  isLive={isLiveStream(playlist.id)}
+                  isJingles={isJinglesPlaylist(playlist.id)}
+                  jingleConfig={isJinglesPlaylist(playlist.id) ? jingleConfig : null}
+                  allTracks={allTracks}
+                  scheduleSlots={getPlaylistSchedules(playlist.id)}
+                  onClick={() => setSelectedPlaylist(playlist)}
+                  onEdit={() => {
+                    setEditPlaylist(playlist);
+                    setIsEditOpen(true);
+                  }}
+                  onDelete={() => handleDeletePlaylist(playlist.id)}
+                  onSetAsLive={() => handleSetAsLiveStream(playlist)}
+                  onViewSchedule={() => navigate('/admin/schedule')}
+                />
+              ))}
+            </AnimatePresence>
           </div>
         )}
+      </div>
 
-        {/* Create modal */}
-        <AnimatePresence>
-          {isCreateOpen && (
-            <>
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50"
-                onClick={() => setIsCreateOpen(false)} />
-              <motion.div
-                initial={{ opacity: 0, scale: 0.9, y: 20 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.9, y: 20 }}
-                className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-sm bg-[#0a1628] rounded-xl border border-[#00d9ff]/30 shadow-2xl z-50 p-6">
-                <div className="flex items-center justify-between mb-5">
-                  <h2 className="text-xl font-bold text-white">Новый плейлист</h2>
-                  <Button size="icon" variant="ghost" onClick={() => setIsCreateOpen(false)}
-                    className="text-white/50 hover:text-white">
-                    <X className="w-5 h-5" />
+      {/* Edit Dialog */}
+      <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
+        <DialogContent className="bg-[#0f1c2e] border-[#00d9ff]/30 text-white max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit Playlist</DialogTitle>
+          </DialogHeader>
+          {editPlaylist && (
+            <EditPlaylistForm
+              playlist={editPlaylist}
+              onSuccess={(updated) => {
+                setPlaylists(prev => prev.map(p => p.id === updated.id ? updated : p));
+                setIsEditOpen(false);
+              }}
+              onCancel={() => setIsEditOpen(false)}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+    </AdminLayout>
+  );
+}
+
+// ==================== STAT CARD ====================
+
+function StatCard({ icon, label, value, color }: { icon: React.ReactNode; label: string; value: string | number; color: string }) {
+  return (
+    <Card className="bg-[#0f1c2e]/90 border-white/10 p-4">
+      <div className="flex items-center gap-3">
+        <div className="p-2 rounded-lg" style={{ backgroundColor: `${color}20` }}>
+          <div style={{ color }}>{icon}</div>
+        </div>
+        <div className="min-w-0">
+          <p className="text-white/50 text-xs">{label}</p>
+          <p className="text-white font-bold text-lg truncate">{value}</p>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+// ==================== PLAYLIST CARD ====================
+
+function PlaylistCard({
+  playlist,
+  index,
+  isLive,
+  isJingles,
+  jingleConfig,
+  allTracks,
+  scheduleSlots,
+  onClick,
+  onEdit,
+  onDelete,
+  onSetAsLive,
+  onViewSchedule
+}: {
+  playlist: Playlist;
+  index: number;
+  isLive: boolean;
+  isJingles?: boolean;
+  jingleConfig?: any;
+  allTracks: Track[];
+  scheduleSlots: ScheduleSlot[];
+  onClick: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  onSetAsLive: () => void;
+  onViewSchedule: () => void;
+}) {
+  const trackCount = playlist.trackIds?.length || 0;
+  const color = playlist.color || '#00d9ff';
+
+  // Calculate total duration
+  const totalDuration = useMemo(() => {
+    return (playlist.trackIds || []).reduce((sum, id) => {
+      const track = allTracks.find(t => t.id === id);
+      return sum + (track?.duration || 0);
+    }, 0);
+  }, [playlist.trackIds, allTracks]);
+
+  // Count tracks without audio files
+  const noAudioCount = useMemo(() => {
+    return (playlist.trackIds || []).filter(id => {
+      const track = allTracks.find(t => t.id === id);
+      return track && !track.audioUrl && !track.storageFilename;
+    }).length;
+  }, [playlist.trackIds, allTracks]);
+
+  const formatDuration = (seconds: number) => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    return h > 0 ? `${h}h ${m}m` : `${m}m`;
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.9 }}
+      transition={{ delay: index * 0.04 }}
+    >
+      <Card
+        className={`bg-[#0f1c2e]/90 border overflow-hidden hover:shadow-lg hover:shadow-[${color}]/10 transition-all cursor-pointer group ${
+          isLive ? 'border-[#00ffaa]/50 ring-1 ring-[#00ffaa]/20' : isJingles ? 'border-[#FFD700]/50 ring-1 ring-[#FFD700]/20' : 'border-white/10 hover:border-white/20'
+        }`}
+        onClick={onClick}
+      >
+        {/* Color Header */}
+        <div
+          className="h-2 w-full"
+          style={{ background: `linear-gradient(90deg, ${color}, ${color}80)` }}
+        />
+
+        <div className="p-4 sm:p-5">
+          {/* Title Row */}
+          <div className="flex items-start justify-between mb-3">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 mb-1">
+                {isLive && (
+                  <Badge className="bg-[#00ffaa]/20 text-[#00ffaa] border-[#00ffaa]/30 text-[10px] px-1.5 py-0 flex-shrink-0">
+                    <Radio className="w-2.5 h-2.5 mr-1 animate-pulse" />
+                    ON AIR
+                  </Badge>
+                )}
+                {isJingles && (
+                  <Badge className="bg-[#FFD700]/20 text-[#FFD700] border-[#FFD700]/30 text-[10px] px-1.5 py-0 flex-shrink-0">
+                    <Bell className="w-2.5 h-2.5 mr-1" />
+                    JINGLES
+                  </Badge>
+                )}
+              </div>
+              <h3 className="text-white font-bold text-lg truncate">{playlist.name}</h3>
+              {playlist.description && (
+                <p className="text-white/50 text-sm mt-1 line-clamp-2">{playlist.description}</p>
+              )}
+            </div>
+          </div>
+
+          {/* Genre */}
+          {playlist.genre && (
+            <Badge variant="outline" className="mb-3 text-xs" style={{ borderColor: `${color}40`, color }}>
+              {playlist.genre}
+            </Badge>
+          )}
+
+          {/* Stats */}
+          <div className="flex items-center gap-4 text-sm text-white/50 mb-3 flex-wrap">
+            <span className="flex items-center gap-1.5">
+              <Music className="w-3.5 h-3.5" />
+              {trackCount} {trackCount === 1 ? 'track' : 'tracks'}
+            </span>
+            {totalDuration > 0 && (
+              <span className="flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5" />
+                {formatDuration(totalDuration)}
+              </span>
+            )}
+            {noAudioCount > 0 && (
+              <span className="flex items-center gap-1.5 text-amber-400/70" title={`${noAudioCount} tracks without audio files`}>
+                <AlertCircle className="w-3.5 h-3.5" />
+                {noAudioCount === trackCount ? 'no audio' : `${noAudioCount} no audio`}
+              </span>
+            )}
+          </div>
+
+          {/* Jingle rotation info */}
+          {isJingles && jingleConfig && (
+            <div className="mb-3 flex items-center gap-2 text-xs">
+              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-medium ${
+                jingleConfig.enabled
+                  ? 'bg-[#FFD700]/15 text-[#FFD700]/80'
+                  : 'bg-white/5 text-white/30'
+              }`}>
+                <Repeat className="w-2.5 h-2.5" />
+                Every {jingleConfig.interval || 5} songs
+              </span>
+              <span className="text-white/30">
+                Next: #{((jingleConfig.rotationIndex || 0) % Math.max(trackCount, 1)) + 1}
+              </span>
+            </div>
+          )}
+
+          {/* Schedule Badges */}
+          {scheduleSlots.length > 0 && (
+            <div className="mb-3 flex flex-wrap gap-1">
+              {scheduleSlots.slice(0, 3).map(slot => (
+                <span
+                  key={slot.id}
+                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${
+                    slot.isActive
+                      ? 'bg-[#00d9ff]/15 text-[#00d9ff]/80'
+                      : 'bg-white/5 text-white/30 line-through'
+                  }`}
+                >
+                  <Calendar className="w-2.5 h-2.5" />
+                  {slot.dayOfWeek !== null ? DAYS_SHORT[slot.dayOfWeek] : 'Daily'} {slot.startTime}
+                </span>
+              ))}
+              {scheduleSlots.length > 3 && (
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] bg-white/5 text-white/30">
+                  +{scheduleSlots.length - 3} more
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* Actions */}
+          <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={onClick}
+              className="flex-1 border-white/10 text-white hover:bg-white/5 text-xs"
+            >
+              <ArrowRight className="w-3.5 h-3.5 mr-1.5" />
+              Open
+            </Button>
+            {!isLive && !isJingles && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={onSetAsLive}
+                className="border-[#00ffaa]/30 text-[#00ffaa] hover:bg-[#00ffaa]/10 text-xs"
+                title="Send to Live Stream"
+              >
+                <Radio className="w-3.5 h-3.5" />
+              </Button>
+            )}
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={onEdit}
+              className="text-white/50 hover:text-white hover:bg-white/5"
+            >
+              <Edit className="w-3.5 h-3.5" />
+            </Button>
+            {!isLive && !isJingles && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={onDelete}
+                className="text-red-400/50 hover:text-red-400 hover:bg-red-400/10"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </Button>
+            )}
+            {scheduleSlots.length > 0 && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={onViewSchedule}
+                className="text-[#00ffaa]/50 hover:text-[#00ffaa] hover:bg-[#00ffaa]/10"
+              >
+                <Calendar className="w-3.5 h-3.5" />
+              </Button>
+            )}
+          </div>
+        </div>
+      </Card>
+    </motion.div>
+  );
+}
+
+// ==================== PLAYLIST DETAIL VIEW ====================
+
+function PlaylistDetail({
+  playlist,
+  allTracks,
+  scheduleSlots,
+  onBack,
+  onUpdate,
+  onSetAsLive,
+  isLive,
+  isJingles,
+  jingleConfig,
+  onJingleConfigUpdate,
+  onViewSchedule,
+  onScheduleCreated
+}: {
+  playlist: Playlist;
+  allTracks: Track[];
+  scheduleSlots: ScheduleSlot[];
+  onBack: () => void;
+  onUpdate: (p: Playlist) => void;
+  onSetAsLive: () => void;
+  isLive: boolean;
+  isJingles?: boolean;
+  jingleConfig?: any;
+  onJingleConfigUpdate?: (cfg: any) => void;
+  onViewSchedule: () => void;
+  onScheduleCreated: () => void;
+}) {
+  const navigate = useNavigate();
+  const [librarySearch, setLibrarySearch] = useState('');
+  const [libraryGenre, setLibraryGenre] = useState('all');
+  const [saving, setSaving] = useState(false);
+  const [showLibrary, setShowLibrary] = useState(false);
+  const [quickScheduleOpen, setQuickScheduleOpen] = useState(false);
+  const [quickScheduleForm, setQuickScheduleForm] = useState({
+    dayOfWeek: new Date().getDay().toString(),
+    startTime: '08:00',
+    endTime: '10:00',
+  });
+  const [quickScheduleSaving, setQuickScheduleSaving] = useState(false);
+  const [playingTrackId, setPlayingTrackId] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [jingleInterval, setJingleInterval] = useState(jingleConfig?.interval || 5);
+  const [jingleEnabled, setJingleEnabled] = useState(jingleConfig?.enabled !== false);
+  const [savingJingleConfig, setSavingJingleConfig] = useState(false);
+
+  const handleSaveJingleConfig = async (updates: any) => {
+    setSavingJingleConfig(true);
+    try {
+      const res = await api.updateJinglePlaylistConfig(updates);
+      if (res.config) {
+        onJingleConfigUpdate?.(res.config);
+        toast.success('Jingle rotation config saved');
+      }
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to save jingle config');
+    } finally {
+      setSavingJingleConfig(false);
+    }
+  };
+
+  const handleResetRotation = async () => {
+    if (!confirm('Reset jingle rotation to the beginning?')) return;
+    setSavingJingleConfig(true);
+    try {
+      const res = await api.resetJingleRotation();
+      if (res.config) {
+        onJingleConfigUpdate?.(res.config);
+        toast.success('Jingle rotation reset');
+      }
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to reset');
+    } finally {
+      setSavingJingleConfig(false);
+    }
+  };
+
+  const handlePlayTrack = (e: React.MouseEvent, track: Track) => {
+    e.stopPropagation();
+    if (playingTrackId === track.id) {
+      audioRef.current?.pause();
+      setPlayingTrackId(null);
+    } else {
+      const url = track.audioUrl;
+      if (!url) {
+        toast.error('No audio URL for this track');
+        return;
+      }
+      if (audioRef.current) {
+        audioRef.current.src = url;
+        audioRef.current.play().catch(err => console.error('Play error:', err));
+      }
+      setPlayingTrackId(track.id);
+    }
+  };
+
+  const DAYS_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const QUICK_TIME_SLOTS = Array.from({ length: 24 }, (_, i) => `${i.toString().padStart(2, '0')}:00`);
+
+  const handleQuickSchedule = async () => {
+    const dayOfWeek = quickScheduleForm.dayOfWeek === 'daily' ? null : parseInt(quickScheduleForm.dayOfWeek);
+    setQuickScheduleSaving(true);
+    try {
+      await api.createSchedule({
+        playlistId: playlist.id,
+        dayOfWeek,
+        startTime: quickScheduleForm.startTime,
+        endTime: quickScheduleForm.endTime,
+        title: playlist.name,
+        isActive: true,
+        repeatWeekly: true,
+        utcOffsetMinutes: new Date().getTimezoneOffset(),
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      });
+      toast.success(`Scheduled "${playlist.name}" at ${quickScheduleForm.dayOfWeek === 'daily' ? 'Daily' : DAYS_SHORT[parseInt(quickScheduleForm.dayOfWeek)]} ${quickScheduleForm.startTime}`);
+      setQuickScheduleOpen(false);
+      onScheduleCreated();
+    } catch (error: any) {
+      console.error('Quick schedule error:', error);
+      toast.error('Failed to schedule');
+    } finally {
+      setQuickScheduleSaving(false);
+    }
+  };
+
+  // Build ordered tracks list
+  const orderedTracks = useMemo(() => {
+    return (playlist.trackIds || [])
+      .map(id => allTracks.find(t => t.id === id))
+      .filter(Boolean) as Track[];
+  }, [playlist.trackIds, allTracks]);
+
+  // Filter library tracks (exclude already in playlist)
+  const libraryTracks = useMemo(() => {
+    const inPlaylist = new Set(playlist.trackIds || []);
+    return allTracks.filter(t => {
+      if (inPlaylist.has(t.id)) return false;
+      const matchSearch = !librarySearch ||
+        t.title.toLowerCase().includes(librarySearch.toLowerCase()) ||
+        t.artist.toLowerCase().includes(librarySearch.toLowerCase());
+      const matchGenre = libraryGenre === 'all' || t.genre?.toLowerCase() === libraryGenre;
+      return matchSearch && matchGenre;
+    });
+  }, [allTracks, playlist.trackIds, librarySearch, libraryGenre]);
+
+  const totalDuration = orderedTracks.reduce((sum, t) => sum + (t.duration || 0), 0);
+  const tracksWithoutAudio = orderedTracks.filter(t => !t.audioUrl && !t.storageFilename);
+  const tracksWithAudioCount = orderedTracks.length - tracksWithoutAudio.length;
+
+  const formatDuration = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
+
+  const formatTotalDuration = (seconds: number) => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    return h > 0 ? `${h}h ${m}m` : `${m} min`;
+  };
+
+  // Save track order
+  const saveOrder = useCallback(async (newTrackIds: string[]) => {
+    setSaving(true);
+    try {
+      await api.updatePlaylist(playlist.id, {
+        ...playlist,
+        trackIds: newTrackIds
+      });
+      onUpdate({ ...playlist, trackIds: newTrackIds });
+    } catch (error: any) {
+      toast.error('Failed to save order');
+    } finally {
+      setSaving(false);
+    }
+  }, [playlist, onUpdate]);
+
+  const handleReorder = (newOrder: Track[]) => {
+    const newIds = newOrder.map(t => t.id);
+    onUpdate({ ...playlist, trackIds: newIds });
+    saveOrder(newIds);
+  };
+
+  const handleAddTrack = async (trackId: string) => {
+    const newIds = [...(playlist.trackIds || []), trackId];
+    setSaving(true);
+    try {
+      await api.updatePlaylist(playlist.id, { ...playlist, trackIds: newIds });
+      onUpdate({ ...playlist, trackIds: newIds });
+      toast.success('Track added');
+    } catch {
+      toast.error('Failed to add track');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleRemoveTrack = async (trackId: string) => {
+    const newIds = (playlist.trackIds || []).filter(id => id !== trackId);
+    setSaving(true);
+    try {
+      await api.updatePlaylist(playlist.id, { ...playlist, trackIds: newIds });
+      onUpdate({ ...playlist, trackIds: newIds });
+      toast.success('Track removed');
+    } catch {
+      toast.error('Failed to remove track');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleShuffle = async () => {
+    if (orderedTracks.length < 2) return;
+    if (!confirm('Shuffle all tracks in this playlist?')) return;
+    const shuffled = [...(playlist.trackIds || [])].sort(() => Math.random() - 0.5);
+    setSaving(true);
+    try {
+      await api.updatePlaylist(playlist.id, { ...playlist, trackIds: shuffled });
+      onUpdate({ ...playlist, trackIds: shuffled });
+      toast.success('Playlist shuffled');
+    } catch {
+      toast.error('Failed to shuffle');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleAddAll = async () => {
+    if (libraryTracks.length === 0) return;
+    const count = Math.min(libraryTracks.length, 50);
+    if (!confirm(`Add ${count} tracks to the playlist?`)) return;
+    const newIds = [...(playlist.trackIds || []), ...libraryTracks.slice(0, 50).map(t => t.id)];
+    setSaving(true);
+    try {
+      await api.updatePlaylist(playlist.id, { ...playlist, trackIds: newIds });
+      onUpdate({ ...playlist, trackIds: newIds });
+      toast.success(`${count} tracks added`);
+    } catch {
+      toast.error('Failed to add tracks');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const color = playlist.color || '#00d9ff';
+
+  return (
+    <div className="space-y-4 sm:space-y-6">
+      {/* Header */}
+      <motion.div
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3 min-w-0">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onBack}
+              className="text-white/70 hover:text-white flex-shrink-0"
+            >
+              <ChevronLeft className="w-5 h-5" />
+            </Button>
+            <div
+              className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0"
+              style={{ background: `linear-gradient(135deg, ${color}, ${color}80)` }}
+            >
+              {isLive ? <Radio className="w-6 h-6 text-[#0a1628]" /> : <ListMusic className="w-6 h-6 text-[#0a1628]" />}
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="text-xl sm:text-2xl font-bold text-white truncate" style={{ fontFamily: 'var(--font-family-display)' }}>
+                  {playlist.name}
+                </h1>
+                {isLive && (
+                  <Badge className="bg-[#00ffaa]/20 text-[#00ffaa] border-[#00ffaa]/30 text-xs flex-shrink-0">
+                    <Radio className="w-3 h-3 mr-1 animate-pulse" />
+                    ON AIR
+                  </Badge>
+                )}
+                {isJingles && (
+                  <Badge className="bg-[#FFD700]/20 text-[#FFD700] border-[#FFD700]/30 text-xs flex-shrink-0">
+                    <Bell className="w-3 h-3 mr-1" />
+                    JINGLES ROTATION
+                  </Badge>
+                )}
+                {saving && (
+                  <Loader2 className="w-4 h-4 text-[#00d9ff] animate-spin flex-shrink-0" />
+                )}
+              </div>
+              <p className="text-white/50 text-sm">
+                {orderedTracks.length} tracks &bull; {formatTotalDuration(totalDuration)}
+                {playlist.genre && <> &bull; {playlist.genre}</>}
+                {tracksWithoutAudio.length > 0 && (
+                  <span className="text-amber-400/70"> &bull; {tracksWithoutAudio.length} без аудио</span>
+                )}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            {!isLive && !isJingles && (
+              <Button
+                onClick={onSetAsLive}
+                variant="outline"
+                size="sm"
+                className="border-[#00ffaa]/30 text-[#00ffaa] hover:bg-[#00ffaa]/10"
+              >
+                <Radio className="w-4 h-4 mr-2" />
+                Send to Live Stream
+              </Button>
+            )}
+            {isJingles && (
+              <Button
+                onClick={handleResetRotation}
+                variant="outline"
+                size="sm"
+                className="border-[#FFD700]/30 text-[#FFD700] hover:bg-[#FFD700]/10"
+                disabled={savingJingleConfig}
+              >
+                <RotateCcw className="w-4 h-4 mr-2" />
+                Reset Rotation
+              </Button>
+            )}
+            <Button
+              onClick={handleShuffle}
+              variant="outline"
+              size="sm"
+              className="border-white/10 text-white/70 hover:bg-white/5"
+              disabled={orderedTracks.length < 2}
+            >
+              <Shuffle className="w-4 h-4 mr-2" />
+              Shuffle
+            </Button>
+            <Button
+              onClick={() => setShowLibrary(!showLibrary)}
+              size="sm"
+              className={showLibrary
+                ? 'bg-[#00d9ff] text-[#0a1628]'
+                : 'bg-[#00d9ff]/10 text-[#00d9ff] border border-[#00d9ff]/30'
+              }
+            >
+              <PlusCircle className="w-4 h-4 mr-2" />
+              {showLibrary ? 'Hide Library' : isJingles ? 'Add Jingles' : 'Add Tracks'}
+            </Button>
+            {!isJingles && (
+              <Button
+                onClick={() => setQuickScheduleOpen(true)}
+                size="sm"
+                className="bg-[#00ffaa] text-[#0a1628] hover:bg-[#00ffaa]/90"
+              >
+                <Calendar className="w-4 h-4 mr-2" />
+                Quick Schedule
+              </Button>
+            )}
+          </div>
+        </div>
+      </motion.div>
+
+      {/* Schedule Info Strip */}
+      {scheduleSlots.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: -5 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+        >
+          <Card className="bg-[#0f1c2e]/90 border-[#00d9ff]/15 p-3 sm:p-4">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="p-1.5 rounded-lg bg-[#00d9ff]/15 flex-shrink-0">
+                  <Calendar className="w-4 h-4 text-[#00d9ff]" />
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-white/60 text-sm font-medium">Scheduled:</span>
+                  {scheduleSlots.map(slot => (
+                    <Badge
+                      key={slot.id}
+                      variant="outline"
+                      className={`text-xs ${
+                        slot.isActive
+                          ? 'border-[#00d9ff]/30 text-[#00d9ff]'
+                          : 'border-white/10 text-white/30 line-through'
+                      }`}
+                    >
+                      {slot.dayOfWeek !== null ? DAYS_SHORT[slot.dayOfWeek] : 'Daily'} {slot.startTime}–{slot.endTime}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+              <Button
+                onClick={onViewSchedule}
+                size="sm"
+                variant="outline"
+                className="border-[#00d9ff]/30 text-[#00d9ff] hover:bg-[#00d9ff]/10 text-xs flex-shrink-0"
+              >
+                <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
+                View in Schedule
+              </Button>
+            </div>
+          </Card>
+        </motion.div>
+      )}
+
+      {/* 🔔 Jingle Rotation Config Panel */}
+      {isJingles && jingleConfig && (
+        <motion.div
+          initial={{ opacity: 0, y: -5 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.12 }}
+        >
+          <Card className="bg-[#0f1c2e]/90 border-[#FFD700]/20 p-4 sm:p-5">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2 rounded-lg bg-[#FFD700]/15">
+                <Settings2 className="w-5 h-5 text-[#FFD700]" />
+              </div>
+              <div>
+                <h3 className="text-white font-semibold text-sm">Jingle Rotation Settings</h3>
+                <p className="text-white/40 text-xs">Jingles play in order, cycling through the list</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {/* Enable toggle */}
+              <div className="flex items-center justify-between bg-[#0a1628]/60 rounded-lg p-3">
+                <div>
+                  <p className="text-white text-sm font-medium">Rotation</p>
+                  <p className="text-white/40 text-xs">Auto-insert jingles</p>
+                </div>
+                <button
+                  onClick={() => {
+                    const newEnabled = !jingleEnabled;
+                    setJingleEnabled(newEnabled);
+                    handleSaveJingleConfig({ enabled: newEnabled });
+                  }}
+                  className={`relative w-12 h-6 rounded-full transition-colors ${
+                    jingleEnabled ? 'bg-[#FFD700]' : 'bg-white/10'
+                  }`}
+                  disabled={savingJingleConfig}
+                >
+                  <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
+                    jingleEnabled ? 'translate-x-6' : 'translate-x-0.5'
+                  }`} />
+                </button>
+              </div>
+
+              {/* Interval setting */}
+              <div className="bg-[#0a1628]/60 rounded-lg p-3">
+                <p className="text-white text-sm font-medium mb-2">Play every N songs</p>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      const newVal = Math.max(1, jingleInterval - 1);
+                      setJingleInterval(newVal);
+                    }}
+                    className="w-8 h-8 rounded-lg bg-white/5 text-white/70 hover:bg-white/10 flex items-center justify-center"
+                  >
+                    <MinusCircle className="w-4 h-4" />
+                  </button>
+                  <div className="flex-1 text-center">
+                    <span className="text-2xl font-bold text-[#FFD700]">{jingleInterval}</span>
+                    <p className="text-white/30 text-[10px]">songs</p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      const newVal = Math.min(20, jingleInterval + 1);
+                      setJingleInterval(newVal);
+                    }}
+                    className="w-8 h-8 rounded-lg bg-white/5 text-white/70 hover:bg-white/10 flex items-center justify-center"
+                  >
+                    <PlusCircle className="w-4 h-4" />
+                  </button>
+                </div>
+                {jingleInterval !== (jingleConfig.interval || 5) && (
+                  <Button
+                    size="sm"
+                    onClick={() => handleSaveJingleConfig({ interval: jingleInterval })}
+                    disabled={savingJingleConfig}
+                    className="w-full mt-2 h-7 text-xs bg-[#FFD700]/20 text-[#FFD700] hover:bg-[#FFD700]/30"
+                  >
+                    {savingJingleConfig ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Save Interval'}
+                  </Button>
+                )}
+              </div>
+
+              {/* Rotation status */}
+              <div className="bg-[#0a1628]/60 rounded-lg p-3">
+                <p className="text-white text-sm font-medium mb-2">Rotation Status</p>
+                <div className="space-y-1.5 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-white/50">Next jingle:</span>
+                    <span className="text-[#FFD700] font-medium">
+                      #{((jingleConfig.rotationIndex || 0) % Math.max(orderedTracks.length, 1)) + 1}
+                      {orderedTracks.length > 0 && ` of ${orderedTracks.length}`}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-white/50">Songs since last:</span>
+                    <span className={`font-medium ${
+                      (jingleConfig.tracksSinceLastJingle || 0) >= (jingleConfig.interval || 5)
+                        ? 'text-[#00ffaa]'
+                        : 'text-white/70'
+                    }`}>
+                      {jingleConfig.tracksSinceLastJingle || 0} / {jingleConfig.interval || 5}
+                    </span>
+                  </div>
+                  {jingleConfig.lastPlayedAt && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-white/50">Last played:</span>
+                      <span className="text-white/70">
+                        {new Date(jingleConfig.lastPlayedAt).toLocaleTimeString()}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Rotation preview */}
+            {orderedTracks.length > 0 && (
+              <div className="mt-4 pt-4 border-t border-white/5">
+                <p className="text-white/50 text-xs mb-2 flex items-center gap-1.5">
+                  <Repeat className="w-3 h-3" />
+                  Rotation Order (jingles play in this sequence, then repeat):
+                </p>
+                <div className="flex gap-1.5 flex-wrap">
+                  {orderedTracks.map((track, i) => {
+                    const isNext = i === ((jingleConfig.rotationIndex || 0) % orderedTracks.length);
+                    return (
+                      <div
+                        key={track.id}
+                        className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-xs transition-all ${
+                          isNext
+                            ? 'bg-[#FFD700]/20 text-[#FFD700] ring-1 ring-[#FFD700]/40 font-semibold'
+                            : 'bg-white/5 text-white/50'
+                        }`}
+                      >
+                        <span className="font-mono text-[10px] opacity-60">#{i + 1}</span>
+                        <span className="truncate max-w-[120px]">{track.title}</span>
+                        {isNext && <Bell className="w-3 h-3 flex-shrink-0" />}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </Card>
+        </motion.div>
+      )}
+
+      {/* ⚠️ Warning: tracks without audio */}
+      {tracksWithoutAudio.length > 0 && orderedTracks.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: -5 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.15 }}
+        >
+          <Card className="bg-amber-500/5 border-amber-500/20 p-3 sm:p-4">
+            <div className="flex items-start gap-3">
+              <div className="p-1.5 rounded-lg bg-amber-500/15 flex-shrink-0 mt-0.5">
+                <AlertCircle className="w-4 h-4 text-amber-400" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-amber-300 text-sm font-medium">
+                  {tracksWithoutAudio.length === orderedTracks.length
+                    ? 'Ни один трек не имеет аудиофайла!'
+                    : `${tracksWithoutAudio.length} из ${orderedTracks.length} треков без аудиофайла`
+                  }
+                </p>
+                <p className="text-amber-300/60 text-xs mt-1">
+                  Auto DJ может воспроизводить только треки с загруженным аудио.
+                  {tracksWithAudioCount > 0
+                    ? ` Будет воспроизведено ${tracksWithAudioCount} из ${orderedTracks.length} треков.`
+                    : ' Загрузите аудиофайлы через Track Upload.'
+                  }
+                </p>
+              </div>
+              <Button
+                size="sm"
+                onClick={() => navigate('/admin/track-upload')}
+                className="bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/30 text-xs flex-shrink-0"
+              >
+                <Upload className="w-3.5 h-3.5 mr-1.5" />
+                Upload
+              </Button>
+            </div>
+          </Card>
+        </motion.div>
+      )}
+
+      {/* Content */}
+      <div className={`grid gap-4 sm:gap-6 ${showLibrary ? 'grid-cols-1 lg:grid-cols-5' : 'grid-cols-1'}`}>
+        {/* Playlist Tracks */}
+        <div className={showLibrary ? 'lg:col-span-3' : ''}>
+          <Card className="bg-[#0f1c2e]/90 border-white/10">
+            <div className="p-4 sm:p-5 border-b border-white/5 flex items-center justify-between">
+              <h2 className="text-white font-semibold flex items-center gap-2">
+                <ArrowUpDown className="w-4 h-4 text-white/40" />
+                Queue &mdash; {orderedTracks.length} tracks
+              </h2>
+              {isLive && (
+                <Badge variant="outline" className="text-[#00ffaa] border-[#00ffaa]/30 text-xs">
+                  <Zap className="w-3 h-3 mr-1" />
+                  Auto DJ will play these
+                </Badge>
+              )}
+            </div>
+
+            {orderedTracks.length === 0 ? (
+              <div className="p-12 text-center">
+                <Music className="w-16 h-16 mx-auto mb-4 text-white/10" />
+                <p className="text-white/40 mb-2">No tracks in this playlist</p>
+                <p className="text-white/30 text-sm mb-4">Click "Add Tracks" to browse your library</p>
+                <Button
+                  onClick={() => setShowLibrary(true)}
+                  size="sm"
+                  className="bg-[#00d9ff]/10 text-[#00d9ff] border border-[#00d9ff]/30"
+                >
+                  <PlusCircle className="w-4 h-4 mr-2" />
+                  Browse Library
+                </Button>
+              </div>
+            ) : (
+              <div className="p-2 sm:p-3">
+                <Reorder.Group
+                  axis="y"
+                  values={orderedTracks}
+                  onReorder={handleReorder}
+                  className="space-y-1"
+                >
+                  {orderedTracks.map((track, index) => (
+                    <Reorder.Item key={track.id} value={track}>
+                      <motion.div
+                        layout
+                        className="flex items-center gap-2 sm:gap-3 p-2.5 sm:p-3 rounded-lg bg-[#0a1628]/40 border border-white/5 hover:border-[#00d9ff]/20 transition-colors cursor-grab active:cursor-grabbing group"
+                      >
+                        <GripVertical className="w-4 h-4 text-white/20 group-hover:text-white/40 flex-shrink-0 hidden sm:block" />
+
+                        <div className="w-7 h-7 rounded bg-white/5 flex items-center justify-center text-white/40 text-xs font-mono flex-shrink-0">
+                          {index + 1}
+                        </div>
+
+                        {/* Play button */}
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={(e) => handlePlayTrack(e, track)}
+                          className={`w-8 h-8 flex-shrink-0 rounded-full transition-all ${
+                            playingTrackId === track.id
+                              ? 'bg-[#00d9ff]/20 text-[#00d9ff]'
+                              : 'text-white/30 hover:text-white hover:bg-white/10 opacity-0 group-hover:opacity-100'
+                          }`}
+                        >
+                          {playingTrackId === track.id ? (
+                            <Pause className="w-4 h-4" />
+                          ) : (
+                            <Play className="w-4 h-4 ml-0.5" />
+                          )}
+                        </Button>
+
+                        {track.coverUrl ? (
+                          <img src={track.coverUrl} alt="" className="w-10 h-10 rounded object-cover flex-shrink-0" />
+                        ) : (
+                          <div className="w-10 h-10 rounded flex items-center justify-center flex-shrink-0"
+                            style={{ background: `linear-gradient(135deg, ${color}20, ${color}10)` }}
+                          >
+                            <Music className="w-5 h-5" style={{ color }} />
+                          </div>
+                        )}
+
+                        <div className="flex-1 min-w-0">
+                          <h4 className="text-white text-sm font-medium truncate">{track.title}</h4>
+                          <p className="text-white/50 text-xs truncate">{track.artist}{track.album ? ` — ${track.album}` : ''}</p>
+                        </div>
+
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          {/* Audio status indicator */}
+                          {(track.audioUrl || track.storageFilename) ? (
+                            <div className="w-5 h-5 rounded-full bg-[#00ffaa]/15 flex items-center justify-center flex-shrink-0" title="Audio file present">
+                              <FileAudio className="w-3 h-3 text-[#00ffaa]" />
+                            </div>
+                          ) : (
+                            <div className="w-5 h-5 rounded-full bg-amber-500/15 flex items-center justify-center flex-shrink-0" title="No audio file — upload via Track Upload">
+                              <AlertCircle className="w-3 h-3 text-amber-400" />
+                            </div>
+                          )}
+                          {track.genre && (
+                            <Badge variant="outline" className="border-white/10 text-white/40 text-[10px] hidden md:flex">
+                              {track.genre}
+                            </Badge>
+                          )}
+                          <span className="text-white/30 text-xs font-mono w-10 text-right">
+                            {formatDuration(track.duration || 0)}
+                          </span>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => handleRemoveTrack(track.id)}
+                            className="w-7 h-7 text-red-400/40 hover:text-red-400 hover:bg-red-400/10 opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            <MinusCircle className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </motion.div>
+                    </Reorder.Item>
+                  ))}
+                </Reorder.Group>
+              </div>
+            )}
+          </Card>
+        </div>
+
+        {/* Library Browser */}
+        {showLibrary && (
+          <div className="lg:col-span-2">
+            <Card className="bg-[#0f1c2e]/90 border-white/10 lg:sticky lg:top-4">
+              <div className="p-4 border-b border-white/5">
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="text-white font-semibold flex items-center gap-2">
+                    <LayoutGrid className="w-4 h-4 text-[#00d9ff]" />
+                    Track Library
+                  </h2>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setShowLibrary(false)}
+                    className="text-white/40 hover:text-white lg:hidden"
+                  >
+                    <X className="w-4 h-4" />
                   </Button>
                 </div>
-                <div className="space-y-4">
-                  <div>
-                    <Label className="text-white mb-2 block">Название</Label>
-                    <Input value={newName} onChange={e => setNewName(e.target.value)}
-                      onKeyDown={e => e.key === 'Enter' && handleCreate()}
-                      placeholder="Soul Classics, Funk Mix..."
-                      className="bg-white/5 border-white/20 text-white" autoFocus />
-                  </div>
-                  <div className="flex gap-3">
-                    <Button variant="outline" onClick={() => setIsCreateOpen(false)}
-                      className="flex-1 bg-white/5 border-white/20 text-white hover:bg-white/10">
-                      Отмена
-                    </Button>
-                    <Button onClick={handleCreate} disabled={creating || !newName.trim()}
-                      className="flex-1 bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] text-[#0a1628]">
-                      {creating ? <RefreshCw className="w-4 h-4 animate-spin" /> : 'Создать'}
-                    </Button>
-                  </div>
+
+                {/* Search */}
+                <div className="relative mb-3">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white/30" />
+                  <Input
+                    value={librarySearch}
+                    onChange={(e) => setLibrarySearch(e.target.value)}
+                    placeholder="Search tracks..."
+                    className="pl-9 h-9 bg-[#0a1628] border-white/10 text-white text-sm"
+                  />
                 </div>
-              </motion.div>
-            </>
-          )}
-        </AnimatePresence>
+
+                {/* Genre filter */}
+                <div className="flex gap-1.5 flex-wrap">
+                  {GENRES.slice(0, 6).map(g => (
+                    <Button
+                      key={g}
+                      size="sm"
+                      variant={libraryGenre === g ? 'default' : 'outline'}
+                      onClick={() => setLibraryGenre(g)}
+                      className={`h-7 px-2.5 text-[11px] ${
+                        libraryGenre === g
+                          ? 'bg-[#00d9ff] text-[#0a1628]'
+                          : 'border-white/10 text-white/50 hover:bg-white/5'
+                      }`}
+                    >
+                      {g === 'all' ? 'All' : g.charAt(0).toUpperCase() + g.slice(1)}
+                    </Button>
+                  ))}
+                </div>
+
+                {/* Bulk add */}
+                {libraryTracks.length > 0 && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleAddAll}
+                    className="w-full mt-3 h-8 text-xs border-[#00d9ff]/20 text-[#00d9ff] hover:bg-[#00d9ff]/10"
+                  >
+                    <PlusCircle className="w-3.5 h-3.5 mr-1.5" />
+                    Add All ({Math.min(libraryTracks.length, 50)})
+                  </Button>
+                )}
+              </div>
+
+              {/* Track list */}
+              <div className="p-2 max-h-[60vh] overflow-y-auto space-y-1">
+                {libraryTracks.length === 0 ? (
+                  <div className="p-8 text-center text-white/30 text-sm">
+                    {allTracks.length === 0 ? 'No tracks uploaded yet' : 'All tracks already in playlist'}
+                  </div>
+                ) : (
+                  libraryTracks.map(track => (
+                    <motion.div
+                      key={track.id}
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="flex items-center gap-2 p-2 rounded-lg hover:bg-white/5 transition-colors group"
+                    >
+                      {track.coverUrl ? (
+                        <img src={track.coverUrl} alt="" className="w-9 h-9 rounded object-cover flex-shrink-0" />
+                      ) : (
+                        <div className="w-9 h-9 rounded bg-[#00d9ff]/10 flex items-center justify-center flex-shrink-0">
+                          <Music className="w-4 h-4 text-[#00d9ff]/50" />
+                        </div>
+                      )}
+
+                      <div className="flex-1 min-w-0">
+                        <h4 className="text-white text-sm truncate flex items-center gap-1.5">
+                          {track.title}
+                          {!(track.audioUrl || track.storageFilename) && (
+                            <span className="inline-flex items-center gap-0.5 text-[9px] text-amber-400/80 bg-amber-500/10 px-1 py-0.5 rounded font-normal flex-shrink-0" title="No audio file">
+                              <AlertCircle className="w-2.5 h-2.5" />
+                              no audio
+                            </span>
+                          )}
+                        </h4>
+                        <p className="text-white/40 text-xs truncate">{track.artist}</p>
+                      </div>
+
+                      <span className="text-white/20 text-xs font-mono flex-shrink-0">
+                        {formatDuration(track.duration || 0)}
+                      </span>
+
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={(e) => handlePlayTrack(e, track)}
+                        className={`w-7 h-7 flex-shrink-0 rounded-full transition-all ${
+                          playingTrackId === track.id
+                            ? 'bg-[#00d9ff]/20 text-[#00d9ff] opacity-100'
+                            : 'text-white/30 hover:text-white hover:bg-white/10 opacity-0 group-hover:opacity-100'
+                        }`}
+                      >
+                        {playingTrackId === track.id ? (
+                          <Pause className="w-3.5 h-3.5" />
+                        ) : (
+                          <Play className="w-3.5 h-3.5 ml-0.5" />
+                        )}
+                      </Button>
+
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={() => handleAddTrack(track.id)}
+                        className="w-7 h-7 text-[#00ffaa]/60 hover:text-[#00ffaa] hover:bg-[#00ffaa]/10 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+                      >
+                        <PlusCircle className="w-4 h-4" />
+                      </Button>
+                    </motion.div>
+                  ))
+                )}
+              </div>
+            </Card>
+          </div>
+        )}
       </div>
-    </AdminLayout>
+
+      {/* Quick Schedule Dialog */}
+      <Dialog open={quickScheduleOpen} onOpenChange={setQuickScheduleOpen}>
+        <DialogContent className="bg-[#0f1c2e] border-[#00d9ff]/30 text-white max-w-md">
+          <DialogHeader>
+            <DialogTitle>Quick Schedule</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-2">
+            <div className="flex items-center gap-3 p-3 rounded-lg" style={{ backgroundColor: `${color}15`, borderLeft: `3px solid ${color}` }}>
+              <ListMusic className="w-5 h-5 flex-shrink-0" style={{ color }} />
+              <div className="min-w-0">
+                <p className="text-white font-medium truncate">{playlist.name}</p>
+                <p className="text-white/40 text-xs">{orderedTracks.length} tracks &bull; {formatTotalDuration(totalDuration)}</p>
+              </div>
+            </div>
+            <div>
+              <Label className="text-white/80">Day of Week</Label>
+              <select
+                value={quickScheduleForm.dayOfWeek}
+                onChange={e => setQuickScheduleForm({ ...quickScheduleForm, dayOfWeek: e.target.value })}
+                className="w-full h-10 px-3 rounded-md bg-[#0a1628] border border-white/10 text-white text-sm"
+              >
+                <option value="daily">Daily</option>
+                {DAYS_FULL.map((day, index) => (
+                  <option key={index} value={index.toString()}>{day}</option>
+                ))}
+              </select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-white/80">Start Time</Label>
+                <select
+                  value={quickScheduleForm.startTime}
+                  onChange={e => setQuickScheduleForm({ ...quickScheduleForm, startTime: e.target.value })}
+                  className="w-full h-10 px-3 rounded-md bg-[#0a1628] border border-white/10 text-white text-sm"
+                >
+                  {QUICK_TIME_SLOTS.map(time => (
+                    <option key={time} value={time}>{time}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <Label className="text-white/80">End Time</Label>
+                <select
+                  value={quickScheduleForm.endTime}
+                  onChange={e => setQuickScheduleForm({ ...quickScheduleForm, endTime: e.target.value })}
+                  className="w-full h-10 px-3 rounded-md bg-[#0a1628] border border-white/10 text-white text-sm"
+                >
+                  {QUICK_TIME_SLOTS.map(time => (
+                    <option key={time} value={time}>{time}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="flex gap-3 pt-2">
+              <Button variant="outline" onClick={() => setQuickScheduleOpen(false)} className="flex-1 border-white/10 text-white/70">
+                Cancel
+              </Button>
+              <Button
+                onClick={handleQuickSchedule}
+                disabled={quickScheduleSaving}
+                className="flex-1 bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] text-[#0a1628] font-semibold"
+              >
+                {quickScheduleSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Schedule'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Hidden Audio Element */}
+      <audio
+        ref={audioRef}
+        onEnded={() => setPlayingTrackId(null)}
+        onError={() => {
+          console.error('[Playlist] Audio playback error');
+          setPlayingTrackId(null);
+        }}
+      />
+
+      {/* Floating Mini Player */}
+      <AnimatePresence>
+        {playingTrackId && (() => {
+          const nowPlaying = [...orderedTracks, ...allTracks].find(t => t.id === playingTrackId);
+          if (!nowPlaying) return null;
+          return (
+            <motion.div
+              key="mini-player"
+              initial={{ y: 80, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 80, opacity: 0 }}
+              className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 bg-[#1a1a2e]/95 backdrop-blur-lg border border-[#00d9ff]/30 rounded-xl shadow-2xl shadow-black/40 px-4 py-3 flex items-center gap-3 max-w-sm w-[calc(100%-2rem)]"
+            >
+              <button
+                onClick={(e) => handlePlayTrack(e, nowPlaying)}
+                className="w-9 h-9 rounded-full bg-[#00d9ff] flex items-center justify-center flex-shrink-0"
+              >
+                <Pause className="w-4 h-4 text-black" />
+              </button>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm text-white font-medium truncate">{nowPlaying.title}</p>
+                <p className="text-xs text-white/50 truncate">{nowPlaying.artist}</p>
+              </div>
+              <Volume2 className="w-4 h-4 text-[#00d9ff] animate-pulse flex-shrink-0" />
+            </motion.div>
+          );
+        })()}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+// ==================== CREATE FORM ====================
+
+function CreatePlaylistForm({ onSuccess, onCancel }: { onSuccess: (p: Playlist) => void; onCancel: () => void }) {
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    name: '',
+    description: '',
+    genre: '',
+    color: '#00d9ff'
+  });
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.name.trim()) {
+      toast.error('Enter a playlist name');
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await api.createPlaylist({
+        ...form,
+        trackIds: []
+      });
+      if (!res.playlist) {
+        throw new Error(res.error || 'Server did not return playlist data');
+      }
+      toast.success('Playlist created');
+      onSuccess(res.playlist);
+    } catch (error: any) {
+      console.error('[Playlists] Create failed:', error);
+      toast.error(error.message || 'Failed to create playlist');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4 mt-2">
+      <div>
+        <Label className="text-white/80">Name *</Label>
+        <Input
+          required
+          value={form.name}
+          onChange={e => setForm({ ...form, name: e.target.value })}
+          placeholder="Sunday Soul Grooves"
+          className="bg-[#0a1628] border-white/10 text-white"
+        />
+      </div>
+      <div>
+        <Label className="text-white/80">Description</Label>
+        <Input
+          value={form.description}
+          onChange={e => setForm({ ...form, description: e.target.value })}
+          placeholder="Smooth soul tracks for lazy Sundays"
+          className="bg-[#0a1628] border-white/10 text-white"
+        />
+      </div>
+      <div>
+        <Label className="text-white/80">Genre</Label>
+        <select
+          value={form.genre}
+          onChange={e => setForm({ ...form, genre: e.target.value })}
+          className="w-full h-10 px-3 rounded-md bg-[#0a1628] border border-white/10 text-white text-sm"
+        >
+          <option value="">Any genre</option>
+          {GENRES.filter(g => g !== 'all').map(g => (
+            <option key={g} value={g}>{g.charAt(0).toUpperCase() + g.slice(1)}</option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <Label className="text-white/80">Color</Label>
+        <div className="flex gap-2 flex-wrap mt-1">
+          {COLORS.map(c => (
+            <button
+              key={c.value}
+              type="button"
+              onClick={() => setForm({ ...form, color: c.value })}
+              className={`w-8 h-8 rounded-lg border-2 transition-all ${
+                form.color === c.value ? 'border-white scale-110' : 'border-transparent opacity-60 hover:opacity-100'
+              }`}
+              style={{ backgroundColor: c.value }}
+              title={c.label}
+            />
+          ))}
+        </div>
+      </div>
+      <div className="flex gap-3 pt-2">
+        <Button type="button" variant="outline" onClick={onCancel} className="flex-1 border-white/10 text-white/70">
+          Cancel
+        </Button>
+        <Button
+          type="submit"
+          disabled={saving}
+          className="flex-1 bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] text-[#0a1628] font-semibold"
+        >
+          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Create'}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+// ==================== EDIT FORM ====================
+
+function EditPlaylistForm({ playlist, onSuccess, onCancel }: { playlist: Playlist; onSuccess: (p: Playlist) => void; onCancel: () => void }) {
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    name: playlist.name,
+    description: playlist.description || '',
+    genre: playlist.genre || '',
+    color: playlist.color || '#00d9ff'
+  });
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.name.trim()) {
+      toast.error('Enter a playlist name');
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.updatePlaylist(playlist.id, { ...playlist, ...form });
+      toast.success('Playlist updated');
+      onSuccess({ ...playlist, ...form });
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to update');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4 mt-2">
+      <div>
+        <Label className="text-white/80">Name *</Label>
+        <Input
+          required
+          value={form.name}
+          onChange={e => setForm({ ...form, name: e.target.value })}
+          className="bg-[#0a1628] border-white/10 text-white"
+        />
+      </div>
+      <div>
+        <Label className="text-white/80">Description</Label>
+        <Input
+          value={form.description}
+          onChange={e => setForm({ ...form, description: e.target.value })}
+          className="bg-[#0a1628] border-white/10 text-white"
+        />
+      </div>
+      <div>
+        <Label className="text-white/80">Genre</Label>
+        <select
+          value={form.genre}
+          onChange={e => setForm({ ...form, genre: e.target.value })}
+          className="w-full h-10 px-3 rounded-md bg-[#0a1628] border border-white/10 text-white text-sm"
+        >
+          <option value="">Any genre</option>
+          {GENRES.filter(g => g !== 'all').map(g => (
+            <option key={g} value={g}>{g.charAt(0).toUpperCase() + g.slice(1)}</option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <Label className="text-white/80">Color</Label>
+        <div className="flex gap-2 flex-wrap mt-1">
+          {COLORS.map(c => (
+            <button
+              key={c.value}
+              type="button"
+              onClick={() => setForm({ ...form, color: c.value })}
+              className={`w-8 h-8 rounded-lg border-2 transition-all ${
+                form.color === c.value ? 'border-white scale-110' : 'border-transparent opacity-60 hover:opacity-100'
+              }`}
+              style={{ backgroundColor: c.value }}
+              title={c.label}
+            />
+          ))}
+        </div>
+      </div>
+      <div className="flex gap-3 pt-2">
+        <Button type="button" variant="outline" onClick={onCancel} className="flex-1 border-white/10 text-white/70">
+          Cancel
+        </Button>
+        <Button
+          type="submit"
+          disabled={saving}
+          className="flex-1 bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] text-[#0a1628] font-semibold"
+        >
+          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save'}
+        </Button>
+      </div>
+    </form>
   );
 }

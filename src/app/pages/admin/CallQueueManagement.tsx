@@ -374,7 +374,7 @@ export function CallQueueManagement() {
 
                         {/* Status Badge */}
                         <span className={`inline-block px-3 py-1 rounded-full text-xs font-medium border ${statusColors[call.status as keyof typeof statusColors]}`}>
-                          {call.status.toUpperCase().replace('_', ' ')}
+                          {(call.status || 'waiting').toUpperCase().replace('_', ' ')}
                         </span>
                       </div>
 

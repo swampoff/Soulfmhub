@@ -67,90 +67,22 @@ export function NewsPage() {
   const loadArticles = async () => {
     setLoading(true);
     try {
-      // Mock data for now - replace with real API call
-      const mockArticles: Article[] = [
-        {
-          id: '1',
-          title: 'The Rise of Neo-Soul: A Renaissance in Modern Music',
-          excerpt: 'Exploring how neo-soul is reshaping the contemporary music landscape with fresh voices and classic influences.',
-          content: 'Full article content...',
-          category: 'music',
-          author: 'Sarah Johnson',
-          cover_image: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=800&h=500&fit=crop',
-          published_at: '2026-02-03T10:00:00Z',
-          read_time: 8,
-          tags: ['Soul', 'Neo-Soul', 'Trends'],
-          featured: true,
-        },
-        {
-          id: '2',
-          title: 'Interview: DJ Groove on 30 Years of Funk',
-          excerpt: 'Legendary DJ Groove sits down with us to discuss three decades of bringing funk to the airwaves.',
-          content: 'Full article content...',
-          category: 'interviews',
-          author: 'Mike Davis',
-          cover_image: 'https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=800&h=500&fit=crop',
-          published_at: '2026-02-02T14:30:00Z',
-          read_time: 12,
-          tags: ['Interview', 'Funk', 'DJ'],
-          featured: true,
-        },
-        {
-          id: '3',
-          title: 'Soul FM Hub Launches New Mobile App',
-          excerpt: 'Listen to Soul FM Hub on the go with our brand new mobile application, available now on iOS and Android.',
-          content: 'Full article content...',
-          category: 'station',
-          author: 'Soul FM Team',
-          cover_image: 'https://images.unsplash.com/photo-1512941937669-90a1b58e7e9c?w=800&h=500&fit=crop',
-          published_at: '2026-02-01T09:00:00Z',
-          read_time: 5,
-          tags: ['App', 'Technology', 'Update'],
-          featured: false,
-        },
-        {
-          id: '4',
-          title: 'Summer Soul Festival 2026 Lineup Announced',
-          excerpt: 'Get ready for the hottest soul festival of the year! Check out the incredible lineup we have in store.',
-          content: 'Full article content...',
-          category: 'events',
-          author: 'Events Team',
-          cover_image: 'https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?w=800&h=500&fit=crop',
-          published_at: '2026-01-30T11:00:00Z',
-          read_time: 6,
-          tags: ['Festival', 'Live Music', 'Events'],
-          featured: false,
-        },
-        {
-          id: '5',
-          title: 'Top 10 Jazz Albums of January 2026',
-          excerpt: 'Our curated selection of the best jazz releases from this month that you absolutely need to hear.',
-          content: 'Full article content...',
-          category: 'music',
-          author: 'Jazz Curator',
-          cover_image: 'https://images.unsplash.com/photo-1415886541506-6efc5e4b1786?w=800&h=500&fit=crop',
-          published_at: '2026-01-28T16:00:00Z',
-          read_time: 10,
-          tags: ['Jazz', 'Album Reviews', 'Top 10'],
-          featured: false,
-        },
-        {
-          id: '6',
-          title: 'Behind the Scenes: A Day at Soul FM Studios',
-          excerpt: 'Ever wondered what goes on behind the microphone? Take an exclusive tour of our broadcast studios.',
-          content: 'Full article content...',
-          category: 'station',
-          author: 'Station Manager',
-          cover_image: 'https://images.unsplash.com/photo-1478737270239-2f02b77fc618?w=800&h=500&fit=crop',
-          published_at: '2026-01-25T13:00:00Z',
-          read_time: 7,
-          tags: ['Behind the Scenes', 'Studio', 'Radio'],
-          featured: false,
-        },
-      ];
-      
-      setArticles(mockArticles);
-      setFilteredArticles(mockArticles);
+      const data = await api.getNews();
+      const loaded: Article[] = (data.news || data.articles || []).map((n: any) => ({
+        id: n.id,
+        title: n.title || '',
+        excerpt: n.excerpt || n.description || '',
+        content: n.content || '',
+        category: n.category || 'station',
+        author: n.author || 'Soul FM Team',
+        cover_image: n.cover_image || n.coverImage || '',
+        published_at: n.published_at || n.publishedAt || n.createdAt || new Date().toISOString(),
+        read_time: n.read_time || n.readTime || 5,
+        tags: n.tags || [],
+        featured: n.featured || false,
+      }));
+      setArticles(loaded);
+      setFilteredArticles(loaded);
     } catch (error) {
       console.error('Error loading articles:', error);
       setArticles([]);

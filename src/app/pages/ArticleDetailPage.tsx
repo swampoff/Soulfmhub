@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { format } from 'date-fns';
+import { api } from '../../lib/api';
 
 interface Article {
   id: string;
@@ -48,43 +49,29 @@ export function ArticleDetailPage() {
   const loadArticle = async () => {
     setLoading(true);
     try {
-      // Mock data - replace with real API
-      const mockArticle: Article = {
-        id: id || '1',
-        title: 'The Rise of Neo-Soul: A Renaissance in Modern Music',
-        excerpt: 'Exploring how neo-soul is reshaping the contemporary music landscape with fresh voices and classic influences.',
-        content: `
-          <p>The neo-soul movement has been quietly revolutionizing the music industry, bringing back the warmth and authenticity that made classic soul music so beloved. This modern renaissance combines traditional soul elements with contemporary R&B, hip-hop, and jazz influences, creating a sound that feels both nostalgic and refreshingly new.</p>
-
-          <h2>A Brief History</h2>
-          <p>Neo-soul emerged in the 1990s as a response to the increasingly commercial sound of mainstream R&B. Artists like Erykah Badu, D'Angelo, and Lauryn Hill pioneered this movement, focusing on organic instrumentation, thoughtful lyrics, and raw vocal performances.</p>
-
-          <h2>The Modern Wave</h2>
-          <p>Today's neo-soul artists are building on this foundation while incorporating elements from electronic music, indie rock, and global genres. Artists like H.E.R., Daniel Caesar, and SZA have brought neo-soul to mainstream audiences while maintaining its core values of authenticity and emotional depth.</p>
-
-          <h2>Why Neo-Soul Matters</h2>
-          <p>In an age of digital production and auto-tuned perfection, neo-soul offers something increasingly rare: genuine human connection through music. The genre prioritizes storytelling, musicianship, and emotional honesty over commercial appeal.</p>
-
-          <p>The rise of streaming platforms has also democratized music discovery, allowing neo-soul artists to find their audiences without major label support. This has led to a diverse and vibrant scene where experimentation is encouraged and artistic integrity is valued.</p>
-
-          <h2>The Future</h2>
-          <p>As we look ahead, neo-soul shows no signs of slowing down. New artists continue to emerge, each bringing their unique perspective while honoring the genre's rich heritage. The fusion of traditional soul values with modern production techniques promises to keep the genre fresh and relevant for years to come.</p>
-
-          <p>Whether you're a longtime fan or new to the genre, there's never been a better time to explore the world of neo-soul. Its emphasis on authenticity, musicianship, and emotional connection offers a welcome antidote to the often impersonal nature of modern pop music.</p>
-        `,
-        category: 'music',
-        author: 'Sarah Johnson',
-        author_avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&h=200&fit=crop',
-        author_bio: 'Sarah is a music journalist and soul enthusiast with over 10 years of experience covering the contemporary R&B and soul scenes.',
-        cover_image: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?w=1200&h=600&fit=crop',
-        published_at: '2026-02-03T10:00:00Z',
-        read_time: 8,
-        tags: ['Soul', 'Neo-Soul', 'Trends', 'Music History'],
-      };
-      
-      setArticle(mockArticle);
+      if (!id) throw new Error('No article ID');
+      const data = await api.getNewsItem(id);
+      const n = data.news || data.article || data;
+      if (!n || !n.title) {
+        throw new Error('Article not found');
+      }
+      setArticle({
+        id: n.id || id,
+        title: n.title,
+        excerpt: n.excerpt || n.description || '',
+        content: n.content || '',
+        category: n.category || 'station',
+        author: n.author || 'Soul FM Team',
+        author_avatar: n.author_avatar || n.authorAvatar || '',
+        author_bio: n.author_bio || n.authorBio || '',
+        cover_image: n.cover_image || n.coverImage || '',
+        published_at: n.published_at || n.publishedAt || n.createdAt || new Date().toISOString(),
+        read_time: n.read_time || n.readTime || 5,
+        tags: n.tags || [],
+      });
     } catch (error) {
       console.error('Error loading article:', error);
+      setArticle(null);
     } finally {
       setLoading(false);
     }

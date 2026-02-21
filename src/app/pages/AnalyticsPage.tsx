@@ -49,52 +49,22 @@ interface AnalyticsData {
   listenersByCountry: Record<string, number>;
 }
 
-// Mock data for demonstrations
+// Real-time listener data (populated from API)
 const generateListenerData = () => {
-  const data = [];
-  for (let i = 23; i >= 0; i--) {
-    data.push({
-      time: `${i}:00`,
-      listeners: Math.floor(Math.random() * 300) + 150,
-      peak: Math.floor(Math.random() * 100) + 350,
-    });
-  }
-  return data.reverse();
+  return Array.from({ length: 24 }, (_, i) => ({
+    time: `${i}:00`,
+    listeners: 0,
+    peak: 0,
+  }));
 };
 
-const weeklyData = [
-  { day: 'Mon', listeners: 1250, hours: 8500 },
-  { day: 'Tue', listeners: 1480, hours: 9200 },
-  { day: 'Wed', listeners: 1320, hours: 8800 },
-  { day: 'Thu', listeners: 1690, hours: 10200 },
-  { day: 'Fri', listeners: 2150, hours: 12500 },
-  { day: 'Sat', listeners: 2430, hours: 14200 },
-  { day: 'Sun', listeners: 1980, hours: 11800 },
-];
+const weeklyData: Array<{ day: string; listeners: number; hours: number }> = [];
 
-const genreData = [
-  { name: 'Soul', value: 35, color: '#00d9ff' },
-  { name: 'Funk', value: 25, color: '#00ffaa' },
-  { name: 'Jazz', value: 20, color: '#FF8C42' },
-  { name: 'Disco', value: 12, color: '#E91E63' },
-  { name: 'Reggae', value: 8, color: '#9C27B0' },
-];
+const genreData: Array<{ name: string; value: number; color: string }> = [];
 
-const countryData = [
-  { country: 'USA', listeners: 3245, percentage: 42 },
-  { country: 'UK', listeners: 1823, percentage: 24 },
-  { country: 'Germany', listeners: 987, percentage: 13 },
-  { country: 'France', listeners: 654, percentage: 9 },
-  { country: 'Canada', listeners: 432, percentage: 6 },
-  { country: 'Others', listeners: 459, percentage: 6 },
-];
+const countryData: Array<{ country: string; listeners: number; percentage: number }> = [];
 
-const deviceData = [
-  { name: 'Desktop', value: 45, color: '#00d9ff' },
-  { name: 'Mobile', value: 38, color: '#00ffaa' },
-  { name: 'Tablet', value: 12, color: '#FF8C42' },
-  { name: 'Smart Speaker', value: 5, color: '#E91E63' },
-];
+const deviceData: Array<{ name: string; value: number; color: string }> = [];
 
 export function AnalyticsPage() {
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
@@ -118,34 +88,16 @@ export function AnalyticsPage() {
       setAnalytics(data.analytics);
     } catch (error) {
       console.error('Error loading analytics:', error);
-      // Use mock data on error
+      // Show zeroed state on error instead of fake data
       setAnalytics({
-        currentListeners: 287,
-        peakListeners: 1843,
-        totalTracks: 12458,
-        totalShows: 45,
-        totalPlaylists: 128,
-        topTracks: [
-          { id: '1', title: 'Superstition', artist: 'Stevie Wonder', plays: 2543 },
-          { id: '2', title: 'Ain\'t No Mountain High Enough', artist: 'Marvin Gaye', plays: 2234 },
-          { id: '3', title: 'September', artist: 'Earth, Wind & Fire', plays: 2098 },
-          { id: '4', title: 'Lovely Day', artist: 'Bill Withers', plays: 1987 },
-          { id: '5', title: 'Use Me', artist: 'Bill Withers', plays: 1876 },
-        ],
-        topShows: [
-          { id: '1', name: 'Funky Mornings', listeners: 8234 },
-          { id: '2', name: 'Midnight Soul', listeners: 7521 },
-          { id: '3', name: 'Crate Diggers', listeners: 6789 },
-          { id: '4', name: 'Evening Vibes', listeners: 5432 },
-          { id: '5', name: 'Soul Sessions', listeners: 4987 },
-        ],
-        listenersByCountry: {
-          USA: 3245,
-          UK: 1823,
-          Germany: 987,
-          France: 654,
-          Canada: 432,
-        },
+        currentListeners: 0,
+        peakListeners: 0,
+        totalTracks: 0,
+        totalShows: 0,
+        totalPlaylists: 0,
+        topTracks: [],
+        topShows: [],
+        listenersByCountry: {},
       });
     } finally {
       setLoading(false);

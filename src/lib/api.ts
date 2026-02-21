@@ -2,6 +2,20 @@ import { API_BASE, supabase } from './supabase';
 import { publicAnonKey } from '../../utils/supabase/info';
 
 // ── Retry-aware fetch (handles cold-start / transient failures) ──────
+//
+// Supabase Edge Functions gateway requires authentication via EITHER:
+//   • `apikey` header  — project-level access (always the public anon key)
+//   • `Authorization`  — user-level auth (session JWT or anon key)
+//
+// Problem: if `Authorization` carries an expired session JWT and there's no
+// `apikey` header, the gateway rejects the request with:
+//   { code: 401, message: "Invalid JWT" }
+// BEFORE it even reaches our Hono server / requireAuth middleware.
+//
+// Solution: ALWAYS send `apikey` so the gateway accepts the request for
+// project routing.  Our own `requireAuth` middleware then validates the
+// `Authorization` token for admin operations.
+
 async function fetchWithRetry(
   input: RequestInfo | URL,
   init?: RequestInit,
@@ -9,13 +23,57 @@ async function fetchWithRetry(
   backoff = 2000,
   timeoutMs = 30000,
 ): Promise<Response> {
+  // `apikey` — required by the Supabase gateway for project routing.
+  // `Authorization` — fallback to anon key; callers may override with a session JWT.
+  const defaultHeaders: Record<string, string> = {
+    'apikey': publicAnonKey,
+    'Authorization': `Bearer ${publicAnonKey}`,
+  };
+  const mergedHeaders = { ...defaultHeaders, ...(init?.headers as Record<string, string> || {}) };
+  const mergedInit = { ...init, headers: mergedHeaders };
+
   let lastError: Error | null = null;
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
       const controller = new AbortController();
       const tid = setTimeout(() => controller.abort('timeout'), timeoutMs);
-      const response = await fetch(input, { ...init, signal: controller.signal });
+      const response = await fetch(input, { ...mergedInit, signal: controller.signal });
       clearTimeout(tid);
+
+      // If the gateway rejected an expired session JWT, retry once with
+      // the anon key so the request at least reaches our server.
+      if (response.status === 401 && attempt < retries - 1) {
+        const body = await response.clone().text();
+        if (body.includes('Invalid JWT')) {
+          console.warn('[API] Gateway rejected JWT — clearing stale session & retrying with anon key');
+          // Clear the expired session so future calls don't repeat this
+          supabase.auth.signOut().catch(() => {});
+          // Replace Authorization with anon key for the next attempt
+          mergedHeaders['Authorization'] = `Bearer ${publicAnonKey}`;
+          continue;
+        }
+      }
+
+      // ── Wrap .json() with safe parsing ─────────────────────────
+      // The Edge Functions gateway can return non-JSON on boot errors,
+      // 502s, etc.  By reading as text first and JSON.parse-ing, we get
+      // a clear error message instead of a cryptic SyntaxError.
+      const url = typeof input === 'string' ? input : (input as Request).url ?? String(input);
+      (response as any).__safeJson = true;
+      response.json = async function () {
+        const text = await response.clone().text();
+        try {
+          return JSON.parse(text);
+        } catch {
+          console.error(
+            `[API] Non-JSON response (${response.status}) from ${url}:`,
+            text.slice(0, 200),
+          );
+          throw new Error(
+            `Server returned non-JSON (HTTP ${response.status}): ${text.slice(0, 120)}`,
+          );
+        }
+      } as any;
       return response;
     } catch (err: any) {
       lastError = err;
@@ -35,23 +93,73 @@ async function fetchWithRetry(
 }
 
 async function getAuthHeaders() {
+  // Try to refresh the session first to avoid using expired tokens
   const { data: { session } } = await supabase.auth.getSession();
+
+  // Validate session: check that the token isn't expired
+  let validToken: string | null = null;
+  if (session?.access_token) {
+    try {
+      const payload = JSON.parse(atob(session.access_token.split('.')[1]));
+      const expiresAt = payload.exp * 1000; // JWT exp is in seconds
+      if (Date.now() < expiresAt - 30_000) {
+        // Token is valid with >= 30s margin
+        validToken = session.access_token;
+      } else {
+        // Token is expired or about to expire — try to refresh
+        console.warn('[API] Auth token expired/expiring, attempting refresh...');
+        const { data: refreshData } = await supabase.auth.refreshSession();
+        if (refreshData?.session?.access_token) {
+          validToken = refreshData.session.access_token;
+        } else {
+          // Refresh failed — clear the stale session from localStorage
+          // so subsequent calls don't re-send the expired JWT to the gateway.
+          console.warn('[API] Token refresh failed — clearing stale session');
+          await supabase.auth.signOut().catch(() => {});
+        }
+      }
+    } catch {
+      // Malformed token — clear it so we don't keep retrying
+      console.warn('[API] Malformed session token — clearing stale session');
+      await supabase.auth.signOut().catch(() => {});
+    }
+  }
+
   return {
     'Content-Type': 'application/json',
-    'Authorization': session?.access_token ? `Bearer ${session.access_token}` : `Bearer ${publicAnonKey}`,
+    'apikey': publicAnonKey,
+    'Authorization': validToken ? `Bearer ${validToken}` : `Bearer ${publicAnonKey}`,
   };
 }
 
 async function getPublicHeaders() {
   return {
     'Content-Type': 'application/json',
+    'apikey': publicAnonKey,
     'Authorization': `Bearer ${publicAnonKey}`,
   };
 }
 
 async function getAccessToken() {
   const { data: { session } } = await supabase.auth.getSession();
-  return session?.access_token || publicAnonKey;
+  if (session?.access_token) {
+    try {
+      const payload = JSON.parse(atob(session.access_token.split('.')[1]));
+      if (Date.now() < (payload.exp * 1000) - 30_000) {
+        return session.access_token;
+      }
+      // Token expired — try refresh
+      const { data: refreshData } = await supabase.auth.refreshSession();
+      if (refreshData?.session?.access_token) {
+        return refreshData.session.access_token;
+      }
+      // Refresh failed — clean up
+      await supabase.auth.signOut().catch(() => {});
+    } catch {
+      await supabase.auth.signOut().catch(() => {});
+    }
+  }
+  return publicAnonKey;
 }
 
 // Exported helpers for admin components that make direct fetch calls
@@ -61,7 +169,7 @@ export const api = {
   // Auth
   async signUp(email: string, password: string, name: string, role: string = 'listener') {
     console.log('[API] Signing up:', { email, name, role });
-
+    
     try {
       const headers = await getPublicHeaders();
       const response = await fetchWithRetry(`${API_BASE}/auth/signup`, {
@@ -69,19 +177,19 @@ export const api = {
         headers,
         body: JSON.stringify({ email, password, name, role }),
       });
-
+      
       console.log('[API] Signup response status:', response.status, response.statusText);
-
+      
       const data = await response.json();
       console.log('[API] Signup response data:', data);
-
+      
       if (!response.ok || data.error) {
         const errorMsg = data.error || `Signup failed with status ${response.status}: ${response.statusText}`;
         console.error('[API] Signup failed:', errorMsg);
         console.error('[API] Full error details:', JSON.stringify(data, null, 2));
         return { data: null, error: new Error(errorMsg) };
       }
-
+      
       // Now sign in automatically
       console.log('[API] Auto-signing in after signup');
       const signInResult = await this.signIn(email, password);
@@ -89,7 +197,7 @@ export const api = {
         console.error('[API] Auto sign-in failed:', signInResult.error);
         return { data: null, error: signInResult.error };
       }
-
+      
       console.log('[API] Signup and auto-login successful!');
       return { data: signInResult.data, error: null };
     } catch (error: any) {
@@ -191,7 +299,7 @@ export const api = {
   },
 
   async updateTrack(id: string, track: any) {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/tracks/${id}`, {
       method: 'PUT',
       headers,
@@ -206,18 +314,12 @@ export const api = {
   },
 
   async deleteTrack(id: string) {
-    // Delete from Hostinger Direct API instead of Supabase Core
-    console.log(`[API] Deleting track via Hostinger API: ${id}`);
-    const response = await fetchWithRetry(`https://api.soul-fm.com/delete/${id}`, {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/tracks/${id}`, {
       method: 'DELETE',
-      headers: {
-        'Authorization': 'Bearer secret_soul_upload_token_123'
-      },
+      headers,
     });
-    if (!response.ok) {
-      console.error('[API] deleteTrack failed:', response.status);
-    }
-    return response.ok;
+    return response.json();
   },
 
   async bulkUpdateTags(trackIds: string[], options: { action: 'add' | 'remove' | 'replace'; tags: string[] }) {
@@ -234,7 +336,7 @@ export const api = {
     const token = await getAccessToken();
     const formData = new FormData();
     formData.append('cover', coverFile);
-
+    
     const response = await fetchWithRetry(`${API_BASE}/tracks/${trackId}/cover`, {
       method: 'POST',
       headers: {
@@ -278,6 +380,13 @@ export const api = {
       headers,
       body: JSON.stringify(playlist),
     });
+    if (!response.ok) {
+      const errBody = await response.text().catch(() => '');
+      console.error(`[API] createPlaylist failed: ${response.status}`, errBody);
+      let msg = `Create playlist failed (${response.status})`;
+      try { const j = JSON.parse(errBody); msg = j.error || msg; } catch {}
+      throw new Error(msg);
+    }
     return response.json();
   },
 
@@ -288,6 +397,13 @@ export const api = {
       headers,
       body: JSON.stringify(updates),
     });
+    if (!response.ok) {
+      const errBody = await response.text().catch(() => '');
+      console.error(`[API] updatePlaylist failed: ${response.status}`, errBody);
+      let msg = `Update playlist failed (${response.status})`;
+      try { const j = JSON.parse(errBody); msg = j.error || msg; } catch {}
+      throw new Error(msg);
+    }
     return response.json();
   },
 
@@ -297,6 +413,13 @@ export const api = {
       method: 'DELETE',
       headers,
     });
+    if (!response.ok) {
+      const errBody = await response.text().catch(() => '');
+      console.error(`[API] deletePlaylist failed: ${response.status}`, errBody);
+      let msg = `Delete playlist failed (${response.status})`;
+      try { const j = JSON.parse(errBody); msg = j.error || msg; } catch {}
+      throw new Error(msg);
+    }
     return response.json();
   },
 
@@ -314,6 +437,56 @@ export const api = {
     const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/playlists/${playlistId}/tracks/${trackId}`, {
       method: 'DELETE',
+      headers,
+    });
+    return response.json();
+  },
+
+  // Jingle Playlist Rotation
+  async getJinglePlaylistConfig() {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/jingle-playlist/config`, { headers });
+    return response.json();
+  },
+
+  async updateJinglePlaylistConfig(config: any) {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/jingle-playlist/config`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(config),
+    });
+    return response.json();
+  },
+
+  async ensureJinglesPlaylist() {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/jingle-playlist/ensure`, {
+      method: 'POST',
+      headers,
+    });
+    return response.json();
+  },
+
+  async getNextJingle() {
+    const headers = await getPublicHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/jingle-playlist/next`, { headers });
+    return response.json();
+  },
+
+  async advanceJingleRotation() {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/jingle-playlist/advance`, {
+      method: 'POST',
+      headers,
+    });
+    return response.json();
+  },
+
+  async resetJingleRotation() {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/jingle-playlist/reset`, {
+      method: 'POST',
       headers,
     });
     return response.json();
@@ -479,6 +652,36 @@ export const api = {
     return response.json();
   },
 
+  async getIcecastConfig() {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/icecast/config`, { headers });
+    return response.json();
+  },
+
+  async saveIcecastConfig(config: any) {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/icecast/config`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(config),
+    });
+    return response.json();
+  },
+
+  async testIcecastConnection() {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/icecast/test`, {
+      method: 'POST',
+      headers,
+    }, 1, 2000, 15000); // single attempt, 15s timeout
+    return response.json();
+  },
+
+  async getIcecastListenerUrl() {
+    const response = await fetchWithRetry(`${API_BASE}/icecast/listener-url`);
+    return response.json();
+  },
+
   async updateIcecastMetadata(metadata: any) {
     const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/icecast/metadata`, {
@@ -489,30 +692,125 @@ export const api = {
     return response.json();
   },
 
-  // Track Upload with File — Direct to Hostinger API
+  // ==================== AZURACAST INTEGRATION ====================
+
+  async getAzuraCastConfig() {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/azuracast/config`, { headers });
+    return response.json();
+  },
+
+  async saveAzuraCastConfig(config: any) {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/azuracast/config`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(config),
+    });
+    return response.json();
+  },
+
+  async getAzuraCastNowPlaying() {
+    const response = await fetchWithRetry(`${API_BASE}/azuracast/nowplaying`);
+    return response.json();
+  },
+
+  async getAzuraCastStatus() {
+    const response = await fetchWithRetry(`${API_BASE}/azuracast/status`);
+    return response.json();
+  },
+
+  async getAzuraCastListeners() {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/azuracast/listeners`, { headers });
+    return response.json();
+  },
+
+  async getAzuraCastHistory() {
+    const response = await fetchWithRetry(`${API_BASE}/azuracast/history`);
+    return response.json();
+  },
+
+  async getAzuraCastQueue() {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/azuracast/queue`, { headers });
+    return response.json();
+  },
+
+  async getAzuraCastStation() {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/azuracast/station`, { headers });
+    return response.json();
+  },
+
+  async testAzuraCastConnection() {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/azuracast/test`, {
+      method: 'POST',
+      headers,
+    }, 1, 2000, 20000); // single attempt, 20s timeout
+    return response.json();
+  },
+
+  async restartAzuraCastStation() {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/azuracast/restart`, {
+      method: 'POST',
+      headers,
+    });
+    return response.json();
+  },
+
+  async getAzuraCastStreamUrl() {
+    const response = await fetchWithRetry(`${API_BASE}/azuracast/stream-url`);
+    return response.json();
+  },
+
+  // Track Upload with File — 3-step: signed URL → direct Storage upload → server processing
   async uploadTrackFile(formData: FormData, onProgress?: (progress: number) => void) {
+    const accessToken = await getAccessToken();
     const file = formData.get('file') as File;
     if (!file) throw new Error('No file provided');
 
-    // Default config values for the Hostinger upload
-    // In a full implementation, the playlistId would be passed in the formData from the frontend component
-    const playlistId = formData.get('playlist_id') || 'unassigned';
-    const playlistName = formData.get('playlist_name') || 'Uncategorized';
+    // Step 1: Get a signed upload URL from the server (small JSON request)
+    onProgress?.(1);
+    console.log('[API] Step 1: Getting signed upload URL...');
+    const urlResponse = await fetchWithRetry(`${API_BASE}/tracks/get-upload-url`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        originalFilename: file.name,
+        contentType: file.type || 'audio/mpeg',
+      }),
+    });
 
-    // Ensure they are in the formData for the Hostinger API
-    if (!formData.has('playlist_id')) formData.append('playlist_id', playlistId);
-    if (!formData.has('playlist_name')) formData.append('playlist_name', playlistName);
+    if (!urlResponse.ok) {
+      const errText = await urlResponse.text().catch(() => urlResponse.statusText);
+      console.error('[API] Step 1 failed:', urlResponse.status, errText);
+      throw new Error(`Failed to get upload URL (${urlResponse.status}): ${errText}`);
+    }
 
-    console.log('[API] Uploading directly to Hostinger API...', { playlistName });
+    const urlData = await urlResponse.json();
+    if (urlData.error) throw new Error(urlData.error);
+
+    const { signedUrl, token: uploadToken, filename, bucket } = urlData;
+    console.log('[API] Signed URL received for:', filename);
     onProgress?.(5);
 
-    return new Promise<any>((resolve, reject) => {
+    // Step 2: Upload file directly to Supabase Storage via signed URL (XHR for progress)
+    // IMPORTANT: Supabase Kong gateway requires the `apikey` header for ALL requests
+    console.log('[API] Step 2: Uploading file directly to Storage...');
+    await new Promise<void>((resolve, reject) => {
       const xhr = new XMLHttpRequest();
 
       if (onProgress) {
         xhr.upload.addEventListener('progress', (e) => {
           if (e.lengthComputable) {
-            const pct = Math.round(5 + (e.loaded / e.total) * 90);
+            // Map 0-100% upload to 5-80% progress
+            const pct = Math.round(5 + (e.loaded / e.total) * 75);
             onProgress(pct);
           }
         });
@@ -520,34 +818,74 @@ export const api = {
 
       xhr.addEventListener('load', () => {
         if (xhr.status >= 200 && xhr.status < 300) {
-          try {
-            const response = JSON.parse(xhr.responseText);
-            console.log('[API] Hostinger upload successful', response);
-            onProgress?.(100);
-            resolve(response);
-          } catch (e) {
-            resolve({ success: true, message: 'Upload completed but response parse failed' });
-          }
+          console.log('[API] File uploaded to Storage successfully, status:', xhr.status);
+          onProgress?.(80);
+          resolve();
         } else {
-          console.error('[API] Hostinger upload failed:', xhr.status, xhr.responseText);
-          let errMsg = `Upload failed (${xhr.status})`;
+          console.error('[API] Storage upload failed:', xhr.status, xhr.responseText);
+          let errMsg = `Storage upload failed (${xhr.status})`;
           try {
             const errBody = JSON.parse(xhr.responseText);
-            errMsg = errBody.detail || errBody.message || errMsg;
-          } catch { }
+            errMsg = errBody.error || errBody.message || errMsg;
+          } catch {}
           reject(new Error(errMsg));
         }
       });
 
-      xhr.addEventListener('error', () => reject(new Error('Network error during file upload')));
-      xhr.addEventListener('abort', () => reject(new Error('Upload cancelled')));
-      xhr.timeout = 120000;
-      xhr.addEventListener('timeout', () => reject(new Error('Upload timed out')));
+      xhr.addEventListener('error', () => {
+        console.error('[API] Storage upload network error');
+        reject(new Error('Network error during file upload to Storage'));
+      });
 
-      xhr.open('POST', 'https://api.soul-fm.com/upload');
-      xhr.setRequestHeader('Authorization', 'Bearer secret_soul_upload_token_123');
-      xhr.send(formData);
+      xhr.addEventListener('abort', () => {
+        reject(new Error('Upload cancelled'));
+      });
+
+      xhr.timeout = 120000; // 2 min timeout for large files
+      xhr.addEventListener('timeout', () => {
+        reject(new Error('Upload timed out (120s)'));
+      });
+
+      xhr.open('PUT', signedUrl);
+      // Supabase Kong gateway requires apikey header for all requests
+      xhr.setRequestHeader('apikey', publicAnonKey);
+      xhr.setRequestHeader('Authorization', `Bearer ${publicAnonKey}`);
+      xhr.setRequestHeader('Content-Type', file.type || 'audio/mpeg');
+      xhr.send(file);
     });
+
+    // Step 3: Ask server to process the uploaded file (metadata extraction, track creation)
+    console.log('[API] Step 3: Processing uploaded file...');
+    onProgress?.(85);
+
+    const processResponse = await fetchWithRetry(`${API_BASE}/tracks/process`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        filename,
+        bucket,
+        originalFilename: file.name,
+        position: formData.get('position') || 'end',
+        autoAddToLiveStream: formData.get('autoAddToLiveStream') === 'true',
+        generateWaveform: formData.get('generateWaveform') === 'true',
+      }),
+    }, 2, 2000, 45000); // 2 retries, 2s backoff, 45s timeout for metadata processing
+
+    if (!processResponse.ok) {
+      const errText = await processResponse.text().catch(() => processResponse.statusText);
+      console.error('[API] Step 3 failed:', processResponse.status, errText);
+      throw new Error(`Track processing failed (${processResponse.status}): ${errText}`);
+    }
+
+    const result = await processResponse.json();
+    if (result.error) throw new Error(result.error);
+
+    onProgress?.(100);
+    console.log('[API] Track upload complete:', result.track?.title);
+    return result;
   },
 
   // Podcasts
@@ -624,6 +962,15 @@ export const api = {
   async deleteShow(id: string) {
     const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/shows/${id}`, {
+      method: 'DELETE',
+      headers,
+    });
+    return response.json();
+  },
+
+  async deleteAllShows() {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/shows`, {
       method: 'DELETE',
       headers,
     });
@@ -1099,7 +1446,7 @@ export const api = {
   // ==================== FEEDBACK ====================
 
   async getFeedback() {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/feedback`, { headers });
     return response.json();
   },
@@ -1114,7 +1461,7 @@ export const api = {
   },
 
   async updateFeedback(id: string, updates: any) {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/feedback/${id}`, {
       method: 'PUT',
       headers,
@@ -1124,7 +1471,7 @@ export const api = {
   },
 
   async deleteFeedback(id: string) {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/feedback/${id}`, {
       method: 'DELETE',
       headers,
@@ -1140,7 +1487,7 @@ export const api = {
   },
 
   async updateBrandingSettings(settings: any) {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/settings/branding`, {
       method: 'POST',
       headers,
@@ -1152,13 +1499,13 @@ export const api = {
   // ==================== AUDIT LOGS ====================
 
   async getAuditLogs(limit = 100) {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/logs?limit=${limit}`, { headers });
     return response.json();
   },
 
   async createAuditLog(entry: { level?: string; category?: string; message: string; details?: string }) {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/logs`, {
       method: 'POST',
       headers,
@@ -1168,7 +1515,7 @@ export const api = {
   },
 
   async clearAuditLogs() {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/logs`, {
       method: 'DELETE',
       headers,
@@ -1179,13 +1526,13 @@ export const api = {
   // ==================== BACKUP / EXPORT ====================
 
   async exportData(type: string) {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/export/${type}`, { headers });
     return response.json();
   },
 
   async getExportHistory() {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/export-history`, { headers });
     return response.json();
   },
@@ -1193,7 +1540,7 @@ export const api = {
   // ==================== ADMIN DASHBOARD STATS ====================
 
   async getDashboardStats() {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/admin/dashboard-stats`, { headers });
     return response.json();
   },
@@ -1201,13 +1548,13 @@ export const api = {
   // ==================== AI DEV TEAM ====================
 
   async getAITeamMembers() {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/ai-team/members`, { headers });
     return response.json();
   },
 
   async updateAITeamMember(memberId: string, updates: Record<string, any>) {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/ai-team/members/${memberId}`, {
       method: 'PUT',
       headers,
@@ -1217,13 +1564,13 @@ export const api = {
   },
 
   async getAITeamTasks() {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/ai-team/tasks`, { headers });
     return response.json();
   },
 
   async createAITeamTask(task: { title: string; description?: string; priority?: string; assigneeId?: string; labels?: string[] }) {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/ai-team/tasks`, {
       method: 'POST',
       headers,
@@ -1233,7 +1580,7 @@ export const api = {
   },
 
   async updateAITeamTask(taskId: string, updates: Record<string, any>) {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/ai-team/tasks/${taskId}`, {
       method: 'PUT',
       headers,
@@ -1243,7 +1590,7 @@ export const api = {
   },
 
   async deleteAITeamTask(taskId: string) {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/ai-team/tasks/${taskId}`, {
       method: 'DELETE',
       headers,
@@ -1252,13 +1599,13 @@ export const api = {
   },
 
   async getAITeamChat(memberId: string) {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/ai-team/chat/${memberId}`, { headers });
     return response.json();
   },
 
   async sendAITeamChat(memberId: string, text: string) {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/ai-team/chat/${memberId}`, {
       method: 'POST',
       headers,
@@ -1269,16 +1616,16 @@ export const api = {
 
   // SSE streaming version — returns raw Response for manual stream reading
   async streamAITeamChat(memberId: string, text: string): Promise<Response> {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     return fetch(`${API_BASE}/ai-team/chat/${memberId}/stream`, {
       method: 'POST',
-      headers,
+      headers: { ...headers, 'apikey': publicAnonKey },
       body: JSON.stringify({ text }),
     });
   },
 
   async getAITeamStats() {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/ai-team/stats`, { headers });
     return response.json();
   },
@@ -1288,19 +1635,19 @@ export const api = {
   // ── Editorial Department (Эфирный Отдел) ─────────────────────────
 
   async getEditorialSessions() {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/editorial/sessions`, { headers });
     return response.json();
   },
 
   async getEditorialSession(id: string) {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/editorial/sessions/${id}`, { headers });
     return response.json();
   },
 
   async runEditorialSession(type: string, topic?: string) {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/editorial/run-session`, {
       method: 'POST', headers,
       body: JSON.stringify({ type, topic }),
@@ -1309,7 +1656,7 @@ export const api = {
   },
 
   async approveEditorialSession(id: string, feedback?: string) {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/editorial/sessions/${id}/approve`, {
       method: 'POST', headers,
       body: JSON.stringify({ feedback }),
@@ -1318,7 +1665,7 @@ export const api = {
   },
 
   async rejectEditorialSession(id: string, feedback?: string) {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/editorial/sessions/${id}/reject`, {
       method: 'POST', headers,
       body: JSON.stringify({ feedback }),
@@ -1327,7 +1674,7 @@ export const api = {
   },
 
   async deleteEditorialSession(id: string) {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/editorial/sessions/${id}`, {
       method: 'DELETE', headers,
     });
@@ -1335,13 +1682,13 @@ export const api = {
   },
 
   async getEditorialDeliverables() {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/editorial/deliverables`, { headers });
     return response.json();
   },
 
   async approveDeliverable(id: string, feedback?: string) {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/editorial/deliverables/${id}/approve`, {
       method: 'POST', headers,
       body: JSON.stringify({ feedback }),
@@ -1350,7 +1697,7 @@ export const api = {
   },
 
   async rejectDeliverable(id: string, feedback?: string) {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/editorial/deliverables/${id}/reject`, {
       method: 'POST', headers,
       body: JSON.stringify({ feedback }),
@@ -1359,13 +1706,13 @@ export const api = {
   },
 
   async getEditorialStats() {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/editorial/stats`, { headers });
     return response.json();
   },
 
   async clearAllEditorial() {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/editorial/clear-all`, {
       method: 'POST', headers,
     });
@@ -1375,13 +1722,13 @@ export const api = {
   // ── Autopilot ─────────────────────────────────────────────────────
 
   async getAutopilot() {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/editorial/autopilot`, { headers });
     return response.json();
   },
 
   async saveAutopilot(config: any) {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/editorial/autopilot`, {
       method: 'POST', headers,
       body: JSON.stringify(config),
@@ -1390,7 +1737,7 @@ export const api = {
   },
 
   async autopilotTick() {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/editorial/autopilot/tick`, {
       method: 'POST', headers,
     }, 1, 0, 45000);
@@ -1400,7 +1747,7 @@ export const api = {
   // ── Implementation Tasks ──────────────────────────────────────────
 
   async sendToAssistant(sessionId: string) {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/editorial/sessions/${sessionId}/send-to-assistant`, {
       method: 'POST', headers,
     }, 1, 0, 45000);
@@ -1408,13 +1755,13 @@ export const api = {
   },
 
   async getEditorialTasks() {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/editorial/tasks`, { headers });
     return response.json();
   },
 
   async updateTaskStatus(taskId: string, body: any) {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/editorial/tasks/${taskId}/status`, {
       method: 'POST', headers,
       body: JSON.stringify(body),
@@ -1423,7 +1770,7 @@ export const api = {
   },
 
   async deleteTask(taskId: string) {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/editorial/tasks/${taskId}`, {
       method: 'DELETE', headers,
     });
@@ -1433,13 +1780,13 @@ export const api = {
   // ── Telegram Integration ──────────────────────────────────────────
 
   async getTelegramConfig() {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/editorial/telegram`, { headers });
     return response.json();
   },
 
   async saveTelegramConfig(config: any) {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/editorial/telegram`, {
       method: 'POST', headers,
       body: JSON.stringify(config),
@@ -1448,7 +1795,7 @@ export const api = {
   },
 
   async testTelegram() {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/editorial/telegram/test`, {
       method: 'POST', headers,
     }, 1, 0, 15000);
@@ -1456,7 +1803,7 @@ export const api = {
   },
 
   async sendSessionToTelegram(sessionId: string) {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/editorial/sessions/${sessionId}/telegram`, {
       method: 'POST', headers,
     }, 1, 0, 15000);
@@ -1466,19 +1813,19 @@ export const api = {
   // ── AI Providers CRUD ──────────────────────────────────────────────
 
   async getAIProviders() {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/editorial/ai-providers`, { headers });
     return response.json();
   },
 
   async getAgentAIConfig(agentId: string) {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/editorial/ai-providers/${agentId}`, { headers });
     return response.json();
   },
 
   async updateAgentAIConfig(agentId: string, config: any) {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/editorial/ai-providers/${agentId}`, {
       method: 'PUT', headers,
       body: JSON.stringify(config),
@@ -1487,7 +1834,7 @@ export const api = {
   },
 
   async resetAgentAIConfig(agentId: string) {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/editorial/ai-providers/${agentId}`, {
       method: 'DELETE', headers,
     });
@@ -1495,7 +1842,7 @@ export const api = {
   },
 
   async resetAllAIConfigs() {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/editorial/ai-providers/reset-all`, {
       method: 'POST', headers,
     });
@@ -1503,7 +1850,7 @@ export const api = {
   },
 
   async testAgentAI(agentId: string) {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/editorial/ai-providers/${agentId}/test`, {
       method: 'POST', headers,
     }, 1, 0, 90000); // Extended timeout: thinking models + fallback chain
@@ -1513,7 +1860,7 @@ export const api = {
   // ── Individual Agent Chats ─────────────────────────────────────────
 
   async sendAgentChat(agentId: string, message: string) {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/editorial/agent-chat`, {
       method: 'POST', headers,
       body: JSON.stringify({ agentId, message }),
@@ -1522,13 +1869,13 @@ export const api = {
   },
 
   async getAgentChatHistory(agentId: string) {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/editorial/agent-chat/${agentId}`, { headers });
     return response.json();
   },
 
   async clearAgentChats() {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/editorial/agent-chats`, {
       method: 'DELETE', headers,
     });
@@ -1538,7 +1885,7 @@ export const api = {
   // ── Compiled Analysis ─────────────────────────────────────────────
 
   async compileAnalysis() {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/editorial/compile-analysis`, {
       method: 'POST', headers,
     }, 1, 0, 120000);
@@ -1546,8 +1893,150 @@ export const api = {
   },
 
   async getLatestAnalysis() {
-    const headers = await getPublicHeaders();
+    const headers = await getAuthHeaders();
     const response = await fetchWithRetry(`${API_BASE}/editorial/latest-analysis`, { headers });
+    return response.json();
+  },
+
+  // ==================== EVENTS ====================
+
+  async getEvents() {
+    const response = await fetchWithRetry(`${API_BASE}/events`);
+    return response.json();
+  },
+
+  async getEvent(id: string) {
+    const response = await fetchWithRetry(`${API_BASE}/events/${id}`);
+    return response.json();
+  },
+
+  async createEvent(event: any) {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/events`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(event),
+    });
+    return response.json();
+  },
+
+  async updateEvent(id: string, event: any) {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/events/${id}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(event),
+    });
+    return response.json();
+  },
+
+  async deleteEvent(id: string) {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/events/${id}`, {
+      method: 'DELETE',
+      headers,
+    });
+    return response.json();
+  },
+
+  // ==================== MERCH ====================
+
+  async getMerch() {
+    const response = await fetchWithRetry(`${API_BASE}/merch`);
+    return response.json();
+  },
+
+  async getMerchItem(id: string) {
+    const response = await fetchWithRetry(`${API_BASE}/merch/${id}`);
+    return response.json();
+  },
+
+  async createMerchItem(item: any) {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/merch`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(item),
+    });
+    return response.json();
+  },
+
+  async updateMerchItem(id: string, item: any) {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/merch/${id}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(item),
+    });
+    return response.json();
+  },
+
+  async deleteMerchItem(id: string) {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/merch/${id}`, {
+      method: 'DELETE',
+      headers,
+    });
+    return response.json();
+  },
+
+  async seedMerch() {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/merch/seed`, {
+      method: 'POST',
+      headers,
+    });
+    return response.json();
+  },
+
+  // ==================== COMMUNITY ====================
+
+  async getCommunityMessages(channel?: string, limit = 50) {
+    const params = new URLSearchParams();
+    if (channel) params.set('channel', channel);
+    params.set('limit', String(limit));
+    const response = await fetchWithRetry(`${API_BASE}/community/messages?${params}`);
+    return response.json();
+  },
+
+  async postCommunityMessage(data: { user: string; color?: string; message: string; channel: string }) {
+    const response = await fetchWithRetry(`${API_BASE}/community/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    return response.json();
+  },
+
+  async likeCommunityMessage(messageId: string, userId?: string) {
+    const response = await fetchWithRetry(`${API_BASE}/community/messages/${messageId}/like`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId }),
+    });
+    return response.json();
+  },
+
+  async deleteCommunityMessage(id: string) {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/community/messages/${id}`, {
+      method: 'DELETE',
+      headers,
+    });
+    return response.json();
+  },
+
+  async getCommunityStats() {
+    const response = await fetchWithRetry(`${API_BASE}/community/stats`);
+    return response.json();
+  },
+
+  async seedCommunity() {
+    const headers = await getAuthHeaders();
+    const response = await fetchWithRetry(`${API_BASE}/community/seed`, {
+      method: 'POST',
+      headers,
+    });
     return response.json();
   },
 };

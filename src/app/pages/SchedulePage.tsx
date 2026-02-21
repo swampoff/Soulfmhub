@@ -51,23 +51,62 @@ const TIME_SLOTS = generateTimeSlots();
 
 export function SchedulePage() {
   const [selectedDate, setSelectedDate] = useState(new Date());
+  const [allSchedules, setAllSchedules] = useState<any[]>([]);
   const [schedule, setSchedule] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Load all schedules once on mount
   useEffect(() => {
-    loadSchedule();
-  }, [selectedDate]);
+    loadAllSchedules();
+  }, []);
 
-  const loadSchedule = async () => {
+  // Filter by selected date whenever date or data changes
+  useEffect(() => {
+    filterByDate();
+  }, [selectedDate, allSchedules]);
+
+  const loadAllSchedules = async () => {
     setLoading(true);
     try {
-      const { schedule: data } = await api.getSchedule(format(selectedDate, 'yyyy-MM-dd'));
-      setSchedule(data || []);
+      const data = await api.getAllSchedules();
+      const items = data?.schedules || [];
+      setAllSchedules(items);
     } catch (error) {
-      console.error('Error loading schedule:', error);
+      console.error('Error loading schedules:', error);
     } finally {
       setLoading(false);
     }
+  };
+
+  const filterByDate = () => {
+    const dayOfWeek = selectedDate.getDay(); // 0=Sun..6=Sat
+    const dateStr = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
+
+    const filtered = allSchedules.filter((s: any) => {
+      if (!s.isActive) return false;
+
+      const mode = s.scheduleMode || 'recurring';
+
+      if (mode === 'one-time') {
+        // One-time slot: match exact date
+        return s.scheduledDate === dateStr;
+      }
+
+      // Recurring: match day of week, or daily (dayOfWeek === null)
+      return s.dayOfWeek === null || s.dayOfWeek === dayOfWeek;
+    });
+
+    // Map to the display format the page expects
+    const mapped = filtered.map((s: any) => ({
+      id: s.id,
+      name: s.title || s.playlistName || 'Untitled',
+      startTime: s.startTime,
+      endTime: s.endTime,
+      host: s.host || null,
+      genre: s.genre || s.playlistName || null,
+    }));
+
+    setSchedule(mapped);
   };
 
   const getGenreColor = (genre: string) => {
@@ -144,7 +183,7 @@ export function SchedulePage() {
   const scheduleColumns = organizeScheduleColumns();
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#0a1628] via-[#0d1a2d] to-[#0a1628] relative overflow-hidden py-8">
+    <div className="min-h-screen bg-gradient-to-br from-[#0a1628] via-[#0d1a2d] to-[#0a1628] relative overflow-x-hidden py-8">
       {/* Animated Palms - Left */}
       <AnimatedPalm side="left" delay={0.3} />
       
@@ -214,12 +253,12 @@ export function SchedulePage() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.2 }}
-              className="relative bg-[#1a1f2e] rounded-lg overflow-hidden"
-              style={{ minHeight: '600px' }}
+              className="relative bg-[#1a1f2e] rounded-lg overflow-x-auto overflow-y-auto"
+              style={{ maxHeight: '75vh' }}
             >
-              <div className="flex">
+              <div className="flex" style={{ minWidth: `${Math.max(scheduleColumns.length, 1) * 140 + 64}px` }}>
                 {/* Time Column */}
-                <div className="w-16 flex-shrink-0 relative" style={{ height: '600px' }}>
+                <div className="w-16 flex-shrink-0 relative sticky left-0 z-10 bg-[#1a1f2e]" style={{ height: '1140px' }}>
                   {TIME_SLOTS.map((time, index) => (
                     <div
                       key={time}
@@ -233,8 +272,8 @@ export function SchedulePage() {
 
                 {/* Schedule Columns */}
                 <div className="flex-1 grid gap-2 p-4 relative" style={{ 
-                  height: '600px',
-                  gridTemplateColumns: `repeat(${Math.max(scheduleColumns.length, 8)}, minmax(120px, 1fr))`
+                  height: '1140px',
+                  gridTemplateColumns: `repeat(${Math.max(scheduleColumns.length, 1)}, minmax(140px, 1fr))`
                 }}>
                   {/* Time Grid Lines */}
                   {TIME_SLOTS.map((time, index) => (

@@ -1,27 +1,160 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Play } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { api } from '../../lib/api';
-import { motion } from 'motion/react';
-const soulFmLogo = '/favicon.ico'; // Automatically fixed figma asset import
+import { motion, AnimatePresence } from 'motion/react';
+import soulFmLogo from 'figma:asset/7dc3be36ef413fc4dd597274a640ba655b20ab3d.png';
 import { FloatingParticles } from '../components/FloatingParticles';
 import { AnimatedBeach } from '../components/AnimatedBeach';
 import { AnimatedWaves } from '../components/AnimatedWaves';
 import { PublicNowPlayingWidget } from '../components/PublicNowPlayingWidget';
 
 export function HomePage() {
-  const { nowPlaying, setIsPlaying } = useApp();
+  const { nowPlaying, isPlaying, setIsPlaying } = useApp();
   const [loading, setLoading] = useState(false);
+  const [autoplayBlocked, setAutoplayBlocked] = useState(false);
+  const [attemptedAutoplay, setAttemptedAutoplay] = useState(false);
+  const [streamOnline, setStreamOnline] = useState(false);
+
+  // ── Check if Auto DJ is running, then try auto-start ───────────────
+  // 1. Fetch /radio/current-stream to see if Auto DJ is active
+  // 2. Only if `playing: true` → attempt browser autoplay
+  // 3. If browser blocks autoplay → show "Tap to listen" overlay
+  // 4. If Auto DJ is off → do nothing, normal homepage
+  useEffect(() => {
+    if (isPlaying || attemptedAutoplay) return;
+    setAttemptedAutoplay(true);
+
+    const checkAndPlay = async () => {
+      try {
+        // Ask the backend whether Auto DJ is actually running
+        const stream = await api.getCurrentStream();
+        if (!stream?.playing) {
+          // Auto DJ is off — nothing to play
+          console.log('[HomePage] Auto DJ is not running, skipping autoplay');
+          setStreamOnline(false);
+          return;
+        }
+
+        // Auto DJ is running!
+        setStreamOnline(true);
+
+        // Probe browser autoplay policy
+        try {
+          const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+          if (ctx.state === 'suspended') {
+            await ctx.resume();
+            await new Promise((r) => setTimeout(r, 150));
+          }
+          if (ctx.state === 'running') {
+            // Autoplay allowed — start the stream immediately
+            ctx.close();
+            setIsPlaying(true);
+          } else {
+            // Autoplay blocked — show overlay
+            ctx.close();
+            setAutoplayBlocked(true);
+          }
+        } catch {
+          setAutoplayBlocked(true);
+        }
+      } catch (err) {
+        console.error('[HomePage] Error checking stream status:', err);
+        setStreamOnline(false);
+      }
+    };
+
+    checkAndPlay();
+  }, [isPlaying, attemptedAutoplay, setIsPlaying]);
+
+  // When the user clicks anywhere on the hero/overlay, start playing
+  const handleStartListening = useCallback(() => {
+    setAutoplayBlocked(false);
+    setIsPlaying(true);
+  }, [setIsPlaying]);
 
   const handleListenNow = () => {
+    setAutoplayBlocked(false);
     setIsPlaying(true);
   };
 
   return (
     <div className="relative overflow-hidden">
+      {/* ── Autoplay-blocked overlay ─────────────────────────────────── */}
+      {/* Browsers block audio autoplay until user interacts with the page.
+          This overlay invites the visitor to tap/click to start the stream. */}
+      <AnimatePresence>
+        {autoplayBlocked && !isPlaying && (
+          <motion.div
+            key="autoplay-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.4 }}
+            onClick={handleStartListening}
+            className="fixed inset-0 z-[999] flex items-center justify-center cursor-pointer select-none"
+            style={{ background: 'radial-gradient(ellipse at center, rgba(10,22,40,0.92) 0%, rgba(6,13,24,0.97) 100%)' }}
+          >
+            <div className="flex flex-col items-center gap-8 text-center px-6">
+              {/* Pulsating logo */}
+              <motion.div
+                animate={{
+                  scale: [1, 1.06, 1],
+                  filter: [
+                    'drop-shadow(0 0 20px rgba(0,217,255,0.5))',
+                    'drop-shadow(0 0 40px rgba(0,255,170,0.7))',
+                    'drop-shadow(0 0 20px rgba(0,217,255,0.5))',
+                  ],
+                }}
+                transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+              >
+                <img src={soulFmLogo} alt="Soul FM" className="w-40 h-40 md:w-52 md:h-52 rounded-full" />
+              </motion.div>
+
+              {/* Animated play ring */}
+              <motion.div
+                className="relative w-24 h-24 flex items-center justify-center"
+                whileHover={{ scale: 1.12 }}
+                whileTap={{ scale: 0.95 }}
+              >
+                {/* Outer ring */}
+                <motion.div
+                  className="absolute inset-0 rounded-full border-2 border-[#00d9ff]/60"
+                  animate={{ scale: [1, 1.3, 1], opacity: [0.6, 0, 0.6] }}
+                  transition={{ duration: 2, repeat: Infinity, ease: 'easeOut' }}
+                />
+                <motion.div
+                  className="absolute inset-0 rounded-full border-2 border-[#00ffaa]/40"
+                  animate={{ scale: [1, 1.5, 1], opacity: [0.4, 0, 0.4] }}
+                  transition={{ duration: 2, repeat: Infinity, ease: 'easeOut', delay: 0.5 }}
+                />
+                {/* Button */}
+                <div className="w-20 h-20 rounded-full bg-gradient-to-br from-[#00d9ff] to-[#00ffaa] flex items-center justify-center shadow-2xl shadow-[#00d9ff]/40">
+                  <Play className="w-10 h-10 text-[#0a1628] ml-1" fill="currentColor" />
+                </div>
+              </motion.div>
+
+              <div>
+                <motion.p
+                  className="text-2xl md:text-3xl font-bold text-white mb-2"
+                  style={{ fontFamily: 'var(--font-family-display)' }}
+                  animate={{ opacity: [0.8, 1, 0.8] }}
+                  transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
+                >
+                  Tap to Start Listening
+                </motion.p>
+                <p className="text-white/50 text-sm md:text-base">
+                  Join the live stream — soul, funk & jazz 24/7
+                </p>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Enhanced Background Pattern */}
       <div className="absolute inset-0">
         {/* Grid Pattern */}

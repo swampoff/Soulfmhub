@@ -138,16 +138,44 @@ export function AppProvider({ children }: { children: ReactNode }) {
     let subscription: any = null;
 
     try {
-      // Check active session
+      // Check active session — validate the token locally first to avoid
+      // sending expired JWTs to the Supabase gateway (which rejects them
+      // before our Hono server can even see the request).
       supabase.auth.getSession().then(({ data: { session } }) => {
-        if (session?.user) {
-          api.getProfile().then((data) => {
-            if (data.profile) {
-              setUser(data.profile);
-            }
-          }).catch((err) => {
-            console.error('[AppContext] Error loading profile:', err);
-          });
+        if (session?.user && session?.access_token) {
+          // Quick local expiry check so we don't fire a doomed request
+          let tokenOk = false;
+          try {
+            const payload = JSON.parse(atob(session.access_token.split('.')[1]));
+            tokenOk = Date.now() < (payload.exp * 1000) - 10_000; // 10s margin
+          } catch { /* malformed — not ok */ }
+
+          if (tokenOk) {
+            api.getProfile().then((data) => {
+              if (data.profile) {
+                setUser(data.profile);
+              }
+            }).catch((err) => {
+              console.error('[AppContext] Error loading profile:', err);
+            });
+          } else {
+            // Token expired — try refreshing; if that fails, sign out
+            console.warn('[AppContext] Cached session has expired token — attempting refresh');
+            supabase.auth.refreshSession().then(({ data }) => {
+              if (data?.session?.access_token) {
+                api.getProfile().then((profileData) => {
+                  if (profileData.profile) setUser(profileData.profile);
+                }).catch(() => {});
+              } else {
+                console.warn('[AppContext] Refresh failed — clearing stale session');
+                supabase.auth.signOut().catch(() => {});
+                setUser(null);
+              }
+            }).catch(() => {
+              supabase.auth.signOut().catch(() => {});
+              setUser(null);
+            });
+          }
         }
         setLoading(false);
       }).catch((err) => {

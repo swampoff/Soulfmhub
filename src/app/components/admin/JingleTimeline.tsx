@@ -1,8 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { Clock, Calendar, AlertCircle, Eye, EyeOff } from 'lucide-react';
-import { projectId } from '../../../../utils/supabase/info';
+import { projectId, publicAnonKey } from '../../../../utils/supabase/info';
 import { getAccessToken } from '../../../lib/api';
 import { getCategoryInfo } from './jingle-categories';
+
+const API_BASE = `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3`;
+
+/** Helper: fetch with apikey + auth headers */
+async function apiFetch(url: string, opts: RequestInit = {}): Promise<Response> {
+  const token = await getAccessToken();
+  const headers: Record<string, string> = {
+    'apikey': publicAnonKey,
+    'Authorization': `Bearer ${token}`,
+    ...(opts.headers as Record<string, string> || {}),
+  };
+  return fetch(url, { ...opts, headers });
+}
 
 interface JingleRule {
   id: string;
@@ -63,15 +76,7 @@ export function JingleTimeline() {
 
   async function loadRules() {
     try {
-      const token = await getAccessToken();
-      const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/jingle-rules`,
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-          },
-        }
-      );
+      const response = await apiFetch(`${API_BASE}/jingle-rules`);
       if (!response.ok) throw new Error('Failed to load rules');
       const data = await response.json();
       setRules(data.rules || []);
@@ -82,15 +87,7 @@ export function JingleTimeline() {
 
   async function loadJingles() {
     try {
-      const token = await getAccessToken();
-      const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-06086aa3/jingles`,
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-          },
-        }
-      );
+      const response = await apiFetch(`${API_BASE}/jingles`);
       if (!response.ok) throw new Error('Failed to load jingles');
       const data = await response.json();
       setJingles(data.jingles || []);

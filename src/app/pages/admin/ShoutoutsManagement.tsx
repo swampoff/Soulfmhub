@@ -286,7 +286,7 @@ export function ShoutoutsManagement() {
 
                         {/* Status Badge */}
                         <span className={`px-3 py-1 rounded-full text-xs font-medium border whitespace-nowrap ${statusColors[shoutout.status as keyof typeof statusColors]}`}>
-                          {shoutout.status.toUpperCase()}
+                          {(shoutout.status || 'pending').toUpperCase()}
                         </span>
                       </div>
 
