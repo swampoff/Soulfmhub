@@ -350,7 +350,7 @@ app.post("/make-server-06086aa3/tracks/get-upload-url", requireAuth, async (c) =
 // Step 3 of new upload flow: process file from Supabase Storage → AzuraCast → DB
 app.post("/make-server-06086aa3/tracks/process", requireAuth, async (c) => {
   try {
-    const { filename, bucket, originalFilename } = await c.req.json();
+    const { filename, bucket, originalFilename, autoAddToLiveStream, position } = await c.req.json();
 
     // Download from Supabase Storage
     const { data: fileBlob, error: dlErr } = await supabase.storage.from(bucket || 'audio').download(filename);
@@ -395,6 +395,44 @@ app.post("/make-server-06086aa3/tracks/process", requireAuth, async (c) => {
 
     // Clean up temp file from Supabase Storage
     await supabase.storage.from(bucket || 'audio').remove([filename]).catch(() => {});
+
+    // Add to playlist if requested
+    if (autoAddToLiveStream === true || autoAddToLiveStream === 'true') {
+      try {
+        const { data: playlists } = await supabase
+          .from('playlists')
+          .select('id, track_ids, azuracast_playlist_id')
+          .order('name')
+          .limit(1);
+        if (playlists?.length) {
+          const pl = playlists[0];
+          const trackIds = [...(pl.track_ids || [])];
+          if (!trackIds.includes(trackId)) {
+            if (position === 'start') trackIds.unshift(trackId);
+            else trackIds.push(trackId);
+            await supabase.from('playlists').update({
+              track_ids: trackIds,
+              updated_at: new Date().toISOString(),
+            }).eq('id', pl.id);
+          }
+          // Also add to AzuraCast playlist
+          if (pl.azuracast_playlist_id && azId) {
+            const getR = await fetch(`${AZURA_URL}/api/station/${AZURA_STATION}/file/${azId}`, { headers: azuraHeaders() });
+            if (getR.ok) {
+              const fileData = await getR.json();
+              const currentPlaylists: number[] = (fileData.playlists || []).map((p: any) => typeof p === 'object' ? p.id : p);
+              if (!currentPlaylists.includes(pl.azuracast_playlist_id)) {
+                currentPlaylists.push(pl.azuracast_playlist_id);
+                await fetch(`${AZURA_URL}/api/station/${AZURA_STATION}/file/${azId}`, {
+                  method: 'PUT', headers: azuraPostHeaders(),
+                  body: JSON.stringify({ ...fileData, playlists: currentPlaylists }),
+                }).catch(() => {});
+              }
+            }
+          }
+        }
+      } catch (plErr: any) { console.error('[process] playlist add error:', plErr?.message); }
+    }
 
     return c.json({
       track: track || { id: trackId, title, artist, album, duration },
