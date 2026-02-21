@@ -554,41 +554,75 @@ app.post("/make-server-06086aa3/playlists/:id/tracks", requireAdminPin, async (c
 
 // ==================== SCHEDULES ====================
 
-app.get("/make-server-06086aa3/schedules", async (c) => {
+// camelCase ↔ snake_case helpers for schedules
+function scheduleToDb(body: any): any {
+  const d: any = {};
+  if (body.playlistId !== undefined) d.playlist_id = body.playlistId;
+  if (body.playlist_id !== undefined) d.playlist_id = body.playlist_id;
+  if (body.dayOfWeek !== undefined) d.day_of_week = body.dayOfWeek;
+  if (body.day_of_week !== undefined) d.day_of_week = body.day_of_week;
+  if (body.startTime !== undefined) d.start_time = body.startTime;
+  if (body.start_time !== undefined) d.start_time = body.start_time;
+  if (body.endTime !== undefined) d.end_time = body.endTime;
+  if (body.end_time !== undefined) d.end_time = body.end_time;
+  if (body.title !== undefined) d.title = body.title;
+  if (body.isActive !== undefined) d.is_active = body.isActive;
+  if (body.is_active !== undefined) d.is_active = body.is_active;
+  if (body.repeatWeekly !== undefined) d.repeat_weekly = body.repeatWeekly;
+  if (body.utcOffsetMinutes !== undefined) d.utc_offset_minutes = body.utcOffsetMinutes;
+  if (body.timezone !== undefined) d.timezone = body.timezone;
+  return d;
+}
+function scheduleFromDb(s: any): any {
+  return { ...s, playlistId: s.playlist_id, dayOfWeek: s.day_of_week, startTime: s.start_time, endTime: s.end_time, isActive: s.is_active, repeatWeekly: s.repeat_weekly };
+}
+
+// Frontend uses /schedule (singular) — register both singular and plural
+const scheduleGetHandler = async (c: any) => {
   try {
     const { data, error } = await supabase.from('schedules').select('*, playlists(id, name)').order('start_time');
     if (error) throw error;
-    return c.json({ schedules: data || [] });
+    return c.json({ schedules: (data || []).map(scheduleFromDb) });
   } catch (e: any) { return c.json({ error: e.message }, 500); }
-});
-
-app.post("/make-server-06086aa3/schedules", requireAdminPin, async (c) => {
+};
+const schedulePostHandler = async (c: any) => {
   try {
     const body = await c.req.json();
-    const { data, error } = await supabase.from('schedules').insert(body).select().single();
+    const { data, error } = await supabase.from('schedules').insert(scheduleToDb(body)).select().single();
     if (error) throw error;
-    return c.json({ schedule: data }, 201);
+    return c.json({ schedule: scheduleFromDb(data) }, 201);
   } catch (e: any) { return c.json({ error: e.message }, 500); }
-});
-
-app.put("/make-server-06086aa3/schedules/:id", requireAdminPin, async (c) => {
+};
+const schedulePutHandler = async (c: any) => {
   try {
     const id = c.req.param('id');
     const body = await c.req.json();
-    const { data, error } = await supabase.from('schedules').update({ ...body, updated_at: new Date().toISOString() }).eq('id', id).select().single();
+    const { data, error } = await supabase.from('schedules').update({ ...scheduleToDb(body), updated_at: new Date().toISOString() }).eq('id', id).select().single();
     if (error) throw error;
-    return c.json({ schedule: data });
+    return c.json({ schedule: scheduleFromDb(data) });
   } catch (e: any) { return c.json({ error: e.message }, 500); }
-});
-
-app.delete("/make-server-06086aa3/schedules/:id", requireAdminPin, async (c) => {
+};
+const scheduleDeleteHandler = async (c: any) => {
   try {
     const id = c.req.param('id');
     const { error } = await supabase.from('schedules').delete().eq('id', id);
     if (error) throw error;
     return c.json({ success: true });
   } catch (e: any) { return c.json({ error: e.message }, 500); }
-});
+};
+
+// /schedule (singular) — used by frontend
+app.get("/make-server-06086aa3/schedule", scheduleGetHandler);
+app.post("/make-server-06086aa3/schedule", requireAdminPin, schedulePostHandler);
+app.put("/make-server-06086aa3/schedule/:id", requireAdminPin, schedulePutHandler);
+app.delete("/make-server-06086aa3/schedule/:id", requireAdminPin, scheduleDeleteHandler);
+
+// /schedules (plural) — kept for backward compat
+app.get("/make-server-06086aa3/schedules", scheduleGetHandler);
+app.post("/make-server-06086aa3/schedules", requireAdminPin, schedulePostHandler);
+app.put("/make-server-06086aa3/schedules/:id", requireAdminPin, schedulePutHandler);
+app.delete("/make-server-06086aa3/schedules/:id", requireAdminPin, scheduleDeleteHandler);
+
 
 // ==================== AZURACAST PROXY ====================
 
