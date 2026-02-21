@@ -319,6 +319,81 @@ app.post("/make-server-06086aa3/tracks/upload", requireAuth, async (c) => {
   } catch (e: any) { return c.json({ error: e.message }, 500); }
 });
 
+// Step 1 of new upload flow: get signed upload URL for Supabase Storage
+app.post("/make-server-06086aa3/tracks/get-upload-url", requireAuth, async (c) => {
+  try {
+    const { originalFilename, contentType } = await c.req.json();
+    const ext = (originalFilename || 'track.mp3').split('.').pop() || 'mp3';
+    const filename = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}.${ext}`;
+    const bucket = 'audio';
+
+    // Ensure bucket exists
+    await supabase.storage.createBucket(bucket, { public: false }).catch(() => {});
+
+    const { data, error } = await supabase.storage.from(bucket).createSignedUploadUrl(filename);
+    if (error) return c.json({ error: error.message }, 500);
+
+    return c.json({ signedUrl: data.signedUrl, token: data.token, filename, bucket });
+  } catch (e: any) { return c.json({ error: e.message }, 500); }
+});
+
+// Step 3 of new upload flow: process file from Supabase Storage → AzuraCast → DB
+app.post("/make-server-06086aa3/tracks/process", requireAuth, async (c) => {
+  try {
+    const { filename, bucket, originalFilename } = await c.req.json();
+
+    // Download from Supabase Storage
+    const { data: fileBlob, error: dlErr } = await supabase.storage.from(bucket || 'audio').download(filename);
+    if (dlErr || !fileBlob) return c.json({ error: `Download failed: ${dlErr?.message}` }, 500);
+
+    // Upload to AzuraCast
+    const azForm = new FormData();
+    const arrayBuffer = await fileBlob.arrayBuffer();
+    azForm.append('file', new Blob([arrayBuffer], { type: fileBlob.type || 'audio/mpeg' }), originalFilename || filename);
+
+    const azResp = await fetch(`${AZURA_URL}/api/station/${AZURA_STATION}/files`, {
+      method: 'POST',
+      headers: { 'X-API-Key': AZURA_KEY },
+      body: azForm,
+    });
+
+    if (!azResp.ok) {
+      const errText = await azResp.text();
+      return c.json({ error: `AzuraCast upload failed: ${azResp.status} - ${errText}` }, 500);
+    }
+
+    const azData = await azResp.json();
+    const azId = azData.id;
+    const title = azData.title || (originalFilename || filename).replace(/\.(mp3|wav|m4a|flac|ogg)$/i, '');
+    const artist = azData.artist || 'Unknown Artist';
+    const album = azData.album || '';
+    const genre = azData.genre || '';
+    const duration = Math.round(azData.length || 0);
+    const coverUrl = azData.art ? azData.art.replace('http://187.77.85.42', 'https://stream.soul-fm.com') : null;
+
+    const trackId = `az-${azId}`;
+    const { data: track, error: dbErr } = await supabase.from('tracks').upsert({
+      id: trackId, azuracast_id: azId,
+      title, artist, album, genre, duration,
+      cover_url: coverUrl, audio_url: AZURA_STREAM_URL,
+      storage_filename: azData.path || originalFilename || filename,
+      storage_bucket: 'azuracast',
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'id' }).select().single();
+
+    if (dbErr) console.error('[process] DB error:', dbErr.message);
+
+    // Clean up temp file from Supabase Storage
+    await supabase.storage.from(bucket || 'audio').remove([filename]).catch(() => {});
+
+    return c.json({
+      track: track || { id: trackId, title, artist, album, duration },
+      metadata: { title, artist, album, genre, duration, coverUrl },
+      shortId: trackId, streamUrl: AZURA_STREAM_URL, audioUrl: AZURA_STREAM_URL, azuracastId: azId,
+    });
+  } catch (e: any) { return c.json({ error: e.message }, 500); }
+});
+
 app.get("/make-server-06086aa3/tracks", async (c) => {
   try {
     const { data, error } = await supabase.from('tracks').select('*').order('created_at', { ascending: false });
