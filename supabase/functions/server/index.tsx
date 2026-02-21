@@ -17,9 +17,9 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey);
 app.use('*', cors({ origin: '*', allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], allowHeaders: ['*'] }));
 
 // ── AzuraCast constants ──
-const AZURA_URL = 'http://187.77.85.42';
+const AZURA_URL = 'https://stream.soul-fm.com';
 const AZURA_STATION = '1';
-const AZURA_STREAM_URL = 'http://187.77.85.42/listen/soul_fm_/radio.mp3';
+const AZURA_STREAM_URL = 'https://stream.soul-fm.com/listen/soul_fm_/radio.mp3';
 const AZURA_KEY = Deno.env.get('AZURACAST_API_KEY') || '129fb7c30b2b9314:2169c875e9c0f0abc7e170697960fa0e';
 const azuraHeaders = () => ({ 'X-API-Key': AZURA_KEY, 'Content-Type': 'application/json', 'Accept': 'application/json' });
 const _sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
