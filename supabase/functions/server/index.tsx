@@ -20,8 +20,9 @@ app.use('*', cors({ origin: '*', allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 
 const AZURA_URL = 'https://stream.soul-fm.com';
 const AZURA_STATION = '1';
 const AZURA_STREAM_URL = 'https://stream.soul-fm.com/listen/soul_fm_/radio.mp3';
-const AZURA_KEY = Deno.env.get('AZURACAST_API_KEY') || '129fb7c30b2b9314:2169c875e9c0f0abc7e170697960fa0e';
-const azuraHeaders = () => ({ 'X-API-Key': AZURA_KEY, 'Content-Type': 'application/json', 'Accept': 'application/json' });
+const AZURA_KEY = (Deno.env.get('AZURACAST_API_KEY') || '129fb7c30b2b9314:2169c875e9c0f0abc7e170697960fa0e').replace(/[^\x20-\x7E]/g, '').trim();
+const azuraHeaders = () => ({ 'X-API-Key': AZURA_KEY, 'Accept': 'application/json' });
+const azuraPostHeaders = () => ({ 'X-API-Key': AZURA_KEY, 'Content-Type': 'application/json', 'Accept': 'application/json' });
 const _sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 // ── SQL helpers ──
@@ -170,7 +171,7 @@ app.post("/make-server-06086aa3/radio/stop", requireAdminPin, async (c) => {
 
 app.post("/make-server-06086aa3/radio/next", requireAdminPin, async (c) => {
   try {
-    const skipResp = await fetch(`${AZURA_URL}/api/station/${AZURA_STATION}/backend/skip`, { method: 'POST', headers: azuraHeaders() });
+    const skipResp = await fetch(`${AZURA_URL}/api/station/${AZURA_STATION}/backend/skip`, { method: 'POST', headers: azuraPostHeaders() });
     if (!skipResp.ok) console.warn('[next] skip failed:', skipResp.status);
     await _sleep(1500);
 
@@ -204,7 +205,7 @@ app.get("/make-server-06086aa3/radio/status", async (c) => {
     ]);
     const nowPlaying = azNP?.now_playing;
     const song = nowPlaying?.song;
-    const isPlaying = sqlStatus?.status === 'online' || autoDJState.isPlaying;
+    const isPlaying = azNP?.is_online || sqlStatus?.status === 'online' || sqlStatus?.status === 'live' || autoDJState.isPlaying;
     const currentTrack = song ? { id: `az-${song.id || 'live'}`, title: song.title, artist: song.artist, album: song.album || '', duration: nowPlaying?.duration || 180, coverUrl: song.art || null } : autoDJState.currentTrack;
     const elapsed = nowPlaying?.elapsed || 0;
     return c.json({
@@ -222,7 +223,7 @@ app.get("/make-server-06086aa3/radio/current-stream", async (c) => {
       fetch(`${AZURA_URL}/api/nowplaying/${AZURA_STATION}`, { headers: azuraHeaders() }).then(r => r.json()).catch(() => null),
       getStreamState('status'),
     ]);
-    const isOnline = sqlStatus?.status === 'online' || autoDJState.isPlaying;
+    const isOnline = azNP?.is_online || sqlStatus?.status === 'online' || sqlStatus?.status === 'live' || autoDJState.isPlaying;
     if (!isOnline) return c.json({ playing: false, message: 'Auto DJ is not running' }, 200);
     const nowPlaying = azNP?.now_playing;
     const song = nowPlaying?.song;
@@ -236,7 +237,7 @@ app.get("/make-server-06086aa3/radio/current-stream", async (c) => {
 app.get("/make-server-06086aa3/radio/queue", async (c) => {
   try {
     const [sqlStatus, scheduled] = await Promise.all([getStreamState('status'), getCurrentScheduledPlaylist().catch(() => null)]);
-    const isOnline = sqlStatus?.status === 'online' || autoDJState.isPlaying;
+    const isOnline = true; // AzuraCast always streams - queue always available
     if (!isOnline) return c.json({ queue: [], currentIndex: 0, totalTracks: 0 });
     const playlistId = scheduled?.playlistId || 'pl-az-6';
     const { data: playlist } = await supabase.from('playlists').select('track_ids').eq('id', playlistId).single();
@@ -416,7 +417,7 @@ app.put("/make-server-06086aa3/azuracast/playlists/:id/tracks", requireAdminPin,
       const currentPlaylists: number[] = (fileData.playlists || []).map((p: any) => typeof p === 'object' ? p.id : p);
       if (!currentPlaylists.includes(playlistId)) currentPlaylists.push(playlistId);
       const putR = await fetch(`${AZURA_URL}/api/station/${AZURA_STATION}/file/${mediaId}`, {
-        method: 'PUT', headers: azuraHeaders(),
+        method: 'PUT', headers: azuraPostHeaders(),
         body: JSON.stringify({ ...fileData, playlists: currentPlaylists }),
       });
       return putR.ok;
@@ -449,6 +450,32 @@ app.get("/make-server-06086aa3/dashboard/stats", async (c) => {
 
 // Health check
 app.get("/make-server-06086aa3/health", (c) => c.json({ ok: true, version: 'lean-sql' }));
+
+// Debug: test AzuraCast connectivity from Edge Function
+app.get("/make-server-06086aa3/debug/azuracast", async (c) => {
+  const keyRaw = Deno.env.get('AZURACAST_API_KEY') || '';
+  const keyClean = keyRaw.replace(/[^\x20-\x7E]/g, '').trim();
+  const results: any = { keyLength: keyRaw.length, keyCleanLength: keyClean.length };
+
+  // Test 1: no headers
+  try {
+    const r = await fetch(`${AZURA_URL}/api/nowplaying/${AZURA_STATION}`, { signal: AbortSignal.timeout(8000) });
+    results.noHeaders = { status: r.status, ok: r.ok };
+    if (r.ok) { const j = await r.json(); results.noHeaders.is_online = j?.is_online; }
+  } catch (e: any) { results.noHeaders = { error: e.message }; }
+
+  // Test 2: with cleaned key
+  try {
+    const r = await fetch(`${AZURA_URL}/api/nowplaying/${AZURA_STATION}`, {
+      headers: { 'X-API-Key': keyClean, 'Accept': 'application/json' },
+      signal: AbortSignal.timeout(8000),
+    });
+    results.withKey = { status: r.status, ok: r.ok };
+    if (r.ok) { const j = await r.json(); results.withKey.is_online = j?.is_online; }
+  } catch (e: any) { results.withKey = { error: e.message }; }
+
+  return c.json({ azura_url: AZURA_URL, results });
+});
 
 console.log('🎵 Soul FM Hub (lean) ready!');
 Deno.serve(app.fetch);
