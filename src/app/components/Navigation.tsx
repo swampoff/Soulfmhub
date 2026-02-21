@@ -10,7 +10,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from './ui/dropdown-menu';
-import { SOUL_FM_LOGO } from '../../lib/assets';
+import { SoulFMLogo } from './SoulFMLogo';
 import { RealtimeConnectionStatus } from './RealtimeConnectionStatus';
 
 export function Navigation() {
@@ -46,10 +46,8 @@ export function Navigation() {
           {/* Logo */}
           <Link to="/" className="flex items-center gap-3 group">
             <div className="relative w-12 h-12 rounded-full overflow-hidden bg-gradient-to-br from-[#0a1628] to-[#0d2435] p-1.5 shadow-lg border-2 border-[#00d9ff]/30 group-hover:border-[#00d9ff]/60 transition-all">
-              <img 
-                src={SOUL_FM_LOGO} 
-                alt="Soul FM" 
-                className="w-full h-full object-cover rounded-full"
+              <SoulFMLogo
+                className="w-full h-full rounded-full"
                 style={{
                   filter: 'drop-shadow(0 0 8px rgba(0, 217, 255, 0.5))'
                 }}

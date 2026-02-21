@@ -17,7 +17,7 @@ import {
   Linkedin,
   Github
 } from 'lucide-react';
-import { SOUL_FM_LOGO } from '../../lib/assets';
+import { SoulFMLogo } from './SoulFMLogo';
 import { AnimatedBeach } from './AnimatedBeach';
 import { AnimatedWaves } from './AnimatedWaves';
 
@@ -184,10 +184,8 @@ export function Footer() {
                   }}
                 >
                   <div className="w-full h-full rounded-full bg-[#0a1628] p-1">
-                    <img 
-                      src={SOUL_FM_LOGO}
-                      alt="Soul FM Hub"
-                      className="w-full h-full rounded-full object-cover"
+                    <SoulFMLogo
+                      className="w-full h-full rounded-full"
                     />
                   </div>
                 </motion.div>

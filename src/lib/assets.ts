@@ -1,10 +1,12 @@
 // ── Static Asset Paths ──────────────────────────────────────────────
 // Production: soul-fm.com on Vercel
 //
-// Logo:  SVG in /public/assets/soul-fm-logo.svg
+// Logo:  Inline SVG component (SoulFMLogo) preferred over <img> tag.
+//        The <img> path is kept for rare cases but won't render Righteous font.
 // Team:  Unsplash CDN (replace with your own hosted photos later)
 // ─────────────────────────────────────────────────────────────────────
 
+/** @deprecated Use `<SoulFMLogo />` component instead — it renders inline SVG with proper font access */
 export const SOUL_FM_LOGO = '/assets/soul-fm-logo.svg';
 
 export const TEAM_PHOTOS: Record<string, string> = {

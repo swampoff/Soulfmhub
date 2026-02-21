@@ -1,5 +1,6 @@
 import { Home, Radio, ArrowLeft, Headphones, Music } from 'lucide-react';
 import { motion } from 'motion/react';
+import { Link } from 'react-router';
 
 export function NotFoundPage() {
   return (
@@ -62,17 +63,13 @@ export function NotFoundPage() {
           transition={{ delay: 0.3 }}
           className="flex flex-col sm:flex-row gap-3 justify-center"
         >
-          <Link to="/">
-            <Button className="bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] text-slate-900 font-bold gap-2 w-full sm:w-auto">
-              <Home className="w-4 h-4" />
-              Back to Home
-            </Button>
+          <Link to="/" className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-[#00d9ff] to-[#00ffaa] text-slate-900 font-bold hover:opacity-90 transition-opacity w-full sm:w-auto">
+            <Home className="w-4 h-4" />
+            Back to Home
           </Link>
-          <Link to="/schedule">
-            <Button variant="outline" className="border-white/10 text-white/70 hover:text-white gap-2 w-full sm:w-auto">
-              <Radio className="w-4 h-4" />
-              View Schedule
-            </Button>
+          <Link to="/schedule" className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl border border-white/10 text-white/70 hover:text-white hover:border-white/20 transition-colors w-full sm:w-auto">
+            <Radio className="w-4 h-4" />
+            View Schedule
           </Link>
         </motion.div>
 

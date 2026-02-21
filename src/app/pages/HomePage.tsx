@@ -6,7 +6,7 @@ import { Play } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { api } from '../../lib/api';
 import { motion, AnimatePresence } from 'motion/react';
-import { SOUL_FM_LOGO } from '../../lib/assets';
+import { SoulFMLogo } from '../components/SoulFMLogo';
 import { FloatingParticles } from '../components/FloatingParticles';
 import { AnimatedBeach } from '../components/AnimatedBeach';
 import { AnimatedWaves } from '../components/AnimatedWaves';
@@ -120,7 +120,7 @@ export function HomePage() {
                 }}
                 transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
               >
-                <img src={SOUL_FM_LOGO} alt="Soul FM" className="w-40 h-40 md:w-52 md:h-52 rounded-full" />
+                <SoulFMLogo className="w-40 h-40 md:w-52 md:h-52 rounded-full" />
               </motion.div>
 
               {/* Animated play ring */}
@@ -246,12 +246,12 @@ export function HomePage() {
         />
       </div>
 
-      {/* ON AIR NOW Badge */}
+      {/* ON AIR NOW Badge — shows real show/track from Auto DJ */}
       <motion.div
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.7, ease: [0.4, 0, 0.2, 1] }}
-        className="container mx-auto px-4 pt-8 flex justify-center"
+        className="container mx-auto px-4 pt-8 flex flex-col items-center gap-2"
       >
         <Badge className="bg-[#00d9ff]/10 text-[#00d9ff] border border-[#00d9ff]/30 gap-3 px-6 py-2.5 text-sm backdrop-blur-sm">
           <motion.span 
@@ -267,8 +267,27 @@ export function HomePage() {
             }}
           />
           <span className="font-semibold">ON AIR NOW</span>
-          <span className="text-[#00d9ff]/80">• {nowPlaying?.show?.name || 'The Sunday Soul Session'}</span>
+          <span className="text-[#00d9ff]/80">• {nowPlaying?.show?.name || (streamOnline ? 'Auto DJ' : 'Offline')}</span>
         </Badge>
+
+        {/* Currently playing track */}
+        <AnimatePresence mode="wait">
+          {nowPlaying?.track && (
+            <motion.div
+              key={nowPlaying.track.id || nowPlaying.track.title}
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 8 }}
+              transition={{ duration: 0.5, ease: [0.4, 0, 0.2, 1] }}
+              className="flex items-center gap-2 text-xs text-white/50"
+            >
+              <span className="text-[#00ffaa]/70">♪</span>
+              <span className="truncate max-w-[280px] sm:max-w-[400px]">
+                {nowPlaying.track.title}{nowPlaying.track.artist ? ` — ${nowPlaying.track.artist}` : ''}
+              </span>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </motion.div>
 
       {/* Main Content */}
@@ -405,10 +424,8 @@ export function HomePage() {
               >
                 {/* Круглый контейнер для логотипа */}
                 <div className="relative w-72 h-72 md:w-80 md:h-80 rounded-full overflow-hidden bg-gradient-to-br from-[#0a1628] to-[#0d2435] p-4 shadow-2xl">
-                  <img 
-                    src={SOUL_FM_LOGO} 
-                    alt="Soul FM" 
-                    className="w-full h-full object-cover rounded-full"
+                  <SoulFMLogo
+                    className="w-full h-full rounded-full"
                     style={{
                       filter: 'drop-shadow(0 0 30px rgba(0, 217, 255, 0.8)) drop-shadow(0 0 60px rgba(0, 255, 170, 0.5))',
                     }}

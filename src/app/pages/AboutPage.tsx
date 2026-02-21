@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useNavigate } from 'react-router';
-import { SOUL_FM_LOGO } from '../../lib/assets';
+import { SoulFMLogo } from '../components/SoulFMLogo';
 import { AnimatedPalm } from '../components/AnimatedPalm';
 
 export function AboutPage() {
@@ -165,10 +165,8 @@ export function AboutPage() {
                     }}
                     className="relative w-40 h-40 rounded-full overflow-hidden bg-gradient-to-br from-[#0a1628] to-[#0d2435] p-3 shadow-2xl"
                   >
-                    <img
-                      src={SOUL_FM_LOGO}
-                      alt="Soul FM Hub"
-                      className="w-full h-full object-cover rounded-full"
+                    <SoulFMLogo
+                      className="w-full h-full rounded-full"
                       style={{
                         filter: 'drop-shadow(0 0 20px rgba(0, 217, 255, 0.8)) drop-shadow(0 0 40px rgba(0, 255, 170, 0.5))',
                       }}

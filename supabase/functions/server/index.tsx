@@ -104,27 +104,23 @@ async function initializeStorageBuckets() {
 // Enable logger
 app.use('*', logger(console.log));
 
-// Enable CORS — restricted to production domain and Vercel previews
+// Enable CORS — accept all origins for reliability.
+// Security is enforced by requireAuth middleware + admin PIN system.
+// Restrictive origin whitelisting caused "Failed to fetch" errors in
+// preview environments (Figma Make, Vercel deploy previews, etc.)
+// whose sandbox domains don't always match a static whitelist.
+//
+// To tighten for production, replace `origin` with a function that
+// checks against ['https://soul-fm.com', '*.vercel.app', '*.figma.site'].
 app.use(
   "/*",
   cors({
-    origin: (origin) => {
-      if (!origin) return 'https://soul-fm.com'; // non-browser / same-origin
-      const allowed = [
-        'https://soul-fm.com',
-        'https://www.soul-fm.com',
-      ];
-      if (allowed.includes(origin)) return origin;
-      // Allow Vercel preview deployments
-      if (origin.endsWith('.vercel.app')) return origin;
-      // Allow local dev
-      if (origin.startsWith('http://localhost:')) return origin;
-      return 'https://soul-fm.com'; // deny by not matching
-    },
+    origin: (origin) => origin || '*',
     allowHeaders: ["Content-Type", "Authorization", "apikey", "x-client-info"],
     allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     exposeHeaders: ["Content-Length"],
     maxAge: 600,
+    credentials: false,
   }),
 );
 
@@ -470,6 +466,10 @@ async function loadAutoDJStateLight(retries = 2): Promise<any> {
         autoDJState.isPlayingJingle       = saved.isPlayingJingle ?? false;
         // Store track count from IDs without loading full objects
         (autoDJState as any)._totalTrackCount = saved.playlistTrackIds?.length ?? autoDJState.playlistTracks.length;
+        // Restore schedule slot so nowplaying can include show name
+        if (saved.activeScheduleSlot) {
+          (autoDJState as any).activeScheduleSlot = saved.activeScheduleSlot;
+        }
       }
       return saved;
     } catch (e: any) {
@@ -501,6 +501,10 @@ async function loadAutoDJState(retries = 2) {
         autoDJState.listeners             = saved.listeners ?? 0;
         autoDJState.autoAdvance           = saved.autoAdvance ?? true;
         autoDJState.isPlayingJingle       = saved.isPlayingJingle ?? false;
+        // Restore schedule slot for show name reporting
+        if (saved.activeScheduleSlot) {
+          (autoDJState as any).activeScheduleSlot = saved.activeScheduleSlot;
+        }
 
         // Restore playlist from stored IDs (if in-memory list is empty)
         if (autoDJState.playlistTracks.length === 0 && saved.playlistTrackIds?.length > 0) {
@@ -554,6 +558,8 @@ async function saveAutoDJState(retries = 2) {
     listeners:             autoDJState.listeners,
     autoAdvance:           autoDJState.autoAdvance,
     isPlayingJingle:       autoDJState.isPlayingJingle,
+    // Schedule slot — survives cold starts so nowplaying can report the show name
+    activeScheduleSlot:    (autoDJState as any).activeScheduleSlot || null,
   };
 
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -1750,6 +1756,7 @@ app.post("/make-server-06086aa3/radio/stop", requireAuth, async (c) => {
     autoDJState.playlistTracks = [];
     autoDJState.startTime = null;
     autoDJState.currentTrackStartTime = null;
+    (autoDJState as any).activeScheduleSlot = null;
     await saveAutoDJState();
 
     await kv.set('stream:status', {
@@ -2020,6 +2027,27 @@ app.get("/make-server-06086aa3/radio/status", async (c) => {
         ...nowPlaying,
         track: { ...nowPlaying.track, cover: freshCoverUrl },
       };
+    }
+
+    // Enrich nowPlaying with show info (schedule slot or Auto DJ)
+    if (nowPlayingResponse && !nowPlayingResponse.show) {
+      const slot = (autoDJState as any).activeScheduleSlot;
+      if (slot) {
+        nowPlayingResponse = {
+          ...nowPlayingResponse,
+          show: {
+            id: slot.id || 'schedule',
+            name: slot.title || slot.playlistName || 'Live Show',
+            host: slot.djName || 'Auto DJ',
+            isLive: true,
+          },
+        };
+      } else if (isPlayingFinal) {
+        nowPlayingResponse = {
+          ...nowPlayingResponse,
+          show: { id: 'autodj', name: 'Auto DJ', host: 'Soul FM', isLive: false },
+        };
+      }
     }
 
     // Calculate track progress
@@ -2479,11 +2507,36 @@ app.delete("/make-server-06086aa3/radio/listener", async (c) => {
 
 // ==================== NOW PLAYING / STREAM STATUS ====================
 
-// Get current playing track
+// Get current playing track — enriched with show/schedule info
 app.get("/make-server-06086aa3/stream/nowplaying", async (c) => {
   try {
     const nowPlaying = await kv.get('stream:nowplaying');
     const streamStatus = await kv.get('stream:status');
+
+    // Enrich with show info if Auto DJ is running but `show` was never set.
+    // Uses the persisted activeScheduleSlot (survives cold starts).
+    if (nowPlaying && !nowPlaying.show) {
+      try {
+        await loadAutoDJStateLight();
+        const slot = (autoDJState as any).activeScheduleSlot;
+        const isOnline = streamStatus?.status === 'online' || autoDJState.isPlaying;
+        if (slot) {
+          nowPlaying.show = {
+            id: slot.id || 'schedule',
+            name: slot.title || slot.playlistName || 'Live Show',
+            host: slot.djName || 'Auto DJ',
+            isLive: true,
+          };
+        } else if (isOnline) {
+          nowPlaying.show = {
+            id: 'autodj',
+            name: 'Auto DJ',
+            host: 'Soul FM',
+            isLive: false,
+          };
+        }
+      } catch { /* non-critical enrichment */ }
+    }
     
     return c.json({ 
       nowPlaying: nowPlaying || null,

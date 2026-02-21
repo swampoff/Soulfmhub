@@ -36,7 +36,7 @@ import {
   ShoppingBag,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { SOUL_FM_LOGO } from '../../../lib/assets';
+import { SoulFMLogo } from '../SoulFMLogo';
 import { useApp } from '../../../context/AppContext';
 import { supabase } from '../../../lib/supabase';
 
@@ -260,11 +260,8 @@ export function AdminLayout({ children, maxWidth = 'default' }: AdminLayoutProps
             >
               <div className="relative w-10 h-10 sm:w-12 sm:h-12 lg:w-14 lg:h-14 rounded-full bg-gradient-to-br from-[#00d9ff] to-[#00ffaa] p-0.5 hover:scale-110 transition-transform duration-300">
                 <div className="w-full h-full rounded-full bg-[#0a0a0a] flex items-center justify-center overflow-hidden">
-                  <img
-                    src={SOUL_FM_LOGO}
-                    alt="Soul FM"
-                    className="w-full h-full object-cover rounded-full"
-                    style={{ filter: 'drop-shadow(0 0 8px rgba(0, 217, 255, 0.4))' }}
+                  <SoulFMLogo
+                    className="w-full h-full rounded-full"
                   />
                 </div>
               </div>

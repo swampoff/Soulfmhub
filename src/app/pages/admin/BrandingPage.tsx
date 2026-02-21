@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '../../../lib/api';
-import { SOUL_FM_LOGO } from '../../../lib/assets';
+import { SoulFMLogo } from '../../components/SoulFMLogo';
 
 interface BrandSettings {
   stationName: string;
@@ -299,7 +299,7 @@ export function BrandingPage() {
                 style={{ backgroundColor: settings.bgDark }}
               >
                 <div className="flex items-center gap-3 mb-3">
-                  <img src={SOUL_FM_LOGO} alt="Logo" className="w-10 h-10 rounded-full" />
+                  <SoulFMLogo className="w-10 h-10 rounded-full" />
                   <div>
                     <div className="font-bold text-sm" style={{ fontFamily: `${settings.fontDisplay}, cursive`, color: settings.primaryColor }}>
                       {settings.stationName}

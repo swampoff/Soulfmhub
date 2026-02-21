@@ -26,6 +26,29 @@ function isJwtOnCooldown(): boolean {
   return Date.now() < jwtCooldownUntil;
 }
 
+// ── Server-reachability tracking ─────────────────────────────────────
+// After repeated network failures ("Failed to fetch"), we suppress further
+// retries for a cooldown period to avoid flooding the console and UI with
+// errors.  A successful request resets the flag instantly.
+let serverUnreachableUntil = 0;
+const SERVER_COOLDOWN_MS = 30_000; // 30 s
+
+function markServerUnreachable() {
+  serverUnreachableUntil = Date.now() + SERVER_COOLDOWN_MS;
+  console.warn(`[API] Server marked unreachable for ${SERVER_COOLDOWN_MS / 1000}s`);
+}
+
+function markServerReachable() {
+  if (serverUnreachableUntil > 0) {
+    console.log('[API] Server is reachable again');
+    serverUnreachableUntil = 0;
+  }
+}
+
+export function isServerReachable(): boolean {
+  return Date.now() >= serverUnreachableUntil;
+}
+
 // ── Retry-aware fetch (handles cold-start / transient failures) ──────
 //
 // Supabase Edge Functions gateway requires authentication via EITHER:
@@ -44,10 +67,14 @@ function isJwtOnCooldown(): boolean {
 async function fetchWithRetry(
   input: RequestInfo | URL,
   init?: RequestInit,
-  retries = 4,
-  backoff = 2000,
-  timeoutMs = 30000,
+  retries = 3,
+  backoff = 1500,
+  timeoutMs = 25000,
 ): Promise<Response> {
+  // If the server was recently unreachable, fail fast
+  if (!isServerReachable()) {
+    throw new Error('Server unreachable (cooldown active — will retry automatically)');
+  }
   // `apikey` — required by the Supabase gateway for project routing.
   // `Authorization` — fallback to anon key; callers may override with a session JWT.
   const defaultHeaders: Record<string, string> = {
@@ -112,21 +139,27 @@ async function fetchWithRetry(
           );
         }
       } as any;
+      // Server responded — mark reachable
+      markServerReachable();
       return response;
     } catch (err: any) {
       lastError = err;
       const reason = err?.name === 'AbortError' ? `timeout after ${timeoutMs}ms` : (err?.message || err);
-      console.warn(
-        `[API] Fetch attempt ${attempt + 1}/${retries} failed:`,
-        reason,
-      );
+      // Only log on first and last attempt to reduce console spam
+      if (attempt === 0 || attempt === retries - 1) {
+        console.warn(
+          `[API] Fetch attempt ${attempt + 1}/${retries} failed:`,
+          reason,
+        );
+      }
       if (attempt < retries - 1) {
         const delay = backoff * (attempt + 1);
-        console.log(`[API] Retrying in ${delay}ms...`);
         await new Promise((r) => setTimeout(r, delay));
       }
     }
   }
+  // All retries exhausted — mark server unreachable to prevent further spam
+  markServerUnreachable();
   throw lastError ?? new Error('Fetch failed after retries');
 }
 
@@ -282,13 +315,15 @@ export const api = {
 
   async getProfile() {
     const headers = await getAuthHeaders();
-    const response = await fetchWithRetry(`${API_BASE}/auth/profile`, { headers });
+    // Profile check — fewer retries since it's called on every auth change
+    const response = await fetchWithRetry(`${API_BASE}/auth/profile`, { headers }, 2, 1000, 12000);
     return response.json();
   },
 
   // Stream
   async getNowPlaying() {
-    const response = await fetchWithRetry(`${API_BASE}/stream/nowplaying`);
+    // Lightweight polling endpoint — fewer retries, shorter timeout
+    const response = await fetchWithRetry(`${API_BASE}/stream/nowplaying`, undefined, 2, 1000, 12000);
     return response.json();
   },
 
@@ -1136,7 +1171,8 @@ export const api = {
 
   // Get current stream info with signed audio URL for direct playback
   async getCurrentStream() {
-    const response = await fetchWithRetry(`${API_BASE}/radio/current-stream`);
+    // Player-critical but called frequently — 2 retries, shorter timeout
+    const response = await fetchWithRetry(`${API_BASE}/radio/current-stream`, undefined, 2, 1500, 15000);
     return response.json();
   },
 

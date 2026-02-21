@@ -1,3 +1,28 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  Radio,
+  Mic2,
+  Megaphone,
+  Headphones,
+  TrendingUp,
+  Sliders,
+  PenTool,
+  Music,
+  Volume2,
+  Bell,
+  Newspaper,
+  Podcast,
+  Wifi,
+  Calendar,
+  Circle,
+  ChevronUp,
+  ChevronDown,
+  Loader2,
+  RefreshCw,
+  Clapperboard,
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { toast } from 'sonner';
 import { api } from '../../../lib/api';
 import { AdminLayout } from '../../components/admin/AdminLayout';
 import { TEAM_PHOTOS } from '../../../lib/assets';

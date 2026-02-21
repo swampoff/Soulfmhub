@@ -4,10 +4,15 @@ import { Button } from './ui/button';
 import { Slider } from './ui/slider';
 import { useApp } from '../../context/AppContext';
 import { motion, AnimatePresence } from 'motion/react';
-import { SOUL_FM_LOGO } from '../../lib/assets';
+import { SoulFMLogo } from './SoulFMLogo';
 import { RealtimeIndicator } from './RealtimeIndicator';
-import { api } from '../../lib/api';
+import { api, isServerReachable } from '../../lib/api';
 import { supabase } from '../../lib/supabase';
+
+// ── Direct AzuraCast stream fallback ────────────────────────────────
+// When the Supabase Edge Function is unreachable, we fall back to the
+// real AzuraCast HTTPS stream so listeners can still hear audio.
+const AZURACAST_DIRECT_STREAM = 'https://stream.soul-fm.com/soulfm';
 
 // =====================================================================
 //  INTERNAL AUTO DJ STREAM PLAYER  —  Crossfade Engine
@@ -524,6 +529,32 @@ export function RadioPlayer() {
   // Assigned to ref each render so startPlayback's onEnded closure always gets the latest version
   hardLoadNextRef.current = async () => {
     const stream = await fetchCurrentStream();
+    if (!stream) {
+      // Server completely unreachable — fall back to direct AzuraCast stream
+      console.warn('[Player] hardLoadNext: server unreachable — switching to direct stream');
+      setIcecastMode(true);
+      setIcecastUrl(AZURACAST_DIRECT_STREAM);
+
+      // Stop crossfade engine decks (prevents ghost audio from previous session)
+      deckARef.current?.audio.pause();
+      deckBRef.current?.audio.pause();
+      if (crossfadeTimerRef.current) clearTimeout(crossfadeTimerRef.current);
+      crossfadingRef.current = false;
+      setCrossfadeActive(false);
+
+      if (!icecastAudioRef.current) {
+        icecastAudioRef.current = new Audio();
+        icecastAudioRef.current.preload = 'none';
+      }
+      const ice = icecastAudioRef.current;
+      ice.volume = masterVolume.current;
+      ice.src = `${AZURACAST_DIRECT_STREAM}?_t=${Date.now()}`;
+      ice.oncanplay = () => { setIsBuffering(false); setConnectionStatus('connected'); };
+      ice.onplaying = () => { setIsBuffering(false); setConnectionStatus('connected'); };
+      ice.onerror = () => { setConnectionStatus('error'); setIsBuffering(false); };
+      try { await ice.play(); } catch { /* will retry */ }
+      return;
+    }
     if (!stream?.playing) {
       setConnectionStatus('offline');
       setIsPlaying(false);
@@ -574,10 +605,53 @@ export function RadioPlayer() {
 
         const state = await fetchCurrentStream();
         if (!state) {
-          // Server unreachable — don't crash, show offline
-          console.warn('[Player] Could not reach server — showing offline');
-          setConnectionStatus('offline');
-          setIsBuffering(false);
+          // Server unreachable — fall back to direct AzuraCast stream
+          console.warn('[Player] Server unreachable — falling back to direct AzuraCast stream');
+          setIcecastMode(true);
+          setIcecastUrl(AZURACAST_DIRECT_STREAM);
+
+          // Defensive: stop crossfade engine decks if they were lingering from a previous session
+          deckARef.current?.audio.pause();
+          deckBRef.current?.audio.pause();
+          if (crossfadeTimerRef.current) clearTimeout(crossfadeTimerRef.current);
+          crossfadingRef.current = false;
+          setCrossfadeActive(false);
+
+          setStreamState({
+            playing: true,
+            track: { id: 'azuracast-fallback', title: 'Soul FM', artist: 'Live Stream', duration: 0 },
+            audioUrl: null,
+            seekPosition: 0,
+            remainingSeconds: 0,
+            startedAt: new Date().toISOString(),
+            jingleUrl: null,
+            nextTrack: null,
+            crossfadeDuration: 0,
+            listeners: 0,
+          });
+          // Play AzuraCast directly
+          if (!icecastAudioRef.current) {
+            icecastAudioRef.current = new Audio();
+            icecastAudioRef.current.preload = 'none';
+          }
+          const ice = icecastAudioRef.current;
+          ice.volume = masterVolume.current;
+          ice.oncanplay = () => { setIsBuffering(false); setConnectionStatus('connected'); };
+          ice.onplaying = () => { setIsBuffering(false); setConnectionStatus('connected'); };
+          ice.onwaiting = () => setIsBuffering(true);
+          ice.onerror = () => {
+            console.warn('[Player] Direct AzuraCast stream also failed');
+            setConnectionStatus('error');
+            setIsBuffering(false);
+          };
+          ice.src = `${AZURACAST_DIRECT_STREAM}?_t=${Date.now()}`;
+          try { await ice.play(); } catch (e: any) {
+            if (e.name !== 'AbortError') {
+              console.error('[Player] Direct stream play() failed:', e);
+              setConnectionStatus('error');
+              setIsBuffering(false);
+            }
+          }
           return;
         }
         if (!state.playing) {
@@ -960,10 +1034,8 @@ export function RadioPlayer() {
                     <img src={displayCover} alt={displayTrack?.title || ''} className="w-full h-full object-cover" />
                   ) : (
                     <div className="w-full h-full bg-gradient-to-br from-[#0a1628] to-[#0d2435] flex items-center justify-center p-2">
-                      <img
-                        src={SOUL_FM_LOGO}
-                        alt="Soul FM"
-                        className="w-full h-full object-cover rounded-full"
+                      <SoulFMLogo
+                        className="w-full h-full rounded-full"
                         style={{ filter: 'drop-shadow(0 0 8px rgba(0,217,255,.6))' }}
                       />
                     </div>

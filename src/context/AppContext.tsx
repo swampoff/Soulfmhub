@@ -1,6 +1,6 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
-import { api } from '../lib/api';
+import { api, isServerReachable } from '../lib/api';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 
 export type UserRole = 'listener' | 'super_admin';
@@ -79,7 +79,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [volume, setVolume] = useState(0.7);
 
+  // Track whether we've already logged the "server starting" message
+  const nowPlayingFailLoggedRef = useRef(false);
+
   const refreshNowPlaying = async () => {
+    // Skip if server was recently marked unreachable
+    if (!isServerReachable()) return;
     try {
       const data = await api.getNowPlaying();
       if (data?.nowPlaying) {
@@ -88,10 +93,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (data?.streamStatus) {
         setStreamStatus(data.streamStatus);
       }
+      nowPlayingFailLoggedRef.current = false; // reset on success
     } catch (error) {
-      // Silently handle — server may be cold-starting or offline
-      // Don't spam console on initial page load
-      console.warn('[AppContext] Now playing fetch failed (server may be starting)');
+      // Log only once per failure period to avoid console spam
+      if (!nowPlayingFailLoggedRef.current) {
+        console.warn('[AppContext] Now playing fetch failed (server may be starting)');
+        nowPlayingFailLoggedRef.current = true;
+      }
     }
   };
 
@@ -152,13 +160,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
             tokenOk = Date.now() < (payload.exp * 1000) - 10_000; // 10s margin
           } catch { /* malformed — not ok */ }
 
-          if (tokenOk) {
+          if (tokenOk && isServerReachable()) {
             api.getProfile().then((data) => {
               if (data.profile) {
                 setUser(data.profile);
               }
             }).catch((err) => {
-              console.error('[AppContext] Error loading profile:', err);
+              console.warn('[AppContext] Profile fetch failed (server may be starting)');
             });
           } else {
             // Token expired — try refreshing; if that fails, sign out
@@ -188,12 +196,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // Listen for auth changes
       const result = supabase.auth.onAuthStateChange((_event, session) => {
         if (session?.user) {
+          // Skip profile fetch if server is known to be unreachable
+          if (!isServerReachable()) {
+            console.warn('[AppContext] Skipping profile fetch — server unreachable');
+            return;
+          }
           api.getProfile().then((data) => {
             if (data.profile) {
               setUser(data.profile);
             }
           }).catch((err) => {
-            console.error('[AppContext] Error loading profile on auth change:', err);
+            console.warn('[AppContext] Profile fetch failed on auth change (server may be starting)');
           });
         } else {
           setUser(null);

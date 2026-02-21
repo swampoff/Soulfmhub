@@ -2,7 +2,7 @@ import React from 'react';
 import { AdminSetup } from '../components/AdminSetup';
 import { FloatingParticles } from '../components/FloatingParticles';
 import { AnimatedWaves } from '../components/AnimatedWaves';
-import { SOUL_FM_LOGO } from '../../lib/assets';
+import { SoulFMLogo } from '../components/SoulFMLogo';
 
 export function AdminSetupPage() {
   return (
@@ -14,9 +14,7 @@ export function AdminSetupPage() {
       {/* Content */}
       <div className="relative z-10 container mx-auto px-4 py-12">
         <div className="text-center mb-12">
-          <img 
-            src={SOUL_FM_LOGO} 
-            alt="Soul FM" 
+          <SoulFMLogo
             className="h-24 w-auto mx-auto mb-6"
             style={{
               filter: 'drop-shadow(0 0 30px rgba(0, 217, 255, 0.5))',
