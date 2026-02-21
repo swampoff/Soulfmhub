@@ -561,15 +561,17 @@ export function RadioPlayer() {
       return;
     }
 
-    // ── External track without audioUrl — backend is auto-advancing, retry after delay ──
-    if (stream.isExternal && !stream.audioUrl) {
-      console.log(`[Player] External track "${stream.track?.title}" — retrying in ${stream.retryAfterMs || 3000}ms`);
+    // ── Track without audioUrl — backend is auto-advancing, retry after delay ──
+    // Covers both external tracks (AzuraCast) and tracks with no audio file.
+    if (!stream.audioUrl && stream.playing) {
+      const retryMs = stream.retryAfterMs || 3000;
+      console.log(`[Player] No audioUrl for "${stream.track?.title}" (external=${!!stream.isExternal}) — retrying in ${retryMs}ms`);
       setStreamState(stream); // show track info in UI
       setConnectionStatus('connecting');
 
       // If backend returned an icecastUrl, switch to Icecast mode temporarily
       if (stream.icecastUrl) {
-        console.log('[Player] Falling back to AzuraCast stream while external track resolves');
+        console.log('[Player] Falling back to AzuraCast stream while track resolves');
         setIcecastMode(true);
         setIcecastUrl(stream.icecastUrl);
         if (!icecastAudioRef.current) {
@@ -584,7 +586,7 @@ export function RadioPlayer() {
       }
 
       // Retry after the suggested delay
-      setTimeout(() => hardLoadNextRef.current(), stream.retryAfterMs || 3000);
+      setTimeout(() => hardLoadNextRef.current(), retryMs);
       return;
     }
 
@@ -755,6 +757,18 @@ export function RadioPlayer() {
         }
         setIcecastMode(false);
         setIcecastUrl(null);
+
+        // Guard: if stream is playing but has no audioUrl (e.g. track without audio file),
+        // delegate to hardLoadNext which will retry and eventually get a playable track.
+        if (!state.audioUrl) {
+          console.log('[Player] Stream playing but no audioUrl — delegating to hardLoadNext retry');
+          setStreamState(state);
+          setIsBuffering(true);
+          setConnectionStatus('connecting');
+          hardLoadNextRef.current();
+          return;
+        }
+
         await startPlayback(state);
       })();
     } else {
@@ -862,9 +876,11 @@ export function RadioPlayer() {
       try {
         const stream = await fetchCurrentStream();
         if (!stream?.playing) return;
-        // Skip external tracks — the retry logic in hardLoadNext handles these
-        if (stream.isExternal && !stream.audioUrl) {
-          console.log('[Player] Poll: external track still pending, will retry via hardLoadNext');
+        // Skip tracks without audioUrl — the retry logic in hardLoadNext handles these
+        if (!stream.audioUrl) {
+          if (stream.playing) {
+            console.log('[Player] Poll: track without audioUrl, will resolve via hardLoadNext');
+          }
           return;
         }
         if (stream.track && stream.track.id !== currentTrackIdRef.current && !crossfadingRef.current) {

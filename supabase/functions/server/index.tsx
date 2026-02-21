@@ -2140,7 +2140,10 @@ app.get("/make-server-06086aa3/radio/current-stream", async (c) => {
     const filename = track.storageFilename;
 
     if (!filename) {
-      console.warn(`[current-stream] Track "${track.title}" (${track.id}) has no storageFilename`);
+      console.warn(`[current-stream] Track "${track.title}" (${track.id}) has no storageFilename — triggering async advance`);
+      // Fire-and-forget: advance to a playable track in the background
+      checkAndAdvanceTrack().catch(e => console.warn('[current-stream] async advance (no audio) error:', e?.message));
+
       // Still refresh cover URL even though there's no audio
       let noAudioCover = track.coverUrl || null;
       if (track.coverFilename && track.coverBucket) {
@@ -2149,7 +2152,7 @@ app.get("/make-server-06086aa3/radio/current-stream", async (c) => {
           if (fc) noAudioCover = fc;
         } catch (_) { /* non-critical */ }
       }
-      return c.json({ playing: true, error: 'Current track has no audio file', track: {
+      return c.json({ playing: true, error: 'Current track has no audio file', retryAfterMs: 3000, track: {
         id: track.id, title: track.title, artist: track.artist, album: track.album,
         duration: track.duration || 180, coverUrl: noAudioCover,
         isJingle: autoDJState.isPlayingJingle || false,
