@@ -264,15 +264,14 @@ app.post("/make-server-06086aa3/tracks/upload", requireAuth, async (c) => {
     const isAllowed = allowedTypes.includes(file.type) || /\.(mp3|wav|m4a|flac|ogg)$/i.test(file.name);
     if (!isAllowed) return c.json({ error: 'Invalid file type' }, 400);
 
-    // Upload to AzuraCast
-    const azForm = new FormData();
+    // Upload to AzuraCast (JSON + base64)
     const arrayBuffer = await file.arrayBuffer();
-    azForm.append('file', new Blob([arrayBuffer], { type: file.type || 'audio/mpeg' }), file.name);
+    const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
 
     const azResp = await fetch(`${AZURA_URL}/api/station/${AZURA_STATION}/files`, {
       method: 'POST',
-      headers: { 'X-API-Key': AZURA_KEY },
-      body: azForm,
+      headers: { ...azuraPostHeaders() },
+      body: JSON.stringify({ path: file.name, file: base64 }),
     });
 
     if (!azResp.ok) {
@@ -346,15 +345,15 @@ app.post("/make-server-06086aa3/tracks/process", requireAuth, async (c) => {
     const { data: fileBlob, error: dlErr } = await supabase.storage.from(bucket || 'audio').download(filename);
     if (dlErr || !fileBlob) return c.json({ error: `Download failed: ${dlErr?.message}` }, 500);
 
-    // Upload to AzuraCast
-    const azForm = new FormData();
+    // Upload to AzuraCast (JSON + base64)
     const arrayBuffer = await fileBlob.arrayBuffer();
-    azForm.append('file', new Blob([arrayBuffer], { type: fileBlob.type || 'audio/mpeg' }), originalFilename || filename);
+    const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+    const targetPath = originalFilename || filename;
 
     const azResp = await fetch(`${AZURA_URL}/api/station/${AZURA_STATION}/files`, {
       method: 'POST',
-      headers: { 'X-API-Key': AZURA_KEY },
-      body: azForm,
+      headers: { ...azuraPostHeaders() },
+      body: JSON.stringify({ path: targetPath, file: base64 }),
     });
 
     if (!azResp.ok) {
@@ -531,12 +530,11 @@ app.post("/make-server-06086aa3/azuracast/upload", requireAdminPin, async (c) =>
     const file = formData.get('file') as File;
     if (!file) return c.json({ error: 'No file provided' }, 400);
     const arrayBuffer = await file.arrayBuffer();
-    const form = new FormData();
-    form.append('file', new Blob([arrayBuffer], { type: file.type }), file.name);
+    const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
     const resp = await fetch(`${AZURA_URL}/api/station/${AZURA_STATION}/files`, {
       method: 'POST',
-      headers: { 'X-API-Key': AZURA_KEY },
-      body: form,
+      headers: { ...azuraPostHeaders() },
+      body: JSON.stringify({ path: file.name, file: base64 }),
     });
     if (!resp.ok) {
       const errText = await resp.text();
