@@ -19,6 +19,7 @@ app.use('*', cors({ origin: '*', allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 
 // ── AzuraCast constants ──
 const AZURA_URL = 'http://187.77.85.42';
 const AZURA_STATION = '1';
+const AZURA_STREAM_URL = 'http://187.77.85.42/listen/soul_fm_/radio.mp3';
 const AZURA_KEY = Deno.env.get('AZURACAST_API_KEY') || '129fb7c30b2b9314:2169c875e9c0f0abc7e170697960fa0e';
 const azuraHeaders = () => ({ 'X-API-Key': AZURA_KEY, 'Content-Type': 'application/json', 'Accept': 'application/json' });
 const _sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
@@ -151,7 +152,7 @@ app.post("/make-server-06086aa3/radio/start", requireAdminPin, async (c) => {
       source: sourceLabel, hasAudioFile: true,
       activeSchedule: scheduled ? { id: scheduled.id, title: scheduled.title, playlistName: scheduled.playlistName } : null,
       stream: {
-        playing: true, audioUrl: `${AZURA_URL}/radio.mp3`, seekPosition,
+        playing: true, audioUrl: AZURA_STREAM_URL, seekPosition,
         remainingSeconds: Math.max(0, (nowPlaying?.duration || 180) - seekPosition),
         track: { id: currentTrack.id, title: currentTrack.title, artist: currentTrack.artist, album: currentTrack.album, duration: currentTrack.duration || 180, coverUrl: currentTrack.coverUrl },
       },
@@ -189,7 +190,7 @@ app.post("/make-server-06086aa3/radio/next", requireAdminPin, async (c) => {
     });
     return c.json({
       message: 'Skipped to next track', currentTrack,
-      stream: { playing: true, audioUrl: `${AZURA_URL}/radio.mp3`, seekPosition, remainingSeconds: Math.max(0, (nowPlaying?.duration || 180) - seekPosition), track: currentTrack },
+      stream: { playing: true, audioUrl: AZURA_STREAM_URL, seekPosition, remainingSeconds: Math.max(0, (nowPlaying?.duration || 180) - seekPosition), track: currentTrack },
     });
   } catch (e: any) { return c.json({ error: e.message }, 500); }
 });
@@ -210,7 +211,7 @@ app.get("/make-server-06086aa3/radio/status", async (c) => {
       autoDJ: { isPlaying, currentTrack, totalTracks: 61, trackProgress: Math.min((elapsed / (nowPlaying?.duration || 180)) * 100, 100), elapsedSeconds: elapsed, autoAdvance: true, currentSchedule },
       nowPlaying: isPlaying ? { track: currentTrack, startTime: new Date(Date.now() - elapsed * 1000).toISOString(), updatedAt: new Date().toISOString() } : null,
       streamStatus: sqlStatus || { status: isPlaying ? 'online' : 'offline' },
-      streamUrl: `${AZURA_URL}/radio.mp3`, listeners: azNP?.listeners?.current || 0,
+      streamUrl: AZURA_STREAM_URL, listeners: azNP?.listeners?.current || 0,
     });
   } catch (e: any) { return c.json({ error: e.message }, 500); }
 });
@@ -228,7 +229,7 @@ app.get("/make-server-06086aa3/radio/current-stream", async (c) => {
     const seekPosition = nowPlaying?.elapsed || 0;
     const duration = nowPlaying?.duration || 180;
     const track = { id: `az-${song?.id || 'live'}`, title: song?.title || 'Soul FM Live', artist: song?.artist || 'Soul FM', album: song?.album || '', duration, coverUrl: song?.art || null, isJingle: false };
-    return c.json({ playing: true, track, audioUrl: `${AZURA_URL}/radio.mp3`, seekPosition, remainingSeconds: Math.max(0, duration - seekPosition), startedAt: new Date(Date.now() - seekPosition * 1000).toISOString(), crossfadeDuration: 5, listeners: azNP?.listeners?.current || 0, icecastUrl: `${AZURA_URL}/radio.mp3`, azuracastNowPlaying: song ? { title: song.title, artist: song.artist, art: song.art, duration, elapsed: seekPosition, remaining: Math.max(0, duration - seekPosition) } : null });
+    return c.json({ playing: true, track, audioUrl: AZURA_STREAM_URL, seekPosition, remainingSeconds: Math.max(0, duration - seekPosition), startedAt: new Date(Date.now() - seekPosition * 1000).toISOString(), crossfadeDuration: 5, listeners: azNP?.listeners?.current || 0, icecastUrl: AZURA_STREAM_URL, azuracastNowPlaying: song ? { title: song.title, artist: song.artist, art: song.art, duration, elapsed: seekPosition, remaining: Math.max(0, duration - seekPosition) } : null });
   } catch (e: any) { return c.json({ playing: false, error: e.message }, 500); }
 });
 
