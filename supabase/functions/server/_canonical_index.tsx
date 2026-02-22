@@ -609,7 +609,7 @@ const schedulePutHandler = async (c: any) => {
   try {
     const id = c.req.param('id');
     const body = await c.req.json();
-    const { data, error } = await supabase.from('schedules').update({ ...scheduleToDb(body), updated_at: new Date().toISOString() }).eq('id', id).select().single();
+    const { data, error } = await supabase.from('schedules').update(scheduleToDb(body)).eq('id', id).select().single();
     if (error) throw error;
     return c.json({ schedule: scheduleFromDb(data) });
   } catch (e: any) { return c.json({ error: e.message }, 500); }
