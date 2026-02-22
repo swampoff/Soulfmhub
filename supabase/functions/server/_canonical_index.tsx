@@ -568,12 +568,9 @@ function scheduleToDb(body: any): any {
   if (body.title !== undefined) d.title = body.title;
   if (body.isActive !== undefined) d.is_active = body.isActive;
   if (body.is_active !== undefined) d.is_active = body.is_active;
+  // repeat_weekly may exist — try to include it
   if (body.repeatWeekly !== undefined) d.repeat_weekly = body.repeatWeekly;
-  if (body.scheduleMode !== undefined) d.schedule_mode = body.scheduleMode;
-  if (body.scheduledDate !== undefined) d.scheduled_date = body.scheduledDate;
-  if (body.jingleConfig !== undefined) d.jingle_config = body.jingleConfig;
-  if (body.utcOffsetMinutes !== undefined) d.utc_offset_minutes = body.utcOffsetMinutes;
-  if (body.timezone !== undefined) d.timezone = body.timezone;
+  // schedule_mode, scheduled_date, jingle_config, utc_offset_minutes, timezone NOT in this DB schema — skip
   return d;
 }
 function scheduleFromDb(s: any): any {
