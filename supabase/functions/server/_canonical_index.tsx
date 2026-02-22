@@ -569,18 +569,34 @@ function scheduleToDb(body: any): any {
   if (body.isActive !== undefined) d.is_active = body.isActive;
   if (body.is_active !== undefined) d.is_active = body.is_active;
   if (body.repeatWeekly !== undefined) d.repeat_weekly = body.repeatWeekly;
+  if (body.scheduleMode !== undefined) d.schedule_mode = body.scheduleMode;
+  if (body.scheduledDate !== undefined) d.scheduled_date = body.scheduledDate;
+  if (body.jingleConfig !== undefined) d.jingle_config = body.jingleConfig;
   if (body.utcOffsetMinutes !== undefined) d.utc_offset_minutes = body.utcOffsetMinutes;
   if (body.timezone !== undefined) d.timezone = body.timezone;
   return d;
 }
 function scheduleFromDb(s: any): any {
-  return { ...s, playlistId: s.playlist_id, dayOfWeek: s.day_of_week, startTime: s.start_time, endTime: s.end_time, isActive: s.is_active, repeatWeekly: s.repeat_weekly };
+  return {
+    ...s,
+    playlistId: s.playlist_id,
+    dayOfWeek: s.day_of_week,
+    startTime: s.start_time,
+    endTime: s.end_time,
+    isActive: s.is_active,
+    repeatWeekly: s.repeat_weekly ?? false,
+    scheduleMode: s.schedule_mode || 'recurring',
+    scheduledDate: s.scheduled_date || null,
+    jingleConfig: s.jingle_config || null,
+    playlistName: s.playlists?.name || s.title || '',
+    playlistColor: s.playlists?.color || '#00d9ff',
+  };
 }
 
 // Frontend uses /schedule (singular) — register both singular and plural
 const scheduleGetHandler = async (c: any) => {
   try {
-    const { data, error } = await supabase.from('schedules').select('*, playlists(id, name)').order('start_time');
+    const { data, error } = await supabase.from('schedules').select('*, playlists(id, name, color)').order('start_time');
     if (error) throw error;
     return c.json({ schedules: (data || []).map(scheduleFromDb) });
   } catch (e: any) { return c.json({ error: e.message }, 500); }
