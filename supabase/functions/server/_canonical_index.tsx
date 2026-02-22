@@ -568,9 +568,8 @@ function scheduleToDb(body: any): any {
   if (body.title !== undefined) d.title = body.title;
   if (body.isActive !== undefined) d.is_active = body.isActive;
   if (body.is_active !== undefined) d.is_active = body.is_active;
-  // repeat_weekly may exist — try to include it
-  if (body.repeatWeekly !== undefined) d.repeat_weekly = body.repeatWeekly;
-  // schedule_mode, scheduled_date, jingle_config, utc_offset_minutes, timezone NOT in this DB schema — skip
+  // Only include columns known to exist in this DB schema.
+  // repeat_weekly, schedule_mode, scheduled_date, jingle_config, utc_offset_minutes, timezone are NOT in this schema — skip
   return d;
 }
 function scheduleFromDb(s: any): any {
