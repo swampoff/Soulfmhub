@@ -312,6 +312,7 @@ function ScheduleBlock({
   block,
   schedules,
   highlightPlaylistId,
+  isGlobalDragging,
   onDelete,
   onToggleActive,
   onClickBlock,
@@ -322,6 +323,7 @@ function ScheduleBlock({
   block: ScheduleSlot;
   schedules: ScheduleSlot[];
   highlightPlaylistId: string | null;
+  isGlobalDragging?: boolean;
   onDelete: (id: string) => void;
   onToggleActive: (slot: ScheduleSlot) => void;
   onClickBlock: (playlistId: string) => void;
@@ -354,14 +356,15 @@ function ScheduleBlock({
     window.addEventListener('pointerup', onUp);
   };
 
-  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+  const handleResizeStart = useCallback((e: React.PointerEvent) => {
+    if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
     isResizing.current = true;
     startY.current = e.clientY;
     origEndH.current = endH;
 
-    const onMouseMove = (ev: MouseEvent) => {
+    const onPointerMove = (ev: PointerEvent) => {
       if (!isResizing.current) return;
       const delta = ev.clientY - startY.current;
       const hourDelta = Math.round(delta / CELL_HEIGHT);
@@ -371,10 +374,10 @@ function ScheduleBlock({
       setResizeEndH(newEndH);
     };
 
-    const onMouseUp = () => {
+    const onPointerUp = () => {
       isResizing.current = false;
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
       setResizeEndH(prev => {
         if (prev === null || prev === endH) return null;
         const conflict = checkConflict(schedules, block.dayOfWeek, startH, prev, block.id);
@@ -389,8 +392,8 @@ function ScheduleBlock({
       });
     };
 
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
   }, [block, schedules, startH, endH, onResizeCommit]);
 
   return (
@@ -405,7 +408,7 @@ function ScheduleBlock({
         borderLeft: `3px solid ${resizeConflict ? '#ef4444' : color}`,
         zIndex: isDragging ? 30 : 10,
         opacity: isDragging ? 0.3 : undefined,
-        pointerEvents: isDragging ? 'none' : undefined,
+        pointerEvents: (isDragging || isGlobalDragging) ? 'none' : undefined,
       }}
     >
       <div className="p-1.5 h-full flex flex-col relative">
@@ -539,7 +542,7 @@ function ScheduleBlock({
         )}
 
         <div
-          onMouseDown={handleResizeStart}
+          onPointerDown={handleResizeStart}
           className="absolute bottom-0 left-0 right-0 h-3 cursor-ns-resize z-20 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
           style={{ background: 'linear-gradient(transparent, rgba(0,0,0,0.3))' }}
         >
@@ -557,6 +560,7 @@ function ScheduleCell({
   hour,
   schedules,
   hiddenScheduleIds,
+  isGlobalDragging,
   isOver,
   onDelete,
   onToggleActive,
@@ -570,6 +574,7 @@ function ScheduleCell({
   hour: number;
   schedules: ScheduleSlot[];
   hiddenScheduleIds: Set<string>;
+  isGlobalDragging?: boolean;
   isOver: boolean;
   onDelete: (id: string) => void;
   onToggleActive: (slot: ScheduleSlot) => void;
@@ -607,6 +612,7 @@ function ScheduleCell({
           block={block}
           schedules={schedules}
           highlightPlaylistId={highlightPlaylistId}
+          isGlobalDragging={isGlobalDragging}
           onDelete={onDelete}
           onToggleActive={onToggleActive}
           onClickBlock={onClickBlock}
@@ -2258,6 +2264,7 @@ export function ScheduleManagement() {
                                     hour={hourIndex}
                                     schedules={schedules}
                                     hiddenScheduleIds={hiddenScheduleIds}
+                                    isGlobalDragging={!!dragInfo}
                                     isOver={!!(dragOverCell && dragOverCell.day === dayIndex && dragOverCell.hour === hourIndex)}
                                     onDelete={handleDelete}
                                     onToggleActive={handleToggleActive}
