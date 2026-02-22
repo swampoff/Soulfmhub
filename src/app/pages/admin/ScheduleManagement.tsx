@@ -405,6 +405,7 @@ function ScheduleBlock({
         borderLeft: `3px solid ${resizeConflict ? '#ef4444' : color}`,
         zIndex: isDragging ? 30 : 10,
         opacity: isDragging ? 0.3 : undefined,
+        pointerEvents: isDragging ? 'none' : undefined,
       }}
     >
       <div className="p-1.5 h-full flex flex-col relative">
