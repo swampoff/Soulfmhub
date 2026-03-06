@@ -22,7 +22,6 @@ export function Navigation() {
     { path: '/', label: 'Home' },
     { path: '/schedule', label: 'Schedule' },
     { path: '/podcasts', label: 'Shows & Podcasts' },
-    { path: '/music', label: 'Music' },
     { path: '/news', label: 'News' },
     { path: '/djs', label: 'DJs' },
     { path: '/events', label: 'Events' },
@@ -54,7 +53,7 @@ export function Navigation() {
               />
             </div>
             <div className="hidden sm:block">
-              <div 
+              <div
                 className="text-xs text-[#00d9ff] opacity-80 group-hover:opacity-100 transition-opacity"
                 style={{ fontFamily: 'Space Grotesk, sans-serif' }}
               >
@@ -69,11 +68,10 @@ export function Navigation() {
               <Link
                 key={item.path}
                 to={item.path}
-                className={`text-sm font-medium transition-colors relative ${
-                  isActive(item.path)
+                className={`text-sm font-medium transition-colors relative ${isActive(item.path)
                     ? 'text-[#00d9ff]'
                     : 'text-gray-300 hover:text-white'
-                }`}
+                  }`}
               >
                 {item.label}
                 {isActive(item.path) && (
@@ -127,8 +125,8 @@ export function Navigation() {
             {user ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button 
-                    variant="ghost" 
+                  <Button
+                    variant="ghost"
                     size="sm"
                     className="gap-2 text-white hover:bg-white/10 border border-[#00d9ff]/30 hover:border-[#00d9ff]/50"
                   >
@@ -181,16 +179,15 @@ export function Navigation() {
                   key={item.path}
                   to={item.path}
                   onClick={() => setMobileMenuOpen(false)}
-                  className={`px-4 py-3 rounded-lg transition-colors ${
-                    isActive(item.path)
+                  className={`px-4 py-3 rounded-lg transition-colors ${isActive(item.path)
                       ? 'bg-[#00d9ff]/20 text-[#00d9ff]'
                       : 'text-gray-300 hover:bg-white/5 hover:text-white'
-                  }`}
+                    }`}
                 >
                   {item.label}
                 </Link>
               ))}
-              
+
               {/* Interactive links in mobile menu */}
               <div className="border-t border-[#00d9ff]/10 mt-2 pt-2">
                 <div className="px-4 pb-1">
@@ -199,9 +196,8 @@ export function Navigation() {
                 <Link
                   to="/request-song"
                   onClick={() => setMobileMenuOpen(false)}
-                  className={`px-4 py-3 rounded-lg transition-colors flex items-center gap-2 ${
-                    location.pathname === '/request-song' ? 'bg-[#00d9ff]/20 text-[#00d9ff]' : 'text-gray-300 hover:bg-white/5 hover:text-white'
-                  }`}
+                  className={`px-4 py-3 rounded-lg transition-colors flex items-center gap-2 ${location.pathname === '/request-song' ? 'bg-[#00d9ff]/20 text-[#00d9ff]' : 'text-gray-300 hover:bg-white/5 hover:text-white'
+                    }`}
                 >
                   <MessageCircle className="w-4 h-4" />
                   Request a Song
@@ -209,9 +205,8 @@ export function Navigation() {
                 <Link
                   to="/send-shoutout"
                   onClick={() => setMobileMenuOpen(false)}
-                  className={`px-4 py-3 rounded-lg transition-colors flex items-center gap-2 ${
-                    location.pathname === '/send-shoutout' ? 'bg-[#00ffaa]/20 text-[#00ffaa]' : 'text-gray-300 hover:bg-white/5 hover:text-white'
-                  }`}
+                  className={`px-4 py-3 rounded-lg transition-colors flex items-center gap-2 ${location.pathname === '/send-shoutout' ? 'bg-[#00ffaa]/20 text-[#00ffaa]' : 'text-gray-300 hover:bg-white/5 hover:text-white'
+                    }`}
                 >
                   <Heart className="w-4 h-4" />
                   Send a Shoutout
