@@ -7,7 +7,6 @@ import { HomePage } from './pages/HomePage';
 import { SchedulePage } from './pages/SchedulePage';
 import { ShowsPage } from './pages/ShowsPage';
 import { ShowDetailPage } from './pages/ShowDetailPage';
-import { MusicLibraryPage } from './pages/MusicLibraryPage';
 import { NewsPage } from './pages/NewsPage';
 import { ArticleDetailPage } from './pages/ArticleDetailPage';
 import { StreamPlayer } from './pages/StreamPlayer';
@@ -83,7 +82,6 @@ export const router = createBrowserRouter([
           { path: 'shows/:id', Component: ShowDetailPage },
           { path: 'podcasts', Component: ShowsPodcastsPage },
           { path: 'podcasts/:slug', Component: PodcastDetailPage },
-          { path: 'music', Component: MusicLibraryPage },
           { path: 'news', Component: NewsPage },
           { path: 'news/:id', Component: ArticleDetailPage },
           { path: 'support', Component: SupportPage },
