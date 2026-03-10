@@ -26,6 +26,7 @@ import { FAQPage } from './pages/FAQPage';
 import { DJProfilesPage } from './pages/DJProfilesPage';
 import { CommunityPage } from './pages/CommunityPage';
 import { NotFoundPage } from './pages/NotFoundPage';
+import { CityLandingPage } from './pages/CityLandingPage';
 
 // ── Standalone Pages (no public layout) ──────────────────────────────
 import { PublicPlayer } from './pages/PublicPlayer';
@@ -100,6 +101,8 @@ export const router = createBrowserRouter([
           { path: 'faq', Component: FAQPage },
           { path: 'djs', Component: DJProfilesPage },
           { path: 'community', Component: CommunityPage },
+          // City SEO Landing Pages
+          { path: 'city/:city', Component: CityLandingPage },
           // Dashboard (public, requires auth via ProtectedRoute internally)
           { path: 'dashboard', Component: ListenerDashboard },
           // 404 inside public layout
