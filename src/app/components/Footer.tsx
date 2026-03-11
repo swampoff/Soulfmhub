@@ -53,6 +53,17 @@ export function Footer() {
         { label: 'Contact Us', href: '/contact', icon: Mail },
       ]
     },
+    {
+      title: 'Listen in Costa Blanca',
+      links: [
+        { label: 'Calpe', href: '/city/calpe', icon: MapPin },
+        { label: 'Alicante', href: '/city/alicante', icon: MapPin },
+        { label: 'Dénia', href: '/city/denia', icon: MapPin },
+        { label: 'Benidorm', href: '/city/benidorm', icon: MapPin },
+        { label: 'Altea', href: '/city/altea', icon: MapPin },
+        { label: 'Valencia', href: '/city/valencia', icon: MapPin },
+      ]
+    },
   ];
 
   const socialLinks = [
@@ -231,7 +242,7 @@ export function Footer() {
 
         {/* Navigation links */}
         <motion.div 
-          className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-12"
+          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8 mb-12"
           initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}

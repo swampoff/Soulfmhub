@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
-import { Play } from 'lucide-react';
+import { Play, MapPin } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { api } from '../../lib/api';
 import { motion, AnimatePresence } from 'motion/react';
@@ -613,6 +613,51 @@ export function HomePage() {
           ))}
         </motion.div>
       </div>
+
+      {/* Costa Blanca Cities Section */}
+      <motion.section
+        initial={{ opacity: 0 }}
+        whileInView={{ opacity: 1 }}
+        viewport={{ once: true }}
+        transition={{ duration: 0.8 }}
+        className="relative z-10 py-16 px-4"
+      >
+        <div className="max-w-5xl mx-auto text-center">
+          <h2 className="text-2xl md:text-3xl font-bold text-white mb-3">
+            Listen across <span className="text-[#00d9ff]">Costa Blanca</span> & <span className="text-[#00ffaa]">Valencia</span>
+          </h2>
+          <p className="text-gray-400 mb-8 max-w-xl mx-auto">
+            Soul, funk & jazz for expats and music lovers on Spain's Mediterranean coast
+          </p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
+            {[
+              { slug: 'calpe', name: 'Calpe', landmark: 'Peñón de Ifach' },
+              { slug: 'alicante', name: 'Alicante', landmark: 'Santa Bárbara' },
+              { slug: 'denia', name: 'Dénia', landmark: 'Castell de Dénia' },
+              { slug: 'benidorm', name: 'Benidorm', landmark: 'Playa Levante' },
+              { slug: 'altea', name: 'Altea', landmark: 'Blue Dome' },
+              { slug: 'valencia', name: 'Valencia', landmark: 'City of Arts' },
+            ].map((city, i) => (
+              <motion.div
+                key={city.slug}
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ delay: i * 0.08 }}
+              >
+                <Link
+                  to={`/city/${city.slug}`}
+                  className="block p-4 rounded-xl bg-white/5 border border-white/10 hover:border-[#00d9ff]/40 hover:bg-[#00d9ff]/5 transition-all group"
+                >
+                  <MapPin className="w-5 h-5 text-[#00d9ff] mx-auto mb-2 group-hover:scale-110 transition-transform" />
+                  <div className="text-white font-semibold text-sm">{city.name}</div>
+                  <div className="text-white/40 text-xs mt-1">{city.landmark}</div>
+                </Link>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      </motion.section>
 
       {/* Scroll Indicator */}
       <motion.div
