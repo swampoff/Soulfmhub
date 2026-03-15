@@ -30,7 +30,6 @@ export function Footer() {
       links: [
         { label: 'Schedule', href: '/schedule', icon: Calendar },
         { label: 'Shows & Podcasts', href: '/shows', icon: Radio },
-        { label: 'Music Library', href: '/music', icon: Music },
         { label: 'News', href: '/news', icon: Newspaper },
         { label: 'Our DJs', href: '/djs', icon: Radio },
       ]
