@@ -9,9 +9,6 @@ import {
   MapPin,
   Send,
   Instagram,
-  Twitter,
-  Facebook,
-  Youtube,
   Clock,
   Radio,
   CheckCircle,
@@ -22,10 +19,8 @@ import { toast } from 'sonner';
 import { api } from '../../lib/api';
 
 const SOCIAL_LINKS = [
-  { icon: Instagram, label: 'Instagram', handle: '@soulfmhub', color: '#E4405F', href: '#' },
-  { icon: Twitter, label: 'Twitter', handle: '@soulfmhub', color: '#1DA1F2', href: '#' },
-  { icon: Facebook, label: 'Facebook', handle: 'Soul FM Hub', color: '#1877F2', href: '#' },
-  { icon: Youtube, label: 'YouTube', handle: 'Soul FM Hub', color: '#FF0000', href: '#' },
+  { icon: Instagram, label: 'Instagram', handle: '@soulfmradio', color: '#E4405F', href: 'https://instagram.com/soulfmradio' },
+  { icon: Send, label: 'Telegram', handle: '@soulfmradio', color: '#26A5E4', href: 'https://t.me/soulfmradio' },
 ];
 
 const SUBJECTS = [

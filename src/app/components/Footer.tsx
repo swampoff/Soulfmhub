@@ -1,21 +1,17 @@
 import React from 'react';
 import { Link } from 'react-router';
 import { motion } from 'motion/react';
-import { 
-  Radio, 
-  Music, 
-  Calendar, 
-  Newspaper, 
-  Heart, 
-  Mail, 
-  MapPin, 
+import {
+  Radio,
+  Music,
+  Calendar,
+  Newspaper,
+  Heart,
+  Mail,
+  MapPin,
   Phone,
   Instagram,
-  Twitter,
-  Facebook,
-  Youtube,
-  Linkedin,
-  Github
+  Send,
 } from 'lucide-react';
 import { SoulFMLogo } from './SoulFMLogo';
 import { AnimatedBeach } from './AnimatedBeach';
@@ -56,12 +52,8 @@ export function Footer() {
   ];
 
   const socialLinks = [
-    { name: 'Instagram', icon: Instagram, href: '#', color: '#E4405F' },
-    { name: 'Twitter', icon: Twitter, href: '#', color: '#1DA1F2' },
-    { name: 'Facebook', icon: Facebook, href: '#', color: '#4267B2' },
-    { name: 'YouTube', icon: Youtube, href: '#', color: '#FF0000' },
-    { name: 'LinkedIn', icon: Linkedin, href: '#', color: '#0077B5' },
-    { name: 'GitHub', icon: Github, href: '#', color: '#181717' },
+    { name: 'Instagram', icon: Instagram, href: 'https://instagram.com/soulfmradio', color: '#E4405F' },
+    { name: 'Telegram', icon: Send, href: 'https://t.me/soulfmradio', color: '#26A5E4' },
   ];
 
   return (
